@@ -1,0 +1,17 @@
+# Local configuration and robot data
+bridge/config.json
+*probe*.json
+*.log
+*.pid
+# Build artifacts
+agent/dreame-local-agent
+agent/dreame-local-agent-*
+agent/region-guard.so
+*.test
+# Python and editors
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.idea/
+.DS_Store

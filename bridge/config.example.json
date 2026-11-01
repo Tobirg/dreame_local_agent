@@ -1,0 +1,10 @@
+{
+  "serial": "192.168.2.11:4567",
+  "bind": "127.0.0.1",
+  "port": 8765,
+  "token": "REPLACE_WITH_RANDOM_TOKEN",
+  "expected_model": "COPY_FROM_PROBE",
+  "expected_did": "COPY_FROM_PROBE",
+  "expected_mac": "COPY_FROM_PROBE",
+  "allow_control": true
+}
