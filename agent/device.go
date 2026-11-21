@@ -287,6 +287,7 @@ func (a *agent) capabilities() (map[string]any, error) {
 		"hardware":   hw,
 		"properties": props,
 		"commands":   commands,
+		"modules":    a.listModules(),
 	}
 	if hwErr != nil {
 		caps["hardware_error"] = hwErr.Error()

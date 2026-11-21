@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -48,19 +47,6 @@ func atomicPrivate(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(name, path)
-}
-func (a *agent) guardStatus() map[string]any {
-	_, enabledErr := os.Stat(a.path("/data/dreame-local/region-guard.enabled"))
-	loaded := false
-	if b, err := readLimited(a.path("/tmp/dreame-region-guard.loaded"), 64); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 1 {
-			if maps, err := readLimited(a.path(fmt.Sprintf("/proc/%d/maps", pid)), 4<<20); err == nil {
-				loaded = strings.Contains(string(maps), "/data/dreame-local/region-guard.so")
-			}
-		}
-	}
-	_, blockedErr := os.Stat(a.path("/tmp/dreame-region-guard.blocked"))
-	return map[string]any{"enabled": enabledErr == nil, "hook_loaded": loaded, "blocked_since_boot": blockedErr == nil, "restart_required": !loaded}
 }
 func validateWiFi(raw json.RawMessage) (string, string, error) {
 	var p struct {

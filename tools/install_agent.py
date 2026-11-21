@@ -13,7 +13,9 @@ import urllib.error
 BASE = '/data/dreame-local'
 HOOK = '/data/test/ava.sh'
 MARKER = '/data/dreame-local/start.sh >/dev/null 2>&1 || :'
-GUARD_MARKER = 'if [ -r /data/dreame-local/guard-env.sh ]; then . /data/dreame-local/guard-env.sh; fi'
+BOOT_MARKER = 'if [ -r /data/dreame-local/boot-env.sh ]; then . /data/dreame-local/boot-env.sh; fi'
+# Hook line of agents before 0.7.0, when the region guard was built in.
+LEGACY_GUARD_MARKER = 'if [ -r /data/dreame-local/guard-env.sh ]; then . /data/dreame-local/guard-env.sh; fi'
 
 
 def prepare_hook(source):
@@ -22,8 +24,8 @@ def prepare_hook(source):
     if not sep or not first.startswith('#!') or 'sh' not in first:
         raise RuntimeError('Existing boot hook is not a recognized shell script; left unchanged')
     lines = rest.splitlines()
-    lines = [line for line in lines if line not in (MARKER, GUARD_MARKER)]
-    return first + '\n' + MARKER + '\n' + GUARD_MARKER + '\n' + '\n'.join(lines) + '\n'
+    lines = [line for line in lines if line not in (MARKER, BOOT_MARKER, LEGACY_GUARD_MARKER)]
+    return first + '\n' + MARKER + '\n' + BOOT_MARKER + '\n' + '\n'.join(lines) + '\n'
 
 
 def main():
@@ -40,8 +42,6 @@ def main():
     config = {k: source[k] for k in required}
     config.update(bind='0.0.0.0', port=8765, allow_control=source.get('allow_control', False))
     binary = root/'agent/dreame-local-agent-linux-arm64'
-    if not (root/'agent/region-guard.so').is_file():
-        p.error('Packaged regional guard library is missing')
     if not binary.is_file():
         p.error('Packaged ARM64 agent binary is missing')
 
@@ -83,22 +83,17 @@ def main():
         if remote_hash != hashlib.sha256(binary.read_bytes()).hexdigest():
             raise RuntimeError('Agent checksum mismatch after upload')
         shell('chmod 700 '+BASE+'/agent.new')
-        print(shell(BASE+'/agent.new --check-guard').strip())
         push(conf, BASE+'/config.new')
-        for name in ('region-guard.so', 'guard-env.sh'):
-            local = root/'agent'/name
-            push(local, BASE+'/'+name+'.new')
-            if shell('sha256sum '+BASE+'/'+name+'.new').split()[0] != hashlib.sha256(local.read_bytes()).hexdigest():
-                raise RuntimeError('Checksum mismatch: '+name)
-        for name in ('start.sh', 'stop.sh'):
+        for name in ('start.sh', 'stop.sh', 'boot-env.sh'):
             push(root/'agent'/name, BASE+'/'+name+'.new')
-        shell('sh -n '+BASE+'/start.sh.new && sh -n '+BASE+'/stop.sh.new && sh -n '+BASE+'/guard-env.sh.new')
+        shell('sh -n '+BASE+'/start.sh.new && sh -n '+BASE+'/stop.sh.new && sh -n '+BASE+'/boot-env.sh.new')
         shell('if [ -x '+BASE+'/stop.sh ]; then '+BASE+'/stop.sh; fi')
         shell('chmod 700 '+BASE+'/agent.new '+BASE+'/start.sh.new '+BASE+'/stop.sh.new; chmod 600 '+BASE+'/config.new; '
               'mv '+BASE+'/agent.new '+BASE+'/dreame-local-agent && mv '+BASE+'/config.new '+BASE+'/config.json && '
               'mv '+BASE+'/start.sh.new '+BASE+'/start.sh && mv '+BASE+'/stop.sh.new '+BASE+'/stop.sh && '
-              'chmod 600 '+BASE+'/region-guard.so.new '+BASE+'/guard-env.sh.new && '
-              'mv '+BASE+'/region-guard.so.new '+BASE+'/region-guard.so && mv '+BASE+'/guard-env.sh.new '+BASE+'/guard-env.sh')
+              'chmod 600 '+BASE+'/boot-env.sh.new && mv '+BASE+'/boot-env.sh.new '+BASE+'/boot-env.sh && '
+              'mkdir -p '+BASE+'/modules && chmod 700 '+BASE+'/modules && rm -f '+BASE+'/guard-env.sh')
+        legacy_guard = shell('if [ -e '+BASE+'/region-guard.so ]; then echo yes; fi').strip() == 'yes'
         print(shell(BASE+'/dreame-local-agent --version').strip())
         shell(BASE+'/start.sh')
         # The host reaches the robot directly; no local bridge or proxy is used.
@@ -136,7 +131,9 @@ def main():
             print('Agent startup added to existing boot hook; backup: /data/test/ava.sh.before-agent')
         elif original_hook is not None:
             print('Agent startup already configured')
-    print('Regional guard library will load in firmware after the next robot reboot; mode is off by default.')
+    if legacy_guard:
+        print('The built-in region guard of older agents is no longer loaded at boot. Install the region module '
+              'in the web UI (Modules) before rebooting the robot to keep the protection.')
     print('Update the integration URL to',url,'using its Configure button; keep the same token.')
     print('After Home Assistant connects, stop the old Pi bridge: systemctl --user disable --now dreame-local.service')
 

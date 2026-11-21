@@ -6,7 +6,7 @@ const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Во�
 const stationNames={0:'ожидание',1:'мойка салфеток',2:'сушка'};
 const palette=['#7fd9c2','#a3bcec','#e5bd8a','#bcaceb','#a7d39a','#e3a5b4','#93cdd9','#d4d093'];
 let token=sessionStorage.getItem('dreame-token')||localStorage.getItem('dreame-token')||'';
-let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false,guardDirty=false;
+let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false;
 let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
 const activeReads=new Set(),settingsDirty=new Set();
 const canvas=$('map'),ctx=canvas.getContext('2d');
@@ -23,7 +23,7 @@ export function roomCommand(ids,fan,water,repeats=1){
 }
 const command=(name,args={})=>control('/api/v1/command',{name,...args});
 function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
-function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities';}
+function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
 async function api(method,params=null){
  const read=isRead(method),requestID=read?null:Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
@@ -61,53 +61,81 @@ async function control(method,params,before=null){
  finally{busy=false;disableControls(false);}
 }
 function disableControls(disabled){
- document.querySelectorAll('[data-command],#save-fan,#save-volume,#save-region,#region-code,#save-guard,#save-wifi,#send-rpc,.setting-apply').forEach(b=>b.disabled=disabled);
+ document.querySelectorAll('[data-command],#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-apply').forEach(b=>b.disabled=disabled);
  $('clean-rooms').disabled=disabled||selected.size===0;
  $('apply-map-edit').disabled=disabled||!pending;
  $('save-threshold').disabled=disabled||!thresholdDraft||!view?.thresholds_editable;
  $('delete-threshold').disabled=disabled||!$('threshold-choice').value||!view?.thresholds_editable;
  $('draw-threshold').disabled=disabled||!view?.thresholds_editable;
 }
-function renderRegion(region,code){
- const clear=region==='matched'&&code===200,locked=region==='mismatched'&&code===401;
- $('region-status').textContent=clear?'Блокировка снята':locked?'Региональная блокировка активна':'Статус не подтверждён';
- $('region-values').textContent='Регион: '+(region??'недоступен')+' · код: '+(code??'недоступен');
-}
-async function changeRegion(){
- if(busy)return;
- const code=Number($('region-code').value);busy=true;disableControls(true);
- $('region-result').textContent='Отправка команды…';
- try{
-  const result=await api('local.region_lock',{code});
-  if(result?.dispatched!==true)throw Error('Сервис не подтвердил отправку команды');
-  let confirmed=false;
-  for(let attempt=0;attempt<4;attempt++){
-   if(attempt)await new Promise(resolve=>setTimeout(resolve,1000));
-   const rows=await api('get_properties',[{siid:4,piid:19},{siid:14,piid:3}]);
-   if(!Array.isArray(rows))throw Error('Некорректный ответ статуса');
-   const values=new Map(rows.filter(r=>r.code===0&&'value'in r).map(r=>[r.siid+'/'+r.piid,r.value]));
-   renderRegion(values.get('4/19'),values.get('14/3'));
-   confirmed=values.get('14/3')===code&&values.get('4/19')===(code===200?'matched':'mismatched');
-   if(confirmed)break;
-  }
-  $('region-result').textContent=confirmed?'Изменение подтверждено состоянием робота.':'Команда отправлена, но нужный статус пока не подтверждён. Повтори проверку состояния.';
- }catch(e){$('region-result').textContent=e.message;toast(e.message,true);}
- finally{busy=false;disableControls(false);}
-}
-$('save-region').onclick=changeRegion;
-function renderNetwork(wifi,guard){
+function renderNetwork(wifi){
  const network=wifi.ssid||'Не подключён',signal=Number.isFinite(wifi.signal_percent)?' · ~'+wifi.signal_percent+'%':'';
  $('wifi-summary').textContent=network+signal;$('wifi-details').open=$('wifi-details').open||wifi.ap_mode||captiveSetup;
  $('wifi-status').textContent='Сеть: '+network+signal+(Number.isFinite(wifi.signal_dbm)?' ('+wifi.signal_dbm+' dBm)':'')+' · '+(wifi.ap_mode?'Режим точки доступа':'Адреса: '+wifi.addresses.join(', '))+' · '+({idle:'Ожидание',connecting:'Подключение к сети',connected:'Wi-Fi подключён',failed:'Ошибка подключения'}[wifi.state]||wifi.state)+(wifi.error?' · '+wifi.error:'')+(wifi.ap_mode?' · портал: '+(wifi.portal_http&&wifi.portal_dns?'работает':wifi.portal_error||'запускается'):'');
- if(!guardDirty)$('region-guard').checked=guard.enabled;
- $('guard-status').textContent=guard.enabled?(guard.hook_loaded?'Защита включена'+(guard.blocked_since_boot?' · блокирующий вызов был отклонён':''):'Защита сохранена. Перезагрузи робот для загрузки обработчика.'):(guard.hook_loaded?'Защита выключена':'Защита выключена. Обработчик загрузится после перезагрузки робота.');
 }
-$('region-guard').onchange=()=>{guardDirty=true;};
-$('save-guard').onclick=async()=>{
- if(busy)return;busy=true;disableControls(true);
- try{const enabled=$('region-guard').checked,result=await api('local.region_guard',{enabled});if(result.enabled!==enabled)throw Error('Не удалось сохранить режим');guardDirty=false;toast(enabled?'Режим защиты сохранён. Для снятия текущей блокировки примени код 200.':'Защита выключена');}
- catch(e){toast(e.message,true);}finally{busy=false;disableControls(false);await refresh();}
+// ---- Modules: installed packages (GET /api/v1/modules) may add their own panel, mounted as mount(element, ctx).
+const stateListeners=[],mountedPanels=new Map();let stagedModule=null;
+function dropListeners(name){for(let i=stateListeners.length-1;i>=0;i--)if(stateListeners[i].name===name)stateListeners.splice(i,1);}
+function moduleContext(name){
+ const path=action=>'/api/v1/m/'+name+'/'+action;
+ return {
+  read:(action,params={})=>api(path(action),params),
+  call:async(action,params={})=>{if(busy)throw Error('Дождись завершения предыдущей команды');busy=true;disableControls(true);try{return await api(path(action),params);}finally{busy=false;disableControls(false);}},
+  rpc:(method,params)=>api(method,params),
+  onState:fn=>{stateListeners.push({name,fn});},
+  toast,
+ };
+}
+async function mountPanel(m){
+ const key=m.name+'@'+m.version;if(mountedPanels.get(m.name)?.key===key)return;
+ mountedPanels.get(m.name)?.section.remove();dropListeners(m.name);
+ const section=document.createElement('section'),title=document.createElement('h2'),body=document.createElement('div');
+ section.className='panel';section.dataset.module=m.name;title.textContent=m.title;section.append(title,body);$('module-panels').append(section);
+ mountedPanels.set(m.name,{key,section});
+ try{const panel=await import('/m/'+encodeURIComponent(m.name)+'/panel.js?v='+encodeURIComponent(m.version));panel.default(body,moduleContext(m.name));}
+ catch(e){body.textContent='Панель модуля не загрузилась: '+e.message;}
+}
+async function loadModules(){
+ const list=await api('/api/v1/modules');if(!Array.isArray(list))throw Error('Некорректный список модулей');
+ const rows=list.map(m=>{
+  const row=document.createElement('div'),text=document.createElement('span'),remove=document.createElement('button');
+  row.className='module-row';row.dataset.module=m.name;
+  text.textContent=m.error?m.name+' · '+m.error:m.title+' · '+m.version+(m.boot_hook?' · в загрузке робота':'');
+  remove.textContent='Удалить';remove.onclick=()=>removeModule(m);row.append(text,remove);return row;
+ });
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Модули не установлены'}));
+ $('module-list').replaceChildren(...rows);
+ for(const [name,mounted] of mountedPanels)if(!list.some(m=>m.name===name&&m.panel&&!m.error)){mounted.section.remove();mountedPanels.delete(name);dropListeners(name);}
+ for(const m of list)if(m.panel&&!m.error)await mountPanel(m);
+}
+async function removeModule(m){
+ if(busy||!window.confirm('Удалить модуль «'+(m.title||m.name)+'»?'+(m.boot_hook?' Его команды в загрузке робота перестанут действовать после перезагрузки.':'')))return;
+ busy=true;disableControls(true);
+ try{const r=await api('/api/v1/modules/remove',{name:m.name});toast(r.warning||'Модуль удалён',!!r.warning);}catch(e){toast(e.message,true);}finally{busy=false;disableControls(false);}
+ await loadModules().catch(e=>toast(e.message,true));
+}
+$('stage-module').onclick=async()=>{
+ const file=$('module-file').files[0];if(!file){toast('Выбери файл пакета',true);return;}if(busy)return;
+ busy=true;disableControls(true);$('module-review').hidden=true;$('module-result').textContent='Проверяю пакет…';
+ try{
+  // Raw upload: the agent unpacks and validates it, nothing runs until «Установить».
+  const response=await fetch('/api/v1/modules/stage',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/gzip'},body:file,credentials:'omit',cache:'no-store'});
+  const body=await response.json();if(!response.ok)throw Error(body.error||'Ошибка HTTP '+response.status);
+  stagedModule=body.result;const m=stagedModule.manifest;
+  $('module-manifest').textContent=[m.title+' ('+m.name+') '+m.version+(stagedModule.installed_version?' · заменит '+stagedModule.installed_version:''),m.description||'',
+   'SHA-256: '+stagedModule.sha256,'Сообщения прошивки: '+((m.firmware_messages||[]).join(', ')||'нет'),
+   stagedModule.boot_hook?'Добавляет команды в загрузку робота (boot-env.sh): начнут действовать после перезагрузки.':'Не меняет загрузку робота.',
+   'Файлы: '+stagedModule.files.join(', ')].filter(Boolean).join('\n');
+  $('module-review').hidden=false;$('module-result').textContent='Проверь сведения и нажми «Установить».';
+ }catch(e){$('module-result').textContent=e.message;}finally{busy=false;disableControls(false);}
 };
+$('install-module').onclick=async()=>{
+ if(!stagedModule||busy)return;busy=true;disableControls(true);$('module-result').textContent='Устанавливаю…';
+ try{const r=await api('/api/v1/modules/install',{id:stagedModule.id});$('module-result').textContent='Установлен модуль '+r.installed+' '+r.version+'.';$('module-review').hidden=true;stagedModule=null;$('module-file').value='';}
+ catch(e){$('module-result').textContent=e.message;}finally{busy=false;disableControls(false);}
+ await loadModules().catch(e=>toast(e.message,true));
+};
+$('cancel-module').onclick=()=>{stagedModule=null;$('module-review').hidden=true;$('module-result').textContent='';};
 $('wifi-open').onchange=()=>{$('wifi-password').disabled=$('wifi-open').checked;$('wifi-password').required=!$('wifi-open').checked;if($('wifi-open').checked)$('wifi-password').value='';};
 $('wifi-form').onsubmit=async e=>{
  e.preventDefault();if(busy)return;
@@ -133,12 +161,12 @@ async function refresh(){
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
   if(!roomOptionsDirty){if(Number.isInteger(s.suction))$('room-fan').value=s.suction;if(Number.isInteger(s.water)&&s.water>=1&&s.water<=3)$('room-water').value=s.water;}
   $('station').textContent=s.station===undefined?'Состояние станции недоступно':'Состояние станции: '+(stationNames[s.station]||s.station);
-  renderRegion(s.region,s.region_code);
-  const wifi=await api('local.wifi_status'),guard=await api('local.region_guard_status');if(epoch!==viewEpoch||!token)return;renderNetwork(wifi,guard);
+  const wifi=await api('local.wifi_status');if(epoch!==viewEpoch||!token)return;renderNetwork(wifi);
   $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—');
+  for(const listener of stateListeners)try{listener.fn(s);}catch{}
   if(snap.stale){connectionLost(snap.error||'Нет свежих данных от робота');return;}
   $('connection').textContent='Подключён';$('connection').classList.remove('connection-offline');$('reconnect').hidden=true;
- }catch(e){if(!e.suspended&&epoch===viewEpoch){$('region-status').textContent='Статус недоступен: нет связи';connectionLost(e.message);}}finally{if(epoch===viewEpoch)refreshing=false;}
+ }catch(e){if(!e.suspended&&epoch===viewEpoch){connectionLost(e.message);}}finally{if(epoch===viewEpoch)refreshing=false;}
 }
 function invalidateEdit(){pending=null;$('map-preview').textContent='';$('apply-map-edit').disabled=true;}
 function selectRoom(id){
@@ -199,7 +227,7 @@ async function login(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('dashboard').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();clearInterval(timer);timer=setInterval(()=>refresh(),5000);
+ await refresh();await refreshMap();await loadModules().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),5000);
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};

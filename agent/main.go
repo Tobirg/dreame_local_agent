@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
-	"debug/elf"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -27,7 +26,7 @@ import (
 	"time"
 )
 
-const version = "0.6.0"
+const version = "0.7.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -57,6 +56,7 @@ type agent struct {
 	portal  portalState
 	network networkJob
 	dev     device
+	modules moduleHost
 	cfg     config
 	root    string // Only set by tests; runtime always uses the actual root filesystem.
 	avacmd  string
@@ -297,51 +297,6 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 		return a.wifiStatus(), nil
 	case "local.wifi_setup":
 		return a.setupWiFi(ctx, req.Params)
-	case "local.region_guard_status":
-		if params != nil {
-			return nil, errors.New("local.region_guard_status takes no parameters")
-		}
-		return a.guardStatus(), nil
-	case "local.region_guard":
-		if !a.controlAllowed() {
-			return nil, errors.New("control requires pinned identity and allow_control")
-		}
-		options, ok := params.(map[string]any)
-		if !ok || len(options) != 1 {
-			return nil, errors.New("expected enabled boolean")
-		}
-		enabled, ok := options["enabled"].(bool)
-		if !ok {
-			return nil, errors.New("expected enabled boolean")
-		}
-		path := a.path("/data/dreame-local/region-guard.enabled")
-		if enabled {
-			if err := atomicPrivate(path, []byte("1\n")); err != nil {
-				return nil, errors.New("cannot save regional guard mode")
-			}
-		} else {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return nil, errors.New("cannot disable regional guard")
-			}
-		}
-		return a.guardStatus(), nil
-	case "local.region_lock":
-		if !a.cfg.AllowControl || a.cfg.ExpectedModel == "" || a.cfg.ExpectedDID == "" || a.cfg.ExpectedMAC == "" {
-			return nil, errors.New("control requires allow_control and pinned model, did, mac")
-		}
-		options, ok := params.(map[string]any)
-		if !ok || len(options) != 1 || (options["code"] != json.Number("200") && options["code"] != json.Number("401")) {
-			return nil, errors.New("local.region_lock requires only code: 200 or 401")
-		}
-		payload, err := json.Marshal(map[string]any{"type": "msgCvt", "cmd": "device_lock", "code": options["code"]})
-		if err != nil {
-			return nil, err
-		}
-		if _, err := a.runAvacmd(ctx, "msg_cvt", string(payload)); err != nil {
-			return nil, err
-		}
-		// This firmware message has no matching MIOT RPC reply. Do not claim confirmation.
-		return map[string]any{"dispatched": true, "confirmed": false, "requested_code": options["code"]}, nil
 	case "local.map_view":
 		if params != nil {
 			return nil, errors.New("local.map_view takes no parameters")
@@ -444,6 +399,9 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 			asset = "ui/app.js"
 			contentType = "text/javascript; charset=utf-8"
 		}
+		if asset == "" && a.servePanel(w, r.URL.Path) {
+			return
+		}
 		if asset != "" {
 			data, err := webAssets.ReadFile(asset)
 			if err != nil {
@@ -460,7 +418,33 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	send := func(code int, v any) { w.WriteHeader(code); _ = json.NewEncoder(w).Encode(v) }
 	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+a.cfg.Token)) != 1 {
-		send(401, map[string]string{"error": "unauthorized"})
+		module := a.moduleForToken(r.Header.Get("Authorization"))
+		if module == "" {
+			send(401, map[string]string{"error": "unauthorized"})
+			return
+		}
+		// A module's own token may read state and send the firmware messages its manifest declares, nothing else.
+		switch {
+		case r.URL.Path == "/api/v1/firmware_message" && r.Method == "POST":
+			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+			if err != nil {
+				send(400, map[string]string{"error": "invalid firmware message"})
+				return
+			}
+			result, err := a.firmwareMessage(r.Context(), module, body)
+			if err != nil {
+				send(502, rpcErrorResponse(err))
+				return
+			}
+			send(200, map[string]any{"result": result})
+			return
+		case r.Method == "GET" && (r.URL.Path == "/api/v1/state" || r.URL.Path == "/api/v1/capabilities"):
+		default:
+			send(403, map[string]string{"error": "module token cannot use this endpoint"})
+			return
+		}
+	}
+	if a.moduleRoutes(w, r, send) {
 		return
 	}
 	switch r.URL.Path {
@@ -560,31 +544,12 @@ func startDetached(executable string, args []string, logPath, pidPath string) (i
 
 func main() {
 	cfgPath := flag.String("config", "/data/dreame-local/config.json", "configuration file")
-	checkGuard := flag.Bool("check-guard", false, "check firmware regional setter compatibility")
 	daemon := flag.Bool("daemon", false, "start in a detached session")
 	showVersion := flag.Bool("version", false, "print agent version")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("dreame-local-agent " + version)
 		return
-	}
-	if *checkGuard {
-		file, err := elf.Open("/ava/lib/node_msg_cvt.so")
-		if err != nil {
-			log.Fatal("cannot inspect firmware regional setter")
-		}
-		defer file.Close()
-		symbols, err := file.DynamicSymbols()
-		if err != nil {
-			log.Fatal("cannot inspect firmware symbols")
-		}
-		for _, symbol := range symbols {
-			if symbol.Name == "_ZN13avanodemsgcvt9MsgConfig13SetDeviceLockEi" && symbol.Section != elf.SHN_UNDEF {
-				fmt.Println("Regional guard: firmware setter found")
-				return
-			}
-		}
-		log.Fatal("unsupported firmware regional setter")
 	}
 	data, err := readLimited(*cfgPath, 65536)
 	if err != nil {
@@ -628,6 +593,7 @@ func main() {
 	portalDone := make(chan struct{})
 	go func() { defer close(portalDone); a.runPortal(portalContext) }()
 	a.dev.poke = make(chan struct{}, 1)
+	a.modules.slots = make(chan struct{}, 4)
 	go a.runPoller(portalContext, 5*time.Second)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)

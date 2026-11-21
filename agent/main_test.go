@@ -37,7 +37,7 @@ func testAgent(t *testing.T) *agent {
 	if err := os.WriteFile(mock, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	return &agent{root: root, avacmd: mock, gate: make(chan struct{}, 1), cfg: config{Token: strings.Repeat("a", 40), ExpectedModel: "dreame.vacuum.r2505", ExpectedDID: "12345678", ExpectedMAC: "00:11:22:33:44:55", AllowControl: true}}
+	return &agent{root: root, avacmd: mock, gate: make(chan struct{}, 1), modules: moduleHost{slots: make(chan struct{}, 4)}, cfg: config{Token: strings.Repeat("a", 40), ExpectedModel: "dreame.vacuum.r2505", ExpectedDID: "12345678", ExpectedMAC: "00:11:22:33:44:55", AllowControl: true}}
 }
 func TestIdentityFiltersSecrets(t *testing.T) {
 	a := testAgent(t)
@@ -196,55 +196,6 @@ func TestOutputBufferIsBoundedWithIOCopy(t *testing.T) {
 	_, err := io.Copy(&b, strings.NewReader(strings.Repeat("x", 17<<20)))
 	if err != nil || !b.overflow || b.buf.Len() != 16<<20 {
 		t.Fatal("output buffer limit failed", err, b.buf.Len())
-	}
-}
-
-func TestRegionMessageUsesExactDirectArguments(t *testing.T) {
-	a := testAgent(t)
-	script := "#!/usr/bin/env python3\nimport json,sys\nassert sys.argv[1]=='msg_cvt'\nr=json.loads(sys.argv[2])\nassert r=={'type':'msgCvt','cmd':'device_lock','code':200}\nprint('message sent')\n"
-	if err := os.WriteFile(a.avacmd, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	result, err := a.call(context.Background(), request{Method: "local.region_lock", Params: json.RawMessage(`{"code":200}`)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := result.(map[string]any)
-	if v["dispatched"] != true || v["confirmed"] != false {
-		t.Fatal(v)
-	}
-}
-func TestRegionMessageValidationAndControl(t *testing.T) {
-	for _, raw := range []string{`null`, `{"code":201}`, `{"code":"200"}`, `{"code":200,"cmd":"shell"}`, `{"code":200.0}`} {
-		a := testAgent(t)
-		if _, err := a.call(context.Background(), request{Method: "local.region_lock", Params: json.RawMessage(raw)}); err == nil {
-			t.Fatalf("accepted %s", raw)
-		}
-	}
-	for _, field := range []string{"disabled", "model", "did", "mac", "identity"} {
-		a := testAgent(t)
-		switch field {
-		case "disabled":
-			a.cfg.AllowControl = false
-		case "model":
-			a.cfg.ExpectedModel = ""
-		case "did":
-			a.cfg.ExpectedDID = ""
-		case "mac":
-			a.cfg.ExpectedMAC = ""
-		case "identity":
-			a.cfg.ExpectedDID = "other"
-		}
-		if _, err := a.call(context.Background(), request{Method: "local.region_lock", Params: json.RawMessage(`{"code":401}`)}); err == nil {
-			t.Fatalf("accepted %s", field)
-		}
-	}
-}
-func TestRegionFailedDispatchIsNotSuccess(t *testing.T) {
-	a := testAgent(t)
-	_ = os.WriteFile(a.avacmd, []byte("#!/bin/sh\nexit 1\n"), 0700)
-	if _, err := a.call(context.Background(), request{Method: "local.region_lock", Params: json.RawMessage(`{"code":401}`)}); err == nil {
-		t.Fatal("failed command accepted")
 	}
 }
 
