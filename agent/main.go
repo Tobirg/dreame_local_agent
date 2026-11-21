@@ -56,6 +56,7 @@ type agent struct {
 
 	portal  portalState
 	network networkJob
+	dev     device
 	cfg     config
 	root    string // Only set by tests; runtime always uses the actual root filesystem.
 	avacmd  string
@@ -262,6 +263,11 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 			return nil, errors.New("setting changes require pinned identity and allow_control")
 		}
 		return a.changeSetting(ctx, req.Params, info["did"])
+	case "local.command":
+		if !a.controlAllowed() {
+			return nil, errors.New("control requires pinned identity and allow_control")
+		}
+		return a.runCommand(ctx, req.Params, info)
 	case "local.reboot":
 		if !a.controlAllowed() {
 			return nil, errors.New("reboot requires pinned identity and allow_control")
@@ -457,7 +463,25 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		send(401, map[string]string{"error": "unauthorized"})
 		return
 	}
-	if r.URL.Path != "/rpc" {
+	switch r.URL.Path {
+	case "/api/v1/state", "/api/v1/capabilities":
+		if r.Method != "GET" {
+			send(405, map[string]string{"error": "GET required"})
+			return
+		}
+		var result any = a.snapshot() // served from cache: never waits for the robot
+		if r.URL.Path == "/api/v1/capabilities" {
+			caps, err := a.capabilities()
+			if err != nil {
+				send(502, rpcErrorResponse(err))
+				return
+			}
+			result = caps
+		}
+		send(200, map[string]any{"result": result})
+		return
+	case "/rpc", "/api/v1/command":
+	default:
 		send(404, map[string]string{"error": "not found"})
 		return
 	}
@@ -467,17 +491,27 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	defer r.Body.Close()
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
 	var req request
-	if err := decoder.Decode(&req); err != nil {
-		send(400, map[string]string{"error": "invalid RPC envelope"})
-		return
-	}
-	var extra any
-	if decoder.Decode(&extra) != io.EOF {
-		send(400, map[string]string{"error": "trailing JSON data"})
-		return
+	if r.URL.Path == "/api/v1/command" {
+		// Same gate, control policy and request-ID memo as /rpc, under one method name.
+		raw, err := io.ReadAll(r.Body)
+		if err != nil || !json.Valid(raw) {
+			send(400, map[string]string{"error": "invalid command"})
+			return
+		}
+		req = request{Method: "local.command", Params: raw}
+	} else {
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&req); err != nil {
+			send(400, map[string]string{"error": "invalid RPC envelope"})
+			return
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			send(400, map[string]string{"error": "trailing JSON data"})
+			return
+		}
 	}
 	if id := r.Header.Get("X-Dreame-Request-ID"); id != "" && !requestIsRead(req) {
 		status, body := a.memoCall(r.Context(), req, id)
@@ -593,6 +627,8 @@ func main() {
 	defer stopPortal()
 	portalDone := make(chan struct{})
 	go func() { defer close(portalDone); a.runPortal(portalContext) }()
+	a.dev.poke = make(chan struct{}, 1)
+	go a.runPoller(portalContext, 5*time.Second)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan struct{})
