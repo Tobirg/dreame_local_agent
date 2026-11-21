@@ -13,12 +13,16 @@ import (
 	"testing"
 )
 
-func syntheticFrame(t *testing.T, id uint16) string {
+func syntheticFrame(t *testing.T, id uint16, grid ...uint16) string {
 	t.Helper()
 	raw := make([]byte, 27)
 	binary.LittleEndian.PutUint16(raw, id)
 	raw[4] = 'I'
-	binary.LittleEndian.PutUint16(raw[17:19], 50)
+	size := uint16(50)
+	if len(grid) > 0 {
+		size = grid[0]
+	}
+	binary.LittleEndian.PutUint16(raw[17:19], size)
 	binary.LittleEndian.PutUint16(raw[19:21], 3)
 	binary.LittleEndian.PutUint16(raw[21:23], 3)
 	raw = append(raw, 1, 1, 255, 1, 2, 2, 0, 2, 2)

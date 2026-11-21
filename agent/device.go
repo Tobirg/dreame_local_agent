@@ -71,14 +71,16 @@ type snapshot struct {
 }
 
 type device struct {
-	mu       sync.Mutex
-	snap     snapshot
-	polled   bool // at least one successful poll, so missing properties mean "not answered"
-	poke     chan struct{}
-	hashOnce sync.Once
-	hashes   map[string]string
-	changed  chan struct{} // closed on the next snapshot change; see watch
-	streams  atomic.Int32
+	mu        sync.Mutex
+	snap      snapshot
+	polled    bool // at least one successful poll, so missing properties mean "not answered"
+	poke      chan struct{}
+	hashOnce  sync.Once
+	hashes    map[string]string
+	details   map[string]any // consumables, stats, dnd; see details.go
+	detailsAt time.Time
+	changed   chan struct{} // closed on the next snapshot change; see watch
+	streams   atomic.Int32
 }
 
 func int64Of(v any) (int64, bool) {
@@ -91,8 +93,15 @@ func int64Of(v any) (int64, bool) {
 }
 
 func (a *agent) poll(ctx context.Context) {
-	list := make([]map[string]int, len(stateProps))
-	for i, p := range stateProps {
+	props := stateProps
+	a.dev.mu.Lock()
+	withDetails := time.Since(a.dev.detailsAt) >= detailsEvery
+	a.dev.mu.Unlock()
+	if withDetails {
+		props = append(append([]stateProp(nil), stateProps...), detailProps()...)
+	}
+	list := make([]map[string]int, len(props))
+	for i, p := range props {
 		list[i] = map[string]int{"siid": p.siid, "piid": p.piid}
 	}
 	params, _ := json.Marshal(list)
@@ -103,6 +112,14 @@ func (a *agent) poll(ctx context.Context) {
 	}
 	a.dev.mu.Lock()
 	defer a.dev.mu.Unlock()
+	if err == nil && withDetails {
+		a.dev.details, a.dev.detailsAt = parseDetails(result), time.Now()
+	}
+	for k, v := range a.dev.details {
+		if state != nil {
+			state[k] = v
+		}
+	}
 	if err != nil {
 		// Keep the last known state but mark it stale: missing data is not "unchanged".
 		if !a.dev.snap.Stale || a.dev.snap.Error != err.Error() {
@@ -148,6 +165,11 @@ func normalize(result any) (map[string]any, error) {
 		state["activity"] = activity(status, charging, hasCharging)
 		if name, ok := statusNames[status]; ok {
 			state["status_name"] = name
+		}
+	}
+	if code, ok := int64Of(state["error"]); ok {
+		if name, ok := errorNames[code]; ok {
+			state["error_name"] = name
 		}
 	}
 	return state, nil
@@ -317,6 +339,7 @@ type command struct {
 	hwKey      string // hardware flag that must allow this command
 	hwAccepts  func(v any) bool
 	clearRooms bool
+	detail     bool
 }
 
 func (c command) available(hw map[string]any) (any, string) {
@@ -350,15 +373,24 @@ var commandTable = map[string]command{
 	"set_suction": {method: "set_properties", siid: 4, id: 4, min: 0, max: 3},
 	"set_volume":  {method: "set_properties", siid: 7, id: 1, min: 0, max: 100},
 	"clean_rooms": {method: "action", siid: 4, id: 1, clearRooms: true},
+	// Built by detailCommand in details.go.
+	"clean_zone":       {detail: true},
+	"reset_consumable": {detail: true},
+	"set_dnd":          {detail: true},
 }
 
 type commandParams struct {
-	Name    string `json:"name"`
-	Value   *int   `json:"value"`
-	Rooms   []int  `json:"rooms"`
-	Repeats int    `json:"repeats"`
-	Suction int    `json:"suction"`
-	Water   int    `json:"water"`
+	Name       string  `json:"name"`
+	Value      *int    `json:"value"`
+	Rooms      []int   `json:"rooms"`
+	Repeats    int     `json:"repeats"`
+	Suction    int     `json:"suction"`
+	Water      int     `json:"water"`
+	Zones      [][]int `json:"zones"`
+	Consumable string  `json:"consumable"`
+	Enabled    *bool   `json:"enabled"`
+	Start      string  `json:"start"`
+	End        string  `json:"end"`
 }
 
 // runCommand is reached through call(), so it already holds the IPC gate and passed identity checks.
@@ -381,7 +413,16 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 		}
 	}
 	var params any
+	method := c.method
 	switch {
+	case c.detail:
+		var err error
+		if method, params, err = a.detailCommand(p, info["did"]); err != nil {
+			return nil, err
+		}
+		a.dev.mu.Lock()
+		a.dev.detailsAt = time.Time{} // re-read consumables and dnd on the next poll
+		a.dev.mu.Unlock()
 	case c.method == "set_properties":
 		if p.Value == nil || *p.Value < c.min || *p.Value > c.max {
 			return nil, fmt.Errorf("value must be %d..%d", c.min, c.max)
@@ -403,7 +444,7 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 		}
 		params = map[string]any{"did": info["did"], "siid": c.siid, "aiid": c.id, "in": in}
 	}
-	result, err := a.miot(ctx, c.method, params)
+	result, err := a.miot(ctx, method, params)
 	if err != nil {
 		return nil, err
 	}

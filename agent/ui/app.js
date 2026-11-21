@@ -9,6 +9,7 @@ let token=sessionStorage.getItem('dreame-token')||localStorage.getItem('dreame-t
 let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false;
 let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
 const activeReads=new Set(),settingsDirty=new Set();
+let zoneDrawing=false,zone=[],dndDirty=false,careShown='';
 const canvas=$('map'),ctx=canvas.getContext('2d');
 
 export function pixelToRobot(v,x,y){
@@ -63,6 +64,7 @@ async function control(method,params,before=null){
 function disableControls(disabled){
  document.querySelectorAll('[data-command],#stage-update,#apply-update,#rollback-update,#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-apply').forEach(b=>b.disabled=disabled);
  $('clean-rooms').disabled=disabled||selected.size===0;
+ $('clean-zone').disabled=disabled||zone.length!==2;
  $('apply-map-edit').disabled=disabled||!pending;
  $('save-threshold').disabled=disabled||!thresholdDraft||!view?.thresholds_editable;
  $('delete-threshold').disabled=disabled||!$('threshold-choice').value||!view?.thresholds_editable;
@@ -232,11 +234,38 @@ function renderState(snap){
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
   if(!roomOptionsDirty){if(Number.isInteger(s.suction))$('room-fan').value=s.suction;if(Number.isInteger(s.water)&&s.water>=1&&s.water<=3)$('room-water').value=s.water;}
   $('station').textContent=s.station===undefined?'Состояние станции недоступно':'Состояние станции: '+(stationNames[s.station]||s.station);
-  $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—');
+  $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—')+(s.error_name?' ('+s.error_name+')':'');
+  $('robot-error').hidden=!s.error;$('robot-error').textContent=s.error?'Ошибка '+s.error+': '+errorText(s):'';
+  renderCare(s);
   for(const listener of stateListeners)try{listener.fn(s);}catch{}
   if(snap.stale){connectionLost(snap.error||'Нет свежих данных от робота');return;}
   $('connection').textContent='Подключён';$('connection').classList.remove('connection-offline');$('reconnect').hidden=true;
 }
+// ---- Maintenance: consumables, totals and do-not-disturb come with the state once a minute.
+const consumableNames={main_brush:'Основная щётка',side_brush:'Боковая щётка',filter:'Фильтр',sensor:'Датчики',tank_filter:'Фильтр бака',mop_pad:'Салфетки',silver_ion:'Ионы серебра',detergent:'Моющее средство',squeegee:'Скребок',dirty_water_channel:'Канал грязной воды',onboard_dirty_water_tank:'Бак грязной воды робота',deodorizer:'Дезодоратор',wheel:'Колёса',scale_inhibitor:'Антинакипин',fluffing_roller:'Взбивающий валик',roller_mop_filter:'Фильтр валика',water_outlet_filter:'Фильтр слива',track:'Направляющие',washboard:'Поддон мойки',filter_cleaning:'Очистка фильтра'};
+// Russian texts for common error codes; others show the agent's English name.
+const errorTexts={1:'колесо зависло',2:'датчик перепада',3:'бампер заклинило',8:'нет контейнера',9:'нет бака',10:'бак для воды пуст',11:'контейнер полон',12:'основная щётка застряла',13:'боковая щётка застряла',14:'вентилятор',15:'левое колесо',16:'правое колесо',17:'робот застрял',18:'робот застрял',19:'не найдена база',20:'низкий заряд',21:'ошибка зарядки',24:'камера закрыта',47:'путь заблокирован',48:'лидар',51:'фильтр забит',59:'робот в запретной зоне',68:'снимите салфетки',75:'разряжен, выключение',76:'бак грязной воды не установлен',80:'робот застрял',82:'скользкий пол',86:'бак грязной воды полон',101:'контейнер станции полон',102:'крышка станции открыта',105:'бак чистой воды',106:'бак грязной воды',107:'бак чистой воды пуст',109:'бак грязной воды засорён',117:'станция отключена',120:'нет салфеток в станции',121:'мешок для пыли полон',122:'предупреждение без описания',123:'самопроверка не пройдена',125:'слив не удался',129:'мойка не удалась',1000:'не удалось вернуться на базу'};
+const errorText=s=>errorTexts[s.error]||String(s.error_name||'неизвестная ошибка').replaceAll('_',' ');
+function renderCare(s){
+ const parts=s.consumables||{},key=JSON.stringify([parts,s.stats,s.dnd]);
+ if(key===careShown)return;careShown=key;
+ $('care-panel').hidden=!Object.keys(parts).length&&!s.dnd;
+ const rows=Object.entries(parts).map(([name,c])=>{
+  const row=document.createElement('div'),text=document.createElement('span'),reset=document.createElement('button');
+  row.className='module-row';row.dataset.consumable=name;
+  text.textContent=(consumableNames[name]||name)+' · '+(c.left??'—')+'%'+(c.hours!==undefined?' · ещё '+c.hours+' ч':'');
+  if(c.left!==undefined&&c.left<=10)text.classList.add('error');
+  reset.textContent='Сбросить';reset.className='ghost';
+  reset.onclick=()=>{if(window.confirm('Сбросить ресурс «'+(consumableNames[name]||name)+'»? Делай это после замены или чистки.'))control('/api/v1/command',{name:'reset_consumable',consumable:name}).catch(()=>{});};
+  row.append(text,reset);return row;
+ });
+ $('consumables').replaceChildren(...rows);
+ const st=s.stats;$('stats').textContent=st?'Всего уборок: '+(st.cleanings??'—')+' · '+(st.minutes!==undefined?Math.round(st.minutes/60)+' ч':'—')+' · '+(st.area??'—')+' м²':'';
+ $('dnd').hidden=!s.dnd;
+ if(s.dnd&&!dndDirty){$('dnd-enabled').checked=!!s.dnd.enabled;$('dnd-start').value=s.dnd.start||'';$('dnd-end').value=s.dnd.end||'';}
+}
+for(const id of ['dnd-enabled','dnd-start','dnd-end'])$(id).oninput=()=>{dndDirty=true;};
+$('save-dnd').onclick=()=>control('/api/v1/command',{name:'set_dnd',enabled:$('dnd-enabled').checked,start:$('dnd-start').value,end:$('dnd-end').value}).then(()=>{dndDirty=false;},()=>{});
 // Live state: the agent pushes every change on /api/v1/events (Server-Sent Events read with fetch, so the token stays in a header).
 let events=null;
 function stopEvents(){events?.abort('suspend');events=null;}
@@ -283,17 +312,18 @@ function draw(){
  ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
  for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
  drawThresholds();
+ if(zone.length){const [a,b=a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
 }
 async function refreshMap(){
  if(!token||busy)return;const epoch=viewEpoch;
  try{
   const next=await api('local.map_view');if(epoch!==viewEpoch||!token)return;
-  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();draw();disableControls(busy);return;}
+  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();draw();disableControls(busy);return;}
   if(!Number.isInteger(next.width)||!Number.isInteger(next.height)||next.width*next.height>4194304||!Array.isArray(next.rooms))throw Error('Некорректный формат карты');
   const bytes=atob(next.pixels);if(bytes.length!==next.width*next.height)throw Error('Некорректный размер карты');
   next.grid=Uint8Array.from(bytes,c=>c.charCodeAt(0));
-  if(view?.revision!==next.revision){selected=view?.map_id===next.map_id?new Set([...selected].filter(id=>next.rooms.some(r=>r.id===id))):new Set();points=[];invalidateEdit();thresholdDraft=null;thresholdDrawing=false;}
+  if(view?.revision!==next.revision){selected=view?.map_id===next.map_id?new Set([...selected].filter(id=>next.rooms.some(r=>r.id===id))):new Set();points=[];invalidateEdit();thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;}
   view=next;canvas.width=view.width*3;canvas.height=view.height*3;
   $('map-info').textContent='Карта '+view.map_id+' · комнат: '+view.rooms.length+' · '+view.width+' × '+view.height;
   renderRoomButtons();renderThresholdChoices();draw();disableControls(busy);
@@ -302,6 +332,7 @@ async function refreshMap(){
 canvas.onclick=e=>{
  if(!view||view.empty||busy)return;
  const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)*view.width/rect.width,y=view.height-(e.clientY-rect.top)*view.height/rect.height;
+ if(zoneDrawing){zone.push({x,y});if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
  if($('map-operation').value==='split'&&selected.size===1){if(points.length===2)points=[];points.push({x,y,robot:pixelToRobot(view,x,y)});invalidateEdit();draw();return;}
@@ -335,6 +366,13 @@ $('refresh-map').onclick=()=>refreshMap();
 $('clear-selection').onclick=()=>{selected.clear();points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);};
 $('clean-rooms').onclick=async()=>{try{const ids=[...selected],mapID=view?.map_id;const args=roomCommand(ids,Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));await control('/api/v1/command',args,async()=>{const current=await api('local.map_view');if(current.map_id!==mapID||!ids.every(id=>current.rooms.some(r=>r.id===id)))throw Error('Комнаты изменились. Обнови карту и выбери их заново.');});}catch(e){toast(e.message,true);}};
 for(const id of ['room-fan','room-water','room-repeats'])$(id).onchange=()=>{roomOptionsDirty=true;};
+// ---- Zone cleaning: two opposite corners on the map; the agent checks the rectangle against the saved map.
+$('draw-zone').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zone=[];$('zone-status').textContent='Нажми на два противоположных угла зоны.';disableControls(busy);draw();};
+$('clean-zone').onclick=async()=>{
+ try{const [a,b]=zone.map(p=>pixelToRobot(view,p.x,p.y)),mapID=view.map_id;
+  await control('/api/v1/command',{name:'clean_zone',zones:[[a[0],a[1],b[0],b[1]]],repeats:Number($('room-repeats').value),suction:Number($('room-fan').value),water:Number($('room-water').value)},async()=>{const current=await api('local.map_view');if(current.map_id!==mapID)throw Error('Карта изменилась. Выбери зону заново.');});}
+ catch(e){toast(e.message,true);}
+};
 $('map-operation').onchange=()=>{thresholdDrawing=false;thresholdDraft=null;selected.clear();points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);};
 $('prepare-map-edit').onclick=()=>{
  try{
