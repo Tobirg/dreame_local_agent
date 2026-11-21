@@ -281,6 +281,7 @@ func (a *agent) capabilities() (map[string]any, error) {
 		commands[name] = map[string]any{"available": available, "reason": reason}
 	}
 	caps := map[string]any{
+		"agent":      map[string]string{"version": version},
 		"identity":   map[string]string{"model": info["model"], "did": info["did"], "fw_ver": info["fw_ver"]},
 		"firmware":   a.firmwareProfile(info["model"], info["fw_ver"]),
 		"control":    a.controlAllowed(),

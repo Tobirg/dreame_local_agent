@@ -5,7 +5,7 @@ const path=require('node:path');
 const assert=require('node:assert/strict');
 const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES?process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright':'playwright');
 const root=path.resolve(__dirname,'../agent/ui'),token='a'.repeat(40),commands=[],commandReplies=new Map();
-let staleState=false,revision='test-map-1',regionCode=200,installedModules=[],stagedUpload=null,dropNextRead=false,dropNextMutation=false;
+let staleState=false,revision='test-map-1',regionCode=200,installedModules=[],stagedUpload=null,updateLast=null,updatePrevious=null,stagedAgent=null,dropNextRead=false,dropNextMutation=false;
 const values={'2/1':6,'2/2':0,'3/1':95,'4/1':6,'4/4':1,'4/5':2,'4/25':0,'7/1':50,'4/23':(2<<16)|(20<<8),'4/27':0,'28/1':10,'4/50':JSON.stringify([{k:'AutoDry',v:1},{k:'SmartCharge',v:1}]),'4/22':JSON.stringify({obstacle_detect_switch:true,human_detect_switch:false,untouched:42}),'5/4':JSON.stringify([{id:9,en:true,st:'22:00',et:'08:00',wk:127,ss:0,extra:'keep'},{id:10,en:false,st:'12:00',et:'13:00',wk:1,ss:0}])};
 const capabilities={identity:{model:'dreame.vacuum.r2505',fw_ver:'4.3.9_2021'},firmware:{profile:'r2505-r2440-4.3.9_2021',verified:true},control:true,properties:{suction:{readable:true},volume:{readable:true}},commands:{start:{available:true},locate:{available:true},dry_start:{available:false,reason:'HOT_AIR_DRYING_AC_PTC=N'},dry_stop:{available:false,reason:'HOT_AIR_DRYING_AC_PTC=N'}}};
 let passable=[[-700,-700,-400,-700]],impassable=[[100,-700,100,-400]];
@@ -20,6 +20,7 @@ const server=http.createServer((req,res)=>{
   res.setHeader('Content-Type','application/json');
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   if(req.url==='/api/v1/modules'){res.end(JSON.stringify({result:installedModules}));return;}
+  if(req.url==='/api/v1/system/update'){res.end(JSON.stringify({result:{current:'0.7.0',staged:null,previous:updatePrevious,last:updateLast,applying:false}}));return;}
   if(req.url==='/api/v1/state'){
    if(dropNextRead){dropNextRead=false;res.destroy();return;}
    const v=k=>values[k],state={status:v('4/1'),error:v('2/2'),battery:v('3/1'),charging:1,suction:v('4/4'),water:v('4/5'),station:v('4/25'),volume:v('7/1'),region:regionCode===200?'matched':'mismatched',region_code:regionCode};
@@ -38,6 +39,8 @@ const server=http.createServer((req,res)=>{
  let body='';req.on('data',b=>body+=b);req.on('end',()=>{
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   const json=v=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result:v}));};
+  if(req.url==='/api/v1/system/update/stage'){stagedAgent=body;json({version:'0.8.0',current:'0.7.0',sha256:'b'.repeat(64),size:4096});return;}
+  if(req.url==='/api/v1/system/update/apply'){commands.push({method:req.url,params:JSON.parse(body)});updatePrevious='0.6.0';updateLast={id:'u1',status:'rolled_back',from:'0.7.0',to:'0.8.0',error:'new agent did not come up: no answer'};json({applying:true,id:'u1'});return;}
   if(req.url==='/api/v1/modules/stage'){stagedUpload=body;json({id:'0123456789abcdef',sha256:'a'.repeat(64),size:body.length,manifest:{name:'demo',version:'1.0.0',title:'Демо',firmware_messages:['device_lock']},files:['boot-env.sh','handler','manifest.json','panel.js'],boot_hook:true,installed_version:null});return;}
   if(req.url==='/api/v1/modules/install'){installedModules.push({name:'demo',version:'1.0.0',title:'Демо',panel:true,boot_hook:true,firmware_messages:['device_lock']});json({installed:'demo',version:'1.0.0'});return;}
   if(req.url==='/api/v1/modules/remove'){installedModules=installedModules.filter(m=>m.name!==JSON.parse(body).name);json({removed:'demo',warning:''});return;}
@@ -95,6 +98,12 @@ const server=http.createServer((req,res)=>{
   assert.deepEqual(commands.at(-1),{method:'/api/v1/m/demo/ping',params:{n:1}});
   page.once('dialog',d=>d.accept());await page.locator('.module-row[data-module=demo] button').click();await page.waitForFunction(()=>!document.querySelector('section[data-module=demo]'));
   assert.equal(installedModules.length,0);assert.match(await page.locator('#module-list').innerText(),/Модули не установлены/);
+  assert.match(await page.locator('#update-status').innerText(),/Установлена версия 0\.7\.0/);assert(await page.locator('#rollback-update').isHidden());
+  await page.locator('#update-add summary').click();await page.locator('#update-file').setInputFiles({name:'dreame-local-agent',mimeType:'application/octet-stream',buffer:Buffer.from('new-agent')});
+  await page.locator('#stage-update').click();await page.locator('#update-review').waitFor({state:'visible'});assert.equal(stagedAgent,'new-agent');assert.match(await page.locator('#update-summary').innerText(),/0\.7\.0 → 0\.8\.0.*SHA-256: b{64}/);
+  await page.locator('#apply-update').click();await page.waitForFunction(()=>document.querySelector('#update-result').textContent.startsWith('Результат'),null,{timeout:15000});
+  assert.deepEqual(commands.at(-1),{method:'/api/v1/system/update/apply',params:{source:'staged'}});assert.match(await page.locator('#update-result').innerText(),/0\.8\.0 не запустилась, возвращена 0\.7\.0/);
+  assert.equal(await page.locator('#rollback-update').innerText(),'Вернуть версию 0.6.0');
   assert.equal(await page.locator('#wifi-details').getAttribute('open'),null);assert.match(await page.locator('#wifi-summary').innerText(),/Home WiFi.*70%/);assert(await page.evaluate(()=>document.querySelector('#wifi-panel')===document.querySelector('#dashboard').lastElementChild));assert.equal(await page.locator('footer').count(),0);
   await page.locator('#wifi-details summary').click();
   await page.locator('#wifi-ssid').fill('Home');await page.locator('#wifi-password').fill('testpass123');await page.locator('#save-wifi').click();await page.waitForFunction(()=>!document.querySelector('#save-wifi').disabled);assert.deepEqual(commands.at(-1),{method:'local.wifi_setup',params:{ssid:'Home',password:'testpass123',open:false}});assert.equal(await page.locator('#wifi-password').inputValue(),'');assert.match(await page.locator('#wifi-result').innerText(),/Настройки приняты/);assert(!JSON.stringify(await page.evaluate(()=>({...localStorage,...sessionStorage}))).includes('testpass123'));
@@ -117,6 +126,6 @@ const server=http.createServer((req,res)=>{
   await page.locator('#logout').click();assert(await page.locator('#login').isVisible());assert.equal(await page.evaluate(()=>sessionStorage.getItem('dreame-token')),null);
   await page.goto(url+'/?setup=wifi');await page.locator('#wifi-ssid').waitFor({state:'visible',timeout:5000});assert(await page.locator('#wifi-ssid').isVisible());assert(await page.locator('#login').isVisible());await page.locator('#token').fill(token);await page.locator('#wifi-ssid').fill('Setup');await page.locator('#wifi-open').check();await page.locator('#save-wifi').click();await page.waitForFunction(()=>document.querySelector('#wifi-result').textContent.includes('Настройки приняты'));assert.deepEqual(commands.at(-1),{method:'local.wifi_setup',params:{ssid:'Setup',password:'',open:true}});
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('Browser checks passed: reboot confirmation, collapsed final Wi-Fi panel and signal, repeated multi-room cleaning, threshold add/edit/delete, packed settings preservation, reconnection without repeating commands, stale snapshot warning, capability-hidden commands,  login, status, coordinates, start, room cleaning, merge, split, stale-map blocking, settings, module package review, install, panel state and actions, removal, Wi-Fi submission without password storage, captive setup form before login, mobile layout, logout, no external requests');
+  console.log('Browser checks passed: reboot confirmation, collapsed final Wi-Fi panel and signal, repeated multi-room cleaning, threshold add/edit/delete, packed settings preservation, reconnection without repeating commands, stale snapshot warning, capability-hidden commands,  login, status, coordinates, start, room cleaning, merge, split, stale-map blocking, settings, module package review, install, panel state and actions, removal, agent update with rollback report, Wi-Fi submission without password storage, captive setup form before login, mobile layout, logout, no external requests');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

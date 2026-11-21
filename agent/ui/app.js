@@ -23,7 +23,7 @@ export function roomCommand(ids,fan,water,repeats=1){
 }
 const command=(name,args={})=>control('/api/v1/command',{name,...args});
 function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
-function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules';}
+function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
 async function api(method,params=null){
  const read=isRead(method),requestID=read?null:Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
@@ -61,7 +61,7 @@ async function control(method,params,before=null){
  finally{busy=false;disableControls(false);}
 }
 function disableControls(disabled){
- document.querySelectorAll('[data-command],#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-apply').forEach(b=>b.disabled=disabled);
+ document.querySelectorAll('[data-command],#stage-update,#apply-update,#rollback-update,#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-apply').forEach(b=>b.disabled=disabled);
  $('clean-rooms').disabled=disabled||selected.size===0;
  $('apply-map-edit').disabled=disabled||!pending;
  $('save-threshold').disabled=disabled||!thresholdDraft||!view?.thresholds_editable;
@@ -73,6 +73,48 @@ function renderNetwork(wifi){
  $('wifi-summary').textContent=network+signal;$('wifi-details').open=$('wifi-details').open||wifi.ap_mode||captiveSetup;
  $('wifi-status').textContent='Сеть: '+network+signal+(Number.isFinite(wifi.signal_dbm)?' ('+wifi.signal_dbm+' dBm)':'')+' · '+(wifi.ap_mode?'Режим точки доступа':'Адреса: '+wifi.addresses.join(', '))+' · '+({idle:'Ожидание',connecting:'Подключение к сети',connected:'Wi-Fi подключён',failed:'Ошибка подключения'}[wifi.state]||wifi.state)+(wifi.error?' · '+wifi.error:'')+(wifi.ap_mode?' · портал: '+(wifi.portal_http&&wifi.portal_dns?'работает':wifi.portal_error||'запускается'):'');
 }
+// ---- Agent self-update: the agent checks the uploaded binary, a helper swaps it and rolls back if it does not come up.
+let stagedUpdate=null;
+function describeUpdate(r){
+ if(!r)return '';
+ return {applying:'идёт обновление',updated:'обновлено '+r.from+' → '+r.to,rolled_back:'версия '+r.to+' не запустилась, возвращена '+r.from,failed:'ошибка'}[r.status]+(r.error?' ('+r.error+')':'');
+}
+function renderUpdate(u){
+ $('update-status').textContent='Установлена версия '+u.current+(u.last?' · последнее обновление: '+describeUpdate(u.last):'');
+ $('rollback-update').hidden=!u.previous||u.applying;if(u.previous)$('rollback-update').textContent='Вернуть версию '+u.previous;
+}
+async function loadUpdate(){renderUpdate(await api('/api/v1/system/update'));}
+async function runUpdate(source,label){
+ if(busy)return;busy=true;disableControls(true);
+ try{
+  const start=await api('/api/v1/system/update/apply',{source});
+  $('update-result').textContent=label+' Агент перезапускается, связь пропадёт на несколько секунд…';
+  for(let i=0;i<60;i++){
+   await new Promise(resolve=>setTimeout(resolve,2000));
+   let u;try{u=await api('/api/v1/system/update');}catch{continue;}
+   if(u.applying||u.last?.id!==start.id||u.last.status==='applying')continue;
+   renderUpdate(u);$('update-result').textContent='Результат: '+describeUpdate(u.last)+'.';
+   // The web UI is embedded in the agent: reload to get the new version's pages.
+   if(u.last.status==='updated'){$('update-result').textContent+=' Перезагружаю страницу…';setTimeout(()=>location.reload(),1500);}
+   return;
+  }
+  $('update-result').textContent='Агент не ответил за 2 минуты. Обнови страницу и проверь версию.';
+ }catch(e){$('update-result').textContent=e.message;}finally{busy=false;disableControls(false);}
+}
+$('stage-update').onclick=async()=>{
+ const file=$('update-file').files[0];if(!file){toast('Выбери файл агента',true);return;}if(busy)return;
+ busy=true;disableControls(true);$('update-review').hidden=true;$('update-result').textContent='Проверяю файл…';
+ try{
+  const response=await fetch('/api/v1/system/update/stage',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/octet-stream'},body:file,credentials:'omit',cache:'no-store'});
+  const body=await response.json();if(!response.ok)throw Error(body.error||'Ошибка HTTP '+response.status);
+  stagedUpdate=body.result;
+  $('update-summary').textContent='Версия '+stagedUpdate.current+' → '+stagedUpdate.version+' · '+Math.round(stagedUpdate.size/1024)+' КБ · SHA-256: '+stagedUpdate.sha256;
+  $('update-review').hidden=false;$('update-result').textContent='Проверь версию и нажми «Обновить».';
+ }catch(e){$('update-result').textContent=e.message;}finally{busy=false;disableControls(false);}
+};
+$('apply-update').onclick=()=>{if(!stagedUpdate)return;$('update-review').hidden=true;$('update-file').value='';stagedUpdate=null;runUpdate('staged','Обновление начато.');};
+$('cancel-update').onclick=()=>{stagedUpdate=null;$('update-review').hidden=true;$('update-result').textContent='';};
+$('rollback-update').onclick=()=>{if(window.confirm($('rollback-update').textContent+'?'))runUpdate('previous','Возврат начат.');};
 // ---- Modules: installed packages (GET /api/v1/modules) may add their own panel, mounted as mount(element, ctx).
 const stateListeners=[],mountedPanels=new Map();let stagedModule=null;
 function dropListeners(name){for(let i=stateListeners.length-1;i>=0;i--)if(stateListeners[i].name===name)stateListeners.splice(i,1);}
@@ -227,7 +269,7 @@ async function login(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('dashboard').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();await loadModules().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),5000);
+ await refresh();await refreshMap();await loadModules().catch(e=>toast(e.message,true));await loadUpdate().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),5000);
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};

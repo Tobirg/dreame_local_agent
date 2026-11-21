@@ -26,7 +26,8 @@ import (
 	"time"
 )
 
-const version = "0.7.0"
+// Set at build time for test or release builds: -ldflags "-X main.version=..."
+var version = "0.8.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -53,15 +54,16 @@ type agent struct {
 	rebootQueued  atomic.Bool
 	rebootCommand string // Only overridden by tests.
 
-	portal  portalState
-	network networkJob
-	dev     device
-	modules moduleHost
-	cfg     config
-	root    string // Only set by tests; runtime always uses the actual root filesystem.
-	avacmd  string
-	gate    chan struct{}
-	next    atomic.Int64
+	portal     portalState
+	network    networkJob
+	dev        device
+	modules    moduleHost
+	configPath string // absolute; the update helper is started with it
+	cfg        config
+	root       string // Only set by tests; runtime always uses the actual root filesystem.
+	avacmd     string
+	gate       chan struct{}
+	next       atomic.Int64
 }
 
 func (a *agent) path(p string) string { return filepath.Join(a.root, p) }
@@ -444,7 +446,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if a.moduleRoutes(w, r, send) {
+	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) {
 		return
 	}
 	switch r.URL.Path {
@@ -546,6 +548,8 @@ func main() {
 	cfgPath := flag.String("config", "/data/dreame-local/config.json", "configuration file")
 	daemon := flag.Bool("daemon", false, "start in a detached session")
 	showVersion := flag.Bool("version", false, "print agent version")
+	applyUpdate := flag.String("apply-update", "", "internal: replace the installed agent with this binary")
+	updateID := flag.String("update-id", "", "internal: id of the update request")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("dreame-local-agent " + version)
@@ -562,11 +566,18 @@ func main() {
 	if len(cfg.Token) < 32 || strings.HasPrefix(cfg.Token, "REPLACE") || cfg.Port < 1 || cfg.Port > 65535 {
 		log.Fatal("invalid API token or port")
 	}
+	if *applyUpdate != "" {
+		runUpdateHelper(cfg, *applyUpdate, *updateID)
+		return
+	}
 	path, err := exec.LookPath("avacmd")
 	if err != nil {
 		log.Fatal("avacmd not found in PATH")
 	}
 	a := &agent{cfg: cfg, avacmd: path, gate: make(chan struct{}, 1)}
+	if abs, err := filepath.Abs(*cfgPath); err == nil {
+		a.configPath = abs
+	}
 	a.next.Store(time.Now().Unix())
 	if _, err := a.identity(); err != nil {
 		log.Fatal(err)
