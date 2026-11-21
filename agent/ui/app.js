@@ -316,10 +316,10 @@ export function applyCapabilities(caps){
  for(const [prop,input,apply] of [['suction','fan','save-fan'],['volume','volume','save-volume']]){const hide=caps.properties?.[prop]?.readable===false;$(input).closest('label').hidden=hide;$(apply).hidden=hide;}
 }
 async function login(){
- const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('dashboard').append($('wifi-panel'));applyCapabilities(caps);
+ const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('main-page').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();await mainTokenOnly('modules-panel',loadModules);await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
+ await refresh();await refreshMap();await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
@@ -501,3 +501,7 @@ function scheduleResume(){clearTimeout(resumeTimer);resumeTimer=setTimeout(async
 $('reconnect').onclick=scheduleResume;
 document.addEventListener('visibilitychange',()=>{if(document.hidden)suspendReads();else scheduleResume();});
 window.addEventListener('online',scheduleResume);window.addEventListener('pageshow',scheduleResume);window.addEventListener('focus',scheduleResume);
+
+// Modules live on their own page: #modules shows it, anything else the robot dashboard.
+function showPage(){const modules=location.hash==='#modules';$('main-page').hidden=modules;$('modules-page').hidden=!modules;$('nav-main').classList.toggle('active',!modules);$('nav-modules').classList.toggle('active',modules);}
+window.addEventListener('hashchange',showPage);showPage();
