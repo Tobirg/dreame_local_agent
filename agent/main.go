@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.9.0"
+var version = "0.10.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -428,6 +428,11 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		scope = "module"
 	}
+	if scope == "module" && r.URL.Path == "/api/v1/command" {
+		if m, err := a.installedModule(module); err == nil && m.Control {
+			scope = "control" // declared in the manifest and shown to the owner at install
+		}
+	}
 	if scope != "admin" && !limitedRoute(scope, r) {
 		send(403, map[string]string{"error": scope + " token cannot use this endpoint"})
 		return
@@ -617,6 +622,8 @@ func main() {
 	go func() { defer close(portalDone); a.runPortal(portalContext) }()
 	a.dev.poke = make(chan struct{}, 1)
 	a.modules.slots = make(chan struct{}, 4)
+	a.modules.ctx = portalContext
+	a.startServices()
 	go a.runPoller(portalContext, 5*time.Second)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
@@ -635,6 +642,7 @@ func main() {
 		log.Fatal(err)
 	}
 	<-done
+	a.stopServices()
 	stopPortal()
 	<-portalDone
 }

@@ -164,7 +164,7 @@ async function loadModules(){
  const rows=list.map(m=>{
   const row=document.createElement('div'),text=document.createElement('span'),remove=document.createElement('button');
   row.className='module-row';row.dataset.module=m.name;
-  text.textContent=m.error?m.name+' · '+m.error:m.title+' · '+m.version+(m.boot_hook?' · в загрузке робота':'');
+  text.textContent=m.error?m.name+' · '+m.error:m.title+' · '+m.version+(m.boot_hook?' · в загрузке робота':'')+(m.service_running===true?' · работает':m.service_running===false?' · фоновый процесс остановлен':'');
   remove.textContent='Удалить';remove.onclick=()=>removeModule(m);row.append(text,remove);return row;
  });
  if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Модули не установлены'}));
@@ -189,6 +189,8 @@ $('stage-module').onclick=async()=>{
   $('module-manifest').textContent=[m.title+' ('+m.name+') '+m.version+(stagedModule.installed_version?' · заменит '+stagedModule.installed_version:''),m.description||'',
    'SHA-256: '+stagedModule.sha256,'Сообщения прошивки: '+((m.firmware_messages||[]).join(', ')||'нет'),
    stagedModule.boot_hook?'Добавляет команды в загрузку робота (boot-env.sh): начнут действовать после перезагрузки.':'Не меняет загрузку робота.',
+   m.control?'Может управлять роботом: запускать уборку, отправлять на базу и другие команды.':'Не управляет роботом.',
+   m.service?'Работает постоянно в фоне (процесс '+m.service+').':'',
    'Файлы: '+stagedModule.files.join(', ')].filter(Boolean).join('\n');
   $('module-review').hidden=false;$('module-result').textContent='Проверь сведения и нажми «Установить».';
  }catch(e){$('module-result').textContent=e.message;}finally{busy=false;disableControls(false);}

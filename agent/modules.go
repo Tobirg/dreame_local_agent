@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -25,15 +26,19 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
 const (
 	modulesBase    = "/data/dreame-local/modules"
+	moduleDataBase = "/data/dreame-local/module-data" // per-module data that survives module updates
 	maxPackage     = 32 << 20
 	maxPackageFile = 256
 	maxHandlerOut  = 1 << 20
@@ -55,12 +60,21 @@ type manifest struct {
 	Panel            string   `json:"panel,omitempty"`             // ES module for the web UI
 	ReadActions      []string `json:"read_actions,omitempty"`      // actions allowed without allow_control
 	FirmwareMessages []string `json:"firmware_messages,omitempty"` // msg_cvt cmd values the module may send
+	Control          bool     `json:"control,omitempty"`           // module token may send /api/v1/command
+	Service          string   `json:"service,omitempty"`           // executable the agent keeps running as: <service> run
 }
 
 type moduleHost struct {
-	mu     sync.Mutex
-	tokens map[string]string // per-process random token -> module name
-	slots  chan struct{}     // bounds concurrent handler processes
+	mu       sync.Mutex
+	slots    chan struct{} // bounds concurrent handler processes
+	ctx      context.Context
+	services map[string]*moduleService
+}
+
+type moduleService struct {
+	cancel  context.CancelFunc
+	done    chan struct{}
+	running atomic.Bool
 }
 
 func (a *agent) modulesDir() string { return a.path(modulesBase) }
@@ -73,7 +87,7 @@ func (m *manifest) validate(dir string) error {
 	if !moduleNameRe.MatchString(m.Name) || m.Version == "" || len(m.Version) > 32 || m.Title == "" || len(m.Title) > 80 || len(m.Description) > 500 {
 		return errors.New("manifest needs name (a-z0-9_-), version and title")
 	}
-	for _, f := range []string{m.Handler, m.Panel} {
+	for _, f := range []string{m.Handler, m.Panel, m.Service} {
 		if f == "" {
 			continue
 		}
@@ -234,6 +248,8 @@ func (a *agent) installModule(ctx context.Context, id string) (any, error) {
 	final := filepath.Join(a.modulesDir(), m.Name)
 	backup := filepath.Join(a.modulesDir(), ".previous-"+m.Name)
 	_ = os.RemoveAll(backup)
+	a.stopService(m.Name)
+	defer a.startService(m.Name) // the new version, or the restored old one
 	hadOld := os.Rename(final, backup) == nil
 	if err := os.Rename(dir, final); err != nil {
 		if hadOld {
@@ -243,7 +259,12 @@ func (a *agent) installModule(ctx context.Context, id string) (any, error) {
 	}
 	_ = os.RemoveAll(staging)
 	if m.Handler != "" {
-		if _, err := a.runHandler(ctx, final, m, "install", nil); err != nil {
+		var previous []string
+		if hadOld {
+			// Lets an update carry over state the old version kept in its own directory.
+			previous = append(previous, "DREAME_MODULE_PREVIOUS="+backup)
+		}
+		if _, err := a.runHandler(ctx, final, m, "install", nil, previous...); err != nil {
 			_ = os.RemoveAll(final)
 			if hadOld {
 				_ = os.Rename(backup, final)
@@ -261,6 +282,7 @@ func (a *agent) removeModule(ctx context.Context, name string) (any, error) {
 		return nil, err
 	}
 	dir := filepath.Join(a.modulesDir(), name)
+	a.stopService(name)
 	var warning string
 	if m.Handler != "" {
 		if _, err := a.runHandler(ctx, dir, m, "uninstall", nil); err != nil {
@@ -270,6 +292,7 @@ func (a *agent) removeModule(ctx context.Context, name string) (any, error) {
 	if err := os.RemoveAll(dir); err != nil {
 		return nil, errors.New("cannot remove module files")
 	}
+	_ = os.RemoveAll(a.moduleDataDir(name))
 	return map[string]any{"removed": name, "warning": warning}, nil
 }
 
@@ -298,46 +321,58 @@ func (a *agent) listModules() []map[string]any {
 			continue
 		}
 		_, bootErr := os.Stat(filepath.Join(dir, "boot-env.sh"))
-		list = append(list, map[string]any{"name": m.Name, "version": m.Version, "title": m.Title, "description": m.Description,
-			"panel": m.Panel != "", "boot_hook": bootErr == nil, "firmware_messages": m.FirmwareMessages})
+		entry := map[string]any{"name": m.Name, "version": m.Version, "title": m.Title, "description": m.Description,
+			"panel": m.Panel != "", "boot_hook": bootErr == nil, "firmware_messages": m.FirmwareMessages, "control": m.Control}
+		if m.Service != "" {
+			entry["service_running"] = a.serviceRunning(m.Name)
+		}
+		list = append(list, entry)
 	}
 	return list
 }
 
+// moduleToken is derived from the main token, so it survives agent restarts and a
+// module's service can keep using it; it changes when the main token does.
 func (a *agent) moduleToken(name string) string {
-	a.modules.mu.Lock()
-	defer a.modules.mu.Unlock()
-	if a.modules.tokens == nil {
-		a.modules.tokens = map[string]string{}
-	}
-	for token, owner := range a.modules.tokens {
-		if owner == name {
-			return token
-		}
-	}
-	token := randomHex(24)
-	a.modules.tokens[token] = name
-	return token
+	mac := hmac.New(sha256.New, []byte(a.cfg.Token))
+	mac.Write([]byte("dreame-module:" + name))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// moduleForToken returns the installed module the token belongs to, or "".
 func (a *agent) moduleForToken(header string) string {
 	token, ok := strings.CutPrefix(header, "Bearer ")
-	if !ok {
+	if !ok || len(token) != 64 {
 		return ""
 	}
-	a.modules.mu.Lock()
-	defer a.modules.mu.Unlock()
-	for t, name := range a.modules.tokens {
-		if subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 {
-			return name
+	entries, _ := os.ReadDir(a.modulesDir())
+	for _, e := range entries {
+		if e.IsDir() && moduleNameRe.MatchString(e.Name()) && subtle.ConstantTimeCompare([]byte(a.moduleToken(e.Name())), []byte(token)) == 1 {
+			if _, err := a.installedModule(e.Name()); err == nil {
+				return e.Name()
+			}
 		}
 	}
 	return ""
 }
 
+func (a *agent) moduleDataDir(name string) string { return filepath.Join(a.path(moduleDataBase), name) }
+
+// moduleEnv is the environment of a module's handler and service.
+func (a *agent) moduleEnv(dir string, m *manifest) ([]string, error) {
+	data := a.moduleDataDir(m.Name)
+	if err := os.MkdirAll(data, 0700); err != nil {
+		return nil, errors.New("cannot create module data directory")
+	}
+	return []string{
+		"PATH=/usr/sbin:/usr/bin:/sbin:/bin:/ava/bin", "HOME=" + dir, "DREAME_MODULE_DIR=" + dir, "DREAME_MODULE_DATA=" + data,
+		"DREAME_API=http://127.0.0.1:" + strconv.Itoa(a.cfg.Port), "DREAME_MODULE_TOKEN=" + a.moduleToken(m.Name),
+	}, nil
+}
+
 // runHandler executes "handler <action>" with the JSON params on stdin and scalar
 // params as P_<key> variables (convenient for shell handlers). Output must be JSON.
-func (a *agent) runHandler(ctx context.Context, dir string, m *manifest, action string, params map[string]any) (json.RawMessage, error) {
+func (a *agent) runHandler(ctx context.Context, dir string, m *manifest, action string, params map[string]any, extraEnv ...string) (json.RawMessage, error) {
 	if a.modules.slots == nil {
 		return nil, errors.New("module host not started")
 	}
@@ -356,10 +391,11 @@ func (a *agent) runHandler(ctx context.Context, dir string, m *manifest, action 
 	cmd := exec.CommandContext(task, filepath.Join(dir, filepath.FromSlash(m.Handler)), action)
 	cmd.Dir = dir
 	cmd.WaitDelay = time.Second
-	cmd.Env = []string{
-		"PATH=/usr/sbin:/usr/bin:/sbin:/bin:/ava/bin", "HOME=" + dir, "DREAME_MODULE_DIR=" + dir,
-		"DREAME_API=http://127.0.0.1:" + strconv.Itoa(a.cfg.Port), "DREAME_MODULE_TOKEN=" + a.moduleToken(m.Name),
+	env, err := a.moduleEnv(dir, m)
+	if err != nil {
+		return nil, err
 	}
+	cmd.Env = append(env, extraEnv...)
 	for k, v := range params {
 		if !fieldRe.MatchString(k) {
 			continue
@@ -573,4 +609,112 @@ func (a *agent) moduleRoutes(w http.ResponseWriter, r *http.Request, send func(i
 		return false
 	}
 	return true
+}
+
+// ---- Services: a module may declare one long-running process. The agent starts it
+// with the module environment, restarts it with backoff and stops it on update/removal.
+
+func (a *agent) startServices() {
+	for _, m := range a.listModules() {
+		if name, _ := m["name"].(string); m["error"] == nil {
+			a.startService(name)
+		}
+	}
+}
+
+func (a *agent) startService(name string) {
+	m, err := a.installedModule(name)
+	if err != nil || m.Service == "" {
+		return
+	}
+	a.modules.mu.Lock()
+	defer a.modules.mu.Unlock()
+	if a.modules.ctx == nil || a.modules.services[name] != nil {
+		return // host not started, or already running
+	}
+	if a.modules.services == nil {
+		a.modules.services = map[string]*moduleService{}
+	}
+	ctx, cancel := context.WithCancel(a.modules.ctx)
+	s := &moduleService{cancel: cancel, done: make(chan struct{})}
+	a.modules.services[name] = s
+	go func() { defer close(s.done); a.superviseService(ctx, s, filepath.Join(a.modulesDir(), name), m) }()
+}
+
+func (a *agent) stopService(name string) {
+	a.modules.mu.Lock()
+	s := a.modules.services[name]
+	delete(a.modules.services, name)
+	a.modules.mu.Unlock()
+	if s != nil {
+		s.cancel()
+		<-s.done
+	}
+}
+
+func (a *agent) stopServices() {
+	a.modules.mu.Lock()
+	var names []string
+	for name := range a.modules.services {
+		names = append(names, name)
+	}
+	a.modules.mu.Unlock()
+	for _, name := range names {
+		a.stopService(name)
+	}
+}
+
+func (a *agent) serviceRunning(name string) bool {
+	a.modules.mu.Lock()
+	defer a.modules.mu.Unlock()
+	s := a.modules.services[name]
+	return s != nil && s.running.Load()
+}
+
+func (a *agent) superviseService(ctx context.Context, s *moduleService, dir string, m *manifest) {
+	delay := time.Second
+	for ctx.Err() == nil {
+		started := time.Now()
+		a.runService(ctx, s, dir, m)
+		if time.Since(started) > time.Minute {
+			delay = time.Second
+		} else if delay < time.Minute {
+			delay *= 2
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(delay):
+		}
+	}
+}
+
+func (a *agent) runService(ctx context.Context, s *moduleService, dir string, m *manifest) {
+	env, err := a.moduleEnv(dir, m)
+	if err != nil {
+		return
+	}
+	logPath := filepath.Join(a.moduleDataDir(m.Name), "service.log")
+	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	if st, err := os.Stat(logPath); err == nil && st.Size() > 256<<10 {
+		flags |= os.O_TRUNC
+	}
+	logFile, err := os.OpenFile(logPath, flags, 0600)
+	if err != nil {
+		return
+	}
+	defer logFile.Close()
+	// Pdeathsig is tied to the thread that started the child: keep it while the service runs.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	cmd := exec.CommandContext(ctx, filepath.Join(dir, filepath.FromSlash(m.Service)), "run")
+	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = dir, env, logFile, logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM} // no orphan if the agent is killed
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 5 * time.Second
+	if cmd.Start() != nil {
+		return
+	}
+	s.running.Store(true)
+	_ = cmd.Wait()
+	s.running.Store(false)
 }

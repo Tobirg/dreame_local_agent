@@ -42,12 +42,15 @@
 
 Пакет распаковывается в `/data/dreame-local/modules/<name>/`. Содержимое:
 
-- `manifest.json` — `name` (`a-z0-9_-`), `version`, `title`, необязательные `description`, `handler`, `panel`, `read_actions`, `firmware_messages`;
-- `handler` — исполняемый файл (shell-скрипт или бинарник). Агент запускает `handler <действие>`: параметры JSON приходят в stdin, скалярные — ещё и в переменных `P_<ключ>`; ответ — JSON в stdout, ошибка — ненулевой код и `{"error": "..."}`. Окружение: `DREAME_MODULE_DIR`, `DREAME_API`, `DREAME_MODULE_TOKEN`. Действия жизненного цикла: `check` (до установки, отказ отменяет её), `install` (после копирования, при ошибке возвращается прежняя версия), `uninstall` (перед удалением). Остальные действия вызываются как `POST /api/v1/m/<name>/<действие>`; без `allow_control` доступны только `read_actions`;
+- `manifest.json` — `name` (`a-z0-9_-`), `version`, `title`, необязательные `description`, `handler`, `panel`, `read_actions`, `firmware_messages`, `control`, `service`;
+- `handler` — исполняемый файл (shell-скрипт или бинарник). Агент запускает `handler <действие>`: параметры JSON приходят в stdin, скалярные — ещё и в переменных `P_<ключ>`; ответ — JSON в stdout, ошибка — ненулевой код и `{"error": "..."}`. Окружение: `DREAME_MODULE_DIR` (папка модуля, при обновлении заменяется целиком), `DREAME_MODULE_DATA` (`/data/dreame-local/module-data/<name>`: сохраняется при обновлении, удаляется вместе с модулем), `DREAME_API`, `DREAME_MODULE_TOKEN`. Действия жизненного цикла: `check` (до установки, отказ отменяет её), `install` (после копирования, при ошибке возвращается прежняя версия; при обновлении `DREAME_MODULE_PREVIOUS` указывает на папку прежней версии), `uninstall` (перед удалением). Остальные действия вызываются как `POST /api/v1/m/<name>/<действие>`; без `allow_control` доступны только `read_actions`;
 - `panel` — ES-модуль `export default function mount(element, ctx)`: `ctx.read/ctx.call(действие, параметры)`, `ctx.rpc(метод, параметры)`, `ctx.onState(fn)`, `ctx.toast(текст, ошибка)`;
+- `service` — исполняемый файл, который агент держит запущенным как `<service> run` с тем же окружением: перезапускает при сбое (пауза от 2 с до 1 мин), останавливает (SIGTERM) при обновлении, удалении модуля и остановке агента. Вывод — в `service.log` в папке данных;
 - `boot-env.sh` — подключается из хука загрузки робота до старта `ava` (например, чтобы предзагрузить библиотеку). Не должен завершать оболочку; действует после перезагрузки.
 
-Токен модуля (`DREAME_MODULE_TOKEN`) даёт только `GET /api/v1/state`, `capabilities`, `events` и `POST /api/v1/firmware_message` — `avacmd msg_cvt` с `cmd` из `firmware_messages` манифеста и не более 7 скалярными полями. Ответа прошивки у этих сообщений нет: результат — «отправлено», а не «применено».
+Токен модуля (`DREAME_MODULE_TOKEN`) выводится из основного токена: он не меняется при перезапуске агента и перестаёт действовать при удалении модуля или смене основного токена. Он даёт только `GET /api/v1/state`, `capabilities`, `events` и `POST /api/v1/firmware_message` — `avacmd msg_cvt` с `cmd` из `firmware_messages` манифеста и не более 7 скалярными полями. Ответа прошивки у этих сообщений нет: результат — «отправлено», а не «применено». С `"control": true` токен модуля может ещё и отправлять `POST /api/v1/command`; это показывается при проверке пакета.
+
+Отдельные модули: [региональная защита](../dreame-module-region), [MQTT и Home Assistant](../dreame-module-mqtt) — каждый в своём репозитории.
 
 API: `GET /api/v1/modules`, `POST /api/v1/modules/stage` (тело — пакет), `POST /api/v1/modules/install` (`{"id"}`), `POST /api/v1/modules/remove` (`{"name"}`).
 
