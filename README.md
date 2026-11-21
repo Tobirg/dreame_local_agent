@@ -22,7 +22,19 @@
 - `GET /api/v1/capabilities` — модель и прошивка, совпадение прошивки с проверенным профилем (`firmware.verified`), аппаратная таблица модели из самой прошивки (`/ava/conf/dconf_runtime.json`), читаемые свойства и доступность команд.
 - `POST /api/v1/command` — `{"name": "start|pause|stop|dock|locate|mapping|empty|wash_mop|dry_start|dry_stop"}`, `{"name": "set_suction|set_volume", "value": N}`, `{"name": "clean_rooms", "rooms": [ids], "repeats": 1..3, "suction": 0..3, "water": 1..3}`. Те же правила, что у `/rpc`: нужен `allow_control`, поддерживается `X-Dreame-Request-ID`, ненулевой код робота возвращается ошибкой. Команда блокируется, только если аппаратная таблица явно говорит, что узла нет.
 
+- `GET /api/v1/events` — тот же снимок потоком Server-Sent Events: сразу текущий, затем при каждом изменении (`id: <seq>`, `event: state`, `data: <снимок>`), комментарий-пинг раз в 20 с. Не больше 8 потоков одновременно.
+
 `/rpc` остаётся без изменений для веб-интерфейса и отладки.
+
+### Токены с правами
+
+Основной `token` из конфигурации даёт полный доступ. Для умного дома и других устройств создай отдельный токен в веб-интерфейсе («Доступ») или через `POST /api/v1/system/tokens` `{"name": "ha", "scope": "read|control"}`. Токен показывается один раз; в конфигурации хранится только его SHA-256. Список — `GET /api/v1/system/tokens`, отзыв — `DELETE /api/v1/system/tokens/<name>`; управлять токенами может только основной токен.
+
+| Права | Доступно |
+|---|---|
+| `read` | `GET state`, `capabilities`, `events`; чтение через `/rpc` (свойства, карта, статус сети) |
+| `control` | то же и `POST /api/v1/command` |
+| основной токен | всё, включая модули, обновление агента, настройки, Wi-Fi, перезагрузку и запись через `/rpc` |
 
 ## Модули
 
@@ -35,7 +47,7 @@
 - `panel` — ES-модуль `export default function mount(element, ctx)`: `ctx.read/ctx.call(действие, параметры)`, `ctx.rpc(метод, параметры)`, `ctx.onState(fn)`, `ctx.toast(текст, ошибка)`;
 - `boot-env.sh` — подключается из хука загрузки робота до старта `ava` (например, чтобы предзагрузить библиотеку). Не должен завершать оболочку; действует после перезагрузки.
 
-Токен модуля (`DREAME_MODULE_TOKEN`) даёт только `GET /api/v1/state`, `GET /api/v1/capabilities` и `POST /api/v1/firmware_message` — `avacmd msg_cvt` с `cmd` из `firmware_messages` манифеста и не более 7 скалярными полями. Ответа прошивки у этих сообщений нет: результат — «отправлено», а не «применено».
+Токен модуля (`DREAME_MODULE_TOKEN`) даёт только `GET /api/v1/state`, `capabilities`, `events` и `POST /api/v1/firmware_message` — `avacmd msg_cvt` с `cmd` из `firmware_messages` манифеста и не более 7 скалярными полями. Ответа прошивки у этих сообщений нет: результат — «отправлено», а не «применено».
 
 API: `GET /api/v1/modules`, `POST /api/v1/modules/stage` (тело — пакет), `POST /api/v1/modules/install` (`{"id"}`), `POST /api/v1/modules/remove` (`{"name"}`).
 

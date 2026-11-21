@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -76,6 +77,8 @@ type device struct {
 	poke     chan struct{}
 	hashOnce sync.Once
 	hashes   map[string]string
+	changed  chan struct{} // closed on the next snapshot change; see watch
+	streams  atomic.Int32
 }
 
 func int64Of(v any) (int64, bool) {
@@ -103,14 +106,14 @@ func (a *agent) poll(ctx context.Context) {
 	if err != nil {
 		// Keep the last known state but mark it stale: missing data is not "unchanged".
 		if !a.dev.snap.Stale || a.dev.snap.Error != err.Error() {
-			a.dev.snap.Seq++
+			a.bumpLocked()
 		}
 		a.dev.snap.Stale, a.dev.snap.Error = true, err.Error()
 		return
 	}
 	now := time.Now().UTC()
 	if a.dev.snap.Stale || !reflect.DeepEqual(a.dev.snap.State, state) {
-		a.dev.snap.Seq++
+		a.bumpLocked()
 	}
 	a.dev.snap = snapshot{Seq: a.dev.snap.Seq, UpdatedAt: &now, State: state}
 	a.dev.polled = true

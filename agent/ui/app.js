@@ -115,6 +115,28 @@ $('stage-update').onclick=async()=>{
 $('apply-update').onclick=()=>{if(!stagedUpdate)return;$('update-review').hidden=true;$('update-file').value='';stagedUpdate=null;runUpdate('staged','Обновление начато.');};
 $('cancel-update').onclick=()=>{stagedUpdate=null;$('update-review').hidden=true;$('update-result').textContent='';};
 $('rollback-update').onclick=()=>{if(window.confirm($('rollback-update').textContent+'?'))runUpdate('previous','Возврат начат.');};
+// ---- Scoped tokens: only the main token manages them; the new token is shown once.
+const scopeNames={read:'чтение',control:'управление'};
+async function loadTokens(){
+ const list=await api('/api/v1/system/tokens');$('token-list').replaceChildren();
+ for(const t of list){
+  const row=document.createElement('div'),label=document.createElement('span'),remove=document.createElement('button');
+  row.className='module-row';label.textContent=t.name+' · '+(scopeNames[t.scope]||t.scope)+' · создан '+new Date(t.created).toLocaleDateString();
+  remove.textContent='Отозвать';remove.className='ghost';
+  remove.onclick=async()=>{if(!window.confirm('Отозвать токен '+t.name+'? Устройства с ним потеряют доступ.'))return;
+   try{const response=await fetch('/api/v1/system/tokens/'+encodeURIComponent(t.name),{method:'DELETE',headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'});
+    const body=await response.json();if(!response.ok)throw Error(body.error||'Ошибка HTTP '+response.status);$('token-result').textContent='Токен '+t.name+' отозван.';await loadTokens();}catch(e){toast(e.message,true);}};
+  row.append(label,remove);$('token-list').append(row);
+ }
+ if(!list.length)$('token-list').textContent='Дополнительных токенов нет.';
+}
+$('create-token').onclick=async()=>{
+ try{const t=await api('/api/v1/system/tokens',{name:$('token-name').value.trim(),scope:$('token-scope').value});
+  $('token-result').textContent='Токен '+t.name+' ('+scopeNames[t.scope]+'). Скопируй сейчас, позже его не показать: '+t.token;$('token-name').value='';$('token-add').open=false;await loadTokens();}
+ catch(e){$('token-result').textContent=e.message;}
+};
+// Panels that need the main token are hidden for a read/control token.
+const mainTokenOnly=(panel,load)=>load().then(()=>{$(panel).hidden=false;}).catch(e=>{if(e.status===403)$(panel).hidden=true;else toast(e.message,true);});
 // ---- Modules: installed packages (GET /api/v1/modules) may add their own panel, mounted as mount(element, ctx).
 const stateListeners=[],mountedPanels=new Map();let stagedModule=null;
 function dropListeners(name){for(let i=stateListeners.length-1;i>=0;i--)if(stateListeners[i].name===name)stateListeners.splice(i,1);}
@@ -193,6 +215,11 @@ async function refresh(){
   // The agent polls the robot; this reads its cached snapshot.
   const snap=await api('/api/v1/state');
   if(epoch!==viewEpoch||!token)return;
+  renderState(snap);
+  const wifi=await api('local.wifi_status');if(epoch!==viewEpoch||!token)return;renderNetwork(wifi);
+ }catch(e){if(!e.suspended&&epoch===viewEpoch){connectionLost(e.message);}}finally{if(epoch===viewEpoch)refreshing=false;}
+}
+function renderState(snap){
   if(!snap?.state||typeof snap.state!=='object')throw Error('Некорректный ответ статуса');
   if(snap.stale&&!snap.updated_at)throw Error(snap.error||'Агент ещё не прочитал состояние робота');
   const s=snap.state;
@@ -203,12 +230,33 @@ async function refresh(){
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
   if(!roomOptionsDirty){if(Number.isInteger(s.suction))$('room-fan').value=s.suction;if(Number.isInteger(s.water)&&s.water>=1&&s.water<=3)$('room-water').value=s.water;}
   $('station').textContent=s.station===undefined?'Состояние станции недоступно':'Состояние станции: '+(stationNames[s.station]||s.station);
-  const wifi=await api('local.wifi_status');if(epoch!==viewEpoch||!token)return;renderNetwork(wifi);
   $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—');
   for(const listener of stateListeners)try{listener.fn(s);}catch{}
   if(snap.stale){connectionLost(snap.error||'Нет свежих данных от робота');return;}
   $('connection').textContent='Подключён';$('connection').classList.remove('connection-offline');$('reconnect').hidden=true;
- }catch(e){if(!e.suspended&&epoch===viewEpoch){connectionLost(e.message);}}finally{if(epoch===viewEpoch)refreshing=false;}
+}
+// Live state: the agent pushes every change on /api/v1/events (Server-Sent Events read with fetch, so the token stays in a header).
+let events=null;
+function stopEvents(){events?.abort('suspend');events=null;}
+async function streamEvents(){
+ stopEvents();const controller=new AbortController();events=controller;
+ while(events===controller&&token&&!document.hidden){
+  try{
+   const response=await fetch('/api/v1/events',{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store',signal:controller.signal});
+   if(!response.ok||!response.body)throw Error('Ошибка HTTP '+response.status);
+   const reader=response.body.pipeThrough(new TextDecoderStream()).getReader();let buffer='';
+   for(;;){
+    const {value,done}=await reader.read();if(done)break;buffer+=value;
+    let end;while((end=buffer.indexOf('\n\n'))>=0){
+     const block=buffer.slice(0,end);buffer=buffer.slice(end+2);
+     const data=block.split('\n').filter(l=>l.startsWith('data: ')).map(l=>l.slice(6)).join('\n');
+     if(data&&!busy)try{renderState(JSON.parse(data));}catch(e){connectionLost(e.message);}
+    }
+   }
+  }catch(e){if(controller.signal.aborted)return;}
+  if(events!==controller)return;
+  connectionLost('Поток событий прервался');await new Promise(resolve=>setTimeout(resolve,3000));
+ }
 }
 function invalidateEdit(){pending=null;$('map-preview').textContent='';$('apply-map-edit').disabled=true;}
 function selectRoom(id){
@@ -269,10 +317,10 @@ async function login(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('dashboard').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();await loadModules().catch(e=>toast(e.message,true));await loadUpdate().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),5000);
+ await refresh();await refreshMap();await mainTokenOnly('modules-panel',loadModules);await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
-$('logout').onclick=()=>{viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
+$('logout').onclick=()=>{stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
 for(const button of document.querySelectorAll('[data-command]'))button.onclick=async()=>{
  // data-command values are the agent's command names.
  try{if(button.dataset.command==='reboot')await rebootRobot();else await command(button.dataset.command);}catch{}
@@ -441,12 +489,12 @@ async function rebootRobot(){
  try{const result=await api('local.reboot');if(!result.accepted)throw Error('Запрос перезагрузки не принят');rebootingUntil=Date.now()+90000;connectionLost('Робот перезагружается');toast('Перезагрузка запрошена. Дождись восстановления связи.');}
  catch(e){toast(e.message,true);}finally{busy=false;disableControls(false);}
 }
-function suspendReads(reason='suspend'){viewEpoch++;refreshing=false;settingsLoading=false;for(const controller of activeReads)controller.abort(reason);}
+function suspendReads(reason='suspend'){stopEvents();viewEpoch++;refreshing=false;settingsLoading=false;for(const controller of activeReads)controller.abort(reason);}
 function scheduleResume(){clearTimeout(resumeTimer);resumeTimer=setTimeout(async()=>{
  if(document.hidden||!token)return;if(busy){scheduleResume();return;}
  suspendReads();
  if($('dashboard').hidden){try{await login();}catch(e){if(!e.suspended)connectionLost(e.message);}return;}
- await refresh();await refreshMap();if($('settings-details').open)await refreshSettings();
+ await refresh();streamEvents();await refreshMap();if($('settings-details').open)await refreshSettings();
  },250);}
 $('reconnect').onclick=scheduleResume;
 document.addEventListener('visibilitychange',()=>{if(document.hidden)suspendReads();else scheduleResume();});

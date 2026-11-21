@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -27,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.8.0"
+var version = "0.9.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -35,13 +34,14 @@ var webAssets embed.FS
 const maxMap = 8 << 20
 
 type config struct {
-	Bind          string `json:"bind"`
-	Port          int    `json:"port"`
-	Token         string `json:"token"`
-	ExpectedModel string `json:"expected_model"`
-	ExpectedDID   string `json:"expected_did"`
-	ExpectedMAC   string `json:"expected_mac"`
-	AllowControl  bool   `json:"allow_control"`
+	Bind          string     `json:"bind"`
+	Port          int        `json:"port"`
+	Token         string     `json:"token"`
+	ExpectedModel string     `json:"expected_model"`
+	ExpectedDID   string     `json:"expected_did"`
+	ExpectedMAC   string     `json:"expected_mac"`
+	AllowControl  bool       `json:"allow_control"`
+	Tokens        []apiToken `json:"tokens,omitempty"`
 }
 type request struct {
 	Method string          `json:"method"`
@@ -60,7 +60,8 @@ type agent struct {
 	modules    moduleHost
 	configPath string // absolute; the update helper is started with it
 	cfg        config
-	root       string // Only set by tests; runtime always uses the actual root filesystem.
+	tokensMu   sync.RWMutex // guards cfg.Tokens
+	root       string       // Only set by tests; runtime always uses the actual root filesystem.
 	avacmd     string
 	gate       chan struct{}
 	next       atomic.Int64
@@ -419,37 +420,44 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	send := func(code int, v any) { w.WriteHeader(code); _ = json.NewEncoder(w).Encode(v) }
-	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+a.cfg.Token)) != 1 {
-		module := a.moduleForToken(r.Header.Get("Authorization"))
-		if module == "" {
+	scope, module := a.scopeOf(r.Header.Get("Authorization")), ""
+	if scope == "" {
+		if module = a.moduleForToken(r.Header.Get("Authorization")); module == "" {
 			send(401, map[string]string{"error": "unauthorized"})
 			return
 		}
-		// A module's own token may read state and send the firmware messages its manifest declares, nothing else.
-		switch {
-		case r.URL.Path == "/api/v1/firmware_message" && r.Method == "POST":
-			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
-			if err != nil {
-				send(400, map[string]string{"error": "invalid firmware message"})
-				return
-			}
-			result, err := a.firmwareMessage(r.Context(), module, body)
-			if err != nil {
-				send(502, rpcErrorResponse(err))
-				return
-			}
-			send(200, map[string]any{"result": result})
-			return
-		case r.Method == "GET" && (r.URL.Path == "/api/v1/state" || r.URL.Path == "/api/v1/capabilities"):
-		default:
-			send(403, map[string]string{"error": "module token cannot use this endpoint"})
+		scope = "module"
+	}
+	if scope != "admin" && !limitedRoute(scope, r) {
+		send(403, map[string]string{"error": scope + " token cannot use this endpoint"})
+		return
+	}
+	if module != "" && r.URL.Path == "/api/v1/firmware_message" {
+		// A module's own token may also send the firmware messages its manifest declares.
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+		if err != nil {
+			send(400, map[string]string{"error": "invalid firmware message"})
 			return
 		}
+		result, err := a.firmwareMessage(r.Context(), module, body)
+		if err != nil {
+			send(502, rpcErrorResponse(err))
+			return
+		}
+		send(200, map[string]any{"result": result})
+		return
 	}
-	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) {
+	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.tokenRoutes(w, r, send) {
 		return
 	}
 	switch r.URL.Path {
+	case "/api/v1/events":
+		if r.Method != "GET" {
+			send(405, map[string]string{"error": "GET required"})
+			return
+		}
+		a.serveEvents(w, r, send)
+		return
 	case "/api/v1/state", "/api/v1/capabilities":
 		if r.Method != "GET" {
 			send(405, map[string]string{"error": "GET required"})
@@ -498,6 +506,10 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 			send(400, map[string]string{"error": "trailing JSON data"})
 			return
 		}
+	}
+	if r.URL.Path == "/rpc" && (scope == "read" || scope == "control") && !requestIsRead(req) {
+		send(403, map[string]string{"error": scope + " token can only read through /rpc"})
+		return
 	}
 	if id := r.Header.Get("X-Dreame-Request-ID"); id != "" && !requestIsRead(req) {
 		status, body := a.memoCall(r.Context(), req, id)

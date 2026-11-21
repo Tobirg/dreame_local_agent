@@ -11,6 +11,9 @@ const capabilities={identity:{model:'dreame.vacuum.r2505',fw_ver:'4.3.9_2021'},f
 let passable=[[-700,-700,-400,-700]],impassable=[[100,-700,100,-400]];
 const grid=Buffer.alloc(40*30);
 for(let y=2;y<28;y++)for(let x=2;x<38;x++)grid[y*40+x]=(x===2||x===37||y===2||y===27)?255:x<20?1:2;
+let tokens=[];const eventClients=new Set();
+const snapshot=()=>{const v=k=>values[k],state={status:v('4/1'),error:v('2/2'),battery:v('3/1'),charging:1,suction:v('4/4'),water:v('4/5'),station:v('4/25'),volume:v('7/1'),region:regionCode===200?'matched':'mismatched',region_code:regionCode};return {seq:1,updated_at:new Date().toISOString(),stale:staleState,error:staleState?'avacmd timed out':undefined,state};};
+const pushEvent=()=>{for(const c of eventClients)c.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');};
 const server=http.createServer((req,res)=>{
  if(req.method==='GET'&&req.url.startsWith('/m/demo/panel.js')){
   res.setHeader('Content-Type','text/javascript; charset=utf-8');
@@ -19,12 +22,13 @@ const server=http.createServer((req,res)=>{
  if(req.method==='GET'&&req.url.startsWith('/api/v1/')){
   res.setHeader('Content-Type','application/json');
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
+  if(req.url==='/api/v1/events'){res.setHeader('Content-Type','text/event-stream');res.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');eventClients.add(res);req.on('close',()=>eventClients.delete(res));return;}
+  if(req.url==='/api/v1/system/tokens'){res.end(JSON.stringify({result:tokens.map(({name,scope,created})=>({name,scope,created}))}));return;}
   if(req.url==='/api/v1/modules'){res.end(JSON.stringify({result:installedModules}));return;}
   if(req.url==='/api/v1/system/update'){res.end(JSON.stringify({result:{current:'0.7.0',staged:null,previous:updatePrevious,last:updateLast,applying:false}}));return;}
   if(req.url==='/api/v1/state'){
    if(dropNextRead){dropNextRead=false;res.destroy();return;}
-   const v=k=>values[k],state={status:v('4/1'),error:v('2/2'),battery:v('3/1'),charging:1,suction:v('4/4'),water:v('4/5'),station:v('4/25'),volume:v('7/1'),region:regionCode===200?'matched':'mismatched',region_code:regionCode};
-   res.end(JSON.stringify({result:{seq:1,updated_at:new Date().toISOString(),stale:staleState,error:staleState?'avacmd timed out':undefined,state}}));return;
+   res.end(JSON.stringify({result:snapshot()}));return;
   }
   res.end(JSON.stringify({result:capabilities}));return;
  }
@@ -39,6 +43,8 @@ const server=http.createServer((req,res)=>{
  let body='';req.on('data',b=>body+=b);req.on('end',()=>{
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   const json=v=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result:v}));};
+  if(req.url==='/api/v1/system/tokens'){const t=JSON.parse(body);tokens.push({...t,created:'2026-11-22T10:00:00Z'});json({...t,created:'2026-11-22T10:00:00Z',token:'f'.repeat(64)});return;}
+  if(req.method==='DELETE'&&req.url.startsWith('/api/v1/system/tokens/')){tokens=tokens.filter(t=>t.name!==decodeURIComponent(req.url.split('/').pop()));json({revoked:true});return;}
   if(req.url==='/api/v1/system/update/stage'){stagedAgent=body;json({version:'0.8.0',current:'0.7.0',sha256:'b'.repeat(64),size:4096});return;}
   if(req.url==='/api/v1/system/update/apply'){commands.push({method:req.url,params:JSON.parse(body)});updatePrevious='0.6.0';updateLast={id:'u1',status:'rolled_back',from:'0.7.0',to:'0.8.0',error:'new agent did not come up: no answer'};json({applying:true,id:'u1'});return;}
   if(req.url==='/api/v1/modules/stage'){stagedUpload=body;json({id:'0123456789abcdef',sha256:'a'.repeat(64),size:body.length,manifest:{name:'demo',version:'1.0.0',title:'Демо',firmware_messages:['device_lock']},files:['boot-env.sh','handler','manifest.json','panel.js'],boot_hook:true,installed_version:null});return;}
@@ -73,6 +79,12 @@ const server=http.createServer((req,res)=>{
   await page.goto(url);assert(await page.locator('#login').isVisible());
   await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});await page.getByRole('button',{name:'Кухня · 1',exact:true}).waitFor();
   assert.equal(await page.locator('#battery').innerText(),'95%');
+  values['3/1']=61;pushEvent();await page.waitForFunction(()=>document.querySelector('#battery').textContent==='61%');values['3/1']=95;pushEvent();await page.waitForFunction(()=>document.querySelector('#battery').textContent==='95%');
+  assert.match(await page.locator('#token-list').innerText(),/Дополнительных токенов нет/);
+  await page.locator('#token-add summary').click();await page.locator('#token-name').fill('ha');await page.locator('#create-token').click();
+  await page.waitForFunction(()=>document.querySelector('#token-result').textContent.includes('f'.repeat(64)));assert.deepEqual(tokens.map(t=>[t.name,t.scope]),[['ha','control']]);
+  assert.match(await page.locator('#token-list').innerText(),/ha · управление/);
+  page.once('dialog',d=>d.accept());await page.locator('#token-list button').click();await page.waitForFunction(()=>document.querySelector('#token-list').textContent.includes('нет'));assert.equal(tokens.length,0);
   const xy=await page.evaluate(async()=>{const m=await import('/app.js');return m.pixelToRobot({origin:[-1000,-1000],grid_size:50},4,8);});assert.deepEqual(xy,[-800,-600]);
   await page.locator('[data-command=start]').click();await page.waitForFunction(()=>!document.querySelector('[data-command=start]').disabled);assert.deepEqual(commands.at(-1),{method:'/api/v1/command',params:{name:'start'}});
   assert(await page.locator('[data-command=dry_start]').isHidden());assert(await page.locator('[data-command=empty]').isVisible());assert.match(await page.locator('#model').innerText(),/r2505 · 4\.3\.9_2021$/);
