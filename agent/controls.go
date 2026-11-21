@@ -4,11 +4,83 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
 	"reflect"
 	"strings"
 	"time"
 )
+
+type mapReplyError struct {
+	reason  string
+	outcome string
+	reply   json.RawMessage
+}
+
+func (e *mapReplyError) Error() string { return e.reason }
+
+func rpcErrorResponse(err error) map[string]any {
+	body := map[string]any{"error": err.Error()}
+	var operation *mapReplyError
+	if errors.As(err, &operation) {
+		body["result"] = operation.reply
+		body["outcome"] = operation.outcome
+	}
+	return body
+}
+
+func isMapEditAction(method string, params any) bool {
+	p, ok := params.(map[string]any)
+	return method == "action" && ok &&
+		(p["siid"] == json.Number("6") || p["siid"] == 6) &&
+		(p["aiid"] == json.Number("2") || p["aiid"] == 2)
+}
+
+// The map handler has an operation result separate from the dispatch code.
+// Even a valid zero is acceptance only, never proof of physical completion.
+func validateMapReply(reply json.RawMessage) error {
+	fail := func(outcome, reason string) error {
+		return &mapReplyError{reason: reason, outcome: outcome, reply: reply}
+	}
+	var result struct {
+		Code *int64          `json:"code"`
+		SIID *int64          `json:"siid"`
+		AIID *int64          `json:"aiid"`
+		Out  json.RawMessage `json:"out"`
+	}
+	if json.Unmarshal(reply, &result) != nil || result.Code == nil ||
+		(result.SIID != nil && *result.SIID != 6) || (result.AIID != nil && *result.AIID != 2) {
+		return fail("indeterminate", "Map response is invalid; outcome unknown; not retried")
+	}
+	if *result.Code != 0 {
+		return fail("rejected", fmt.Sprintf("Map command rejected (code=%d)", *result.Code))
+	}
+	var rows []struct {
+		PIID  int64           `json:"piid"`
+		Value json.RawMessage `json:"value"`
+	}
+	if json.Unmarshal(result.Out, &rows) != nil {
+		return fail("indeterminate", "Map operation result is invalid; outcome unknown; not retried")
+	}
+	var opRet *int64
+	for _, row := range rows {
+		if row.PIID != 6 {
+			continue
+		}
+		var value *int64
+		if opRet != nil || json.Unmarshal(row.Value, &value) != nil || value == nil {
+			return fail("indeterminate", "Map operation result is ambiguous; outcome unknown; not retried")
+		}
+		opRet = value
+	}
+	if opRet == nil {
+		return fail("indeterminate", "Map operation result is missing; outcome unknown; not retried")
+	}
+	if *opRet != 0 {
+		return fail("rejected", fmt.Sprintf("Map operation rejected (op_ret=%d)", *opRet))
+	}
+	return nil
+}
 
 func (a *agent) queueReboot() (any, error) {
 	command := a.rebootCommand

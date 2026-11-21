@@ -118,8 +118,8 @@ func TestDisabledControlStillAllowsReads(t *testing.T) {
 	if _, e := a.call(context.Background(), request{Method: "get_properties", Params: json.RawMessage(`[{"siid":3,"piid":1}]`)}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := a.call(context.Background(), request{Method: "action", Params: json.RawMessage(`{"siid":6,"aiid":1,"in":[]}`)}); e != nil {
-		t.Fatal(e)
+	if _, e := a.call(context.Background(), request{Method: "action", Params: json.RawMessage(`{"siid":6,"aiid":1,"in":[]}`)}); e == nil {
+		t.Fatal("map action bypassed disabled control")
 	}
 	if _, e := a.call(context.Background(), request{Method: "action", Params: json.RawMessage(`{"siid":4,"aiid":1,"in":[]}`)}); e == nil {
 		t.Fatal("control enabled")

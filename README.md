@@ -52,10 +52,13 @@ python3 tools/install_agent.py --serial ROBOT_IP:4567 --config bridge/config.jso
 
 ## Тесты
 
+Контракт ошибок операций карты и разрешения для map request описаны в [docs/map-results.md](docs/map-results.md). Для карты одного внешнего code0 недостаточно: проверяется отдельный operation result, а неизвестный исход не повторяется автоматически.
+
 ```sh
 cd agent && go test ./... && go vet ./...
 cd .. && python3 -m unittest discover -s tests -p 'test_region_guard.py' -v
 # Дополнительные UI-тесты используют Playwright:
+node tests/test_command_results.cjs
 node tests/test_web_ui.cjs
 ```
 

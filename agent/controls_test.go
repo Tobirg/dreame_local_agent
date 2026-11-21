@@ -36,6 +36,11 @@ func TestThresholdActionPreservesRampsCliffsAndFutureFields(t *testing.T) {
 	a := testAgent(t)
 	view := thresholdFixture(t, a)
 	input, _ := json.Marshal(map[string]any{"map_id": 2, "revision": view.Revision, "passable": [][]int{}, "impassable": [][]int{{-80, -180, -50, -150}}})
+	marker := a.path("/map-request.json")
+	script := "#!/usr/bin/env python3\nimport json,sys\nr=json.loads(sys.argv[1][7:])\nopen(" + quotePython(marker) + ",'w').write(json.dumps(r['params']))\nprint(json.dumps({'id':r['id'],'result':{'siid':6,'aiid':2,'code':0,'out':[{'piid':6,'value':0}]}}))\n"
+	if err := os.WriteFile(a.avacmd, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
 	result, err := a.call(context.Background(), request{Method: "local.thresholds", Params: input})
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +54,11 @@ func TestThresholdActionPreservesRampsCliffsAndFutureFields(t *testing.T) {
 			Value string `json:"value"`
 		} `json:"in"`
 	}
-	if json.Unmarshal(result.(json.RawMessage), &action) != nil || action.DID != "12345678" || action.SIID != 6 || action.AIID != 2 || len(action.Input) != 1 || action.Input[0].PIID != 4 {
+	captured, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Unmarshal(captured, &action) != nil || action.DID != "12345678" || action.SIID != 6 || action.AIID != 2 || len(action.Input) != 1 || action.Input[0].PIID != 4 {
 		t.Fatal(string(result.(json.RawMessage)))
 	}
 	var patch struct {

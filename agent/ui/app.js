@@ -39,13 +39,19 @@ async function api(method,params=null){
  }
 }
 
-function assertCommand(result){
+export function assertCommand(result,method,params){
  const rows=Array.isArray(result)?result:[result];
  if(!rows.length||rows.some(r=>!r||r.code!==0))throw Error('Робот отклонил команду: '+JSON.stringify(result));
+ if(method==='local.thresholds'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
+  if(Array.isArray(result)||!Array.isArray(result.out))throw Error('Map operation result is missing; outcome unknown.');
+  const operation=result.out.filter(row=>row&&row.piid===6);
+  if(operation.length!==1||!Number.isSafeInteger(operation[0].value))throw Error('Map operation result is invalid; outcome unknown.');
+  if(operation[0].value!==0)throw Error('Map operation rejected (op_ret='+operation[0].value+')');
+ }
 }
 async function control(method,params,before=null){
  if(busy)return;busy=true;disableControls(true);
- try{if(before)await before();const result=await api(method,params);assertCommand(result);toast('Команда принята роботом');setTimeout(()=>refresh(),900);return result;}
+ try{if(before)await before();const result=await api(method,params);assertCommand(result,method,params);toast('Команда принята роботом');setTimeout(()=>refresh(),900);return result;}
  catch(e){toast(e.message,true);throw e;}
  finally{busy=false;disableControls(false);}
 }

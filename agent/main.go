@@ -193,11 +193,8 @@ func validate(method string, params any) ([]map[string]any, bool, error) {
 			}
 		}
 	}
-	readOnly := method == "get_properties"
-	if method == "action" {
-		readOnly = items[0]["siid"] == json.Number("6") && items[0]["aiid"] == json.Number("1")
-	}
-	return items, readOnly, nil
+	// Even a map request can publish work; no action is a blanket read.
+	return items, method == "get_properties", nil
 }
 func parseReply(output []byte, id int64) (json.RawMessage, error) {
 	for pos, c := range output {
@@ -387,7 +384,16 @@ func (a *agent) miot(ctx context.Context, method string, params any) (any, error
 	if err != nil {
 		return nil, err
 	}
-	return parseReply(out, id)
+	result, err := parseReply(out, id)
+	if err != nil {
+		return nil, err
+	}
+	if isMapEditAction(method, params) {
+		if err := validateMapReply(result); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 func (a *agent) runAvacmd(ctx context.Context, args ...string) ([]byte, error) {
@@ -481,7 +487,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.call(r.Context(), req)
 	if err != nil {
-		send(502, map[string]string{"error": err.Error()})
+		send(502, rpcErrorResponse(err))
 		return
 	}
 	send(200, map[string]any{"result": result})

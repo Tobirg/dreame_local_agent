@@ -33,10 +33,10 @@ const server=http.createServer((req,res)=>{
   else if(q.method==='local.region_guard'){commands.push(q);guardEnabled=q.params.enabled;result={enabled:guardEnabled,hook_loaded:true};}
   else if(q.method==='local.wifi_setup'){commands.push(q);result={accepted:true,state:'connecting',ap_will_disconnect:true};}
   else if(q.method==='local.setting'){commands.push(q);if(JSON.stringify(q.params.expected)!==JSON.stringify(values[q.params.siid+'/'+q.params.piid])){res.writeHead(502);res.end(JSON.stringify({error:'setting changed'}));return;}values[q.params.siid+'/'+q.params.piid]=q.params.value;result=[{code:0}];}
-  else if(q.method==='local.thresholds'){commands.push(q);if(q.params.revision!==revision){res.writeHead(502);res.end(JSON.stringify({error:'map changed'}));return;}passable=q.params.passable;impassable=q.params.impassable;revision='edited-'+revision;result={code:0};}
+  else if(q.method==='local.thresholds'){commands.push(q);if(q.params.revision!==revision){res.writeHead(502);res.end(JSON.stringify({error:'map changed'}));return;}passable=q.params.passable;impassable=q.params.impassable;revision='edited-'+revision;result={siid:6,aiid:2,code:0,out:[{piid:6,value:0}]};}
   else if(q.method==='local.reboot'){commands.push(q);result={accepted:true,rebooting:true};}
   else if(q.method==='local.map_view')result={empty:false,map_id:2,width:40,height:30,grid_size:50,origin:[-1000,-1000],pixels:grid.toString('base64'),rooms:[{id:1,name:'Кухня',x:10,y:15},{id:2,name:'Гостиная',x:28,y:15}],revision,source:'local_saved_file',live:false,thresholds_editable:true,passable_thresholds:passable,impassable_thresholds:impassable};
-  else{commands.push(q);result=q.method==='set_properties'?q.params.map(p=>({...p,code:0})):{code:0,out:[]};if(dropNextMutation){dropNextMutation=false;if(requestID)commandReplies.set(requestID,JSON.stringify({result}));res.destroy();return;}}
+  else{commands.push(q);result=q.method==='set_properties'?q.params.map(p=>({...p,code:0})):{code:0,out:q.method==='action'&&q.params.siid===6&&q.params.aiid===2?[{piid:6,value:0}]:[]};if(dropNextMutation){dropNextMutation=false;if(requestID)commandReplies.set(requestID,JSON.stringify({result}));res.destroy();return;}}
   res.setHeader('Content-Type','application/json');if(requestID)commandReplies.set(requestID,JSON.stringify({result}));res.end(JSON.stringify({result}));
  });
 });

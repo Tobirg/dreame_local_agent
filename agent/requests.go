@@ -21,13 +21,6 @@ func requestIsRead(req request) bool {
 	if req.Method == "get_properties" || req.Method == "miIO.info" || req.Method == "local.maps" || req.Method == "local.map_view" || strings.HasSuffix(req.Method, "_status") {
 		return true
 	}
-	if req.Method == "action" {
-		params, err := decodeParams(req.Params)
-		if err == nil {
-			_, read, err := validate(req.Method, params)
-			return err == nil && read
-		}
-	}
 	return false
 }
 func (a *agent) memoCall(ctx context.Context, req request, id string) (int, []byte) {
@@ -86,7 +79,8 @@ func (a *agent) memoCall(ctx context.Context, req request, id string) (int, []by
 	a.memoMu.Unlock()
 	result, err := a.call(ctx, req)
 	if err != nil {
-		entry.status, entry.body = failure(502, err.Error())
+		entry.status = http.StatusBadGateway
+		entry.body, _ = json.Marshal(rpcErrorResponse(err))
 	} else {
 		entry.status = 200
 		entry.body, _ = json.Marshal(map[string]any{"result": result})
