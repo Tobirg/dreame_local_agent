@@ -25,7 +25,8 @@ type stateProp struct {
 	siid, piid int
 }
 
-// IDs as used by ui/app.js. charging (3/2) follows the Tasshack mapping and is unverified on r2505.
+// IDs as used by ui/app.js. Observed on r2505 4.3.9_2021: charging (3/2) 1 on dock, 2 off dock,
+// 5 returning; station (4/25) 0 idle, 1 mop wash/wetting, 2 drying, 5 seen during post-clean wash.
 var stateProps = []stateProp{
 	{"status", 4, 1}, {"error", 2, 2}, {"battery", 3, 1}, {"charging", 3, 2},
 	{"suction", 4, 4}, {"water", 4, 5}, {"station", 4, 25}, {"volume", 7, 1},
