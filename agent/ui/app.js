@@ -2,9 +2,11 @@ import {settings} from '/settings.js';
 const $=id=>document.getElementById(id);
 const captiveSetup=new URLSearchParams(location.search).get('setup')==='wifi';
 const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту'};
+// Station codes observed on r2505; other codes are shown as numbers.
+const stationNames={0:'ожидание',1:'мойка салфеток',2:'сушка'};
 const palette=['#7fd9c2','#a3bcec','#e5bd8a','#bcaceb','#a7d39a','#e3a5b4','#93cdd9','#d4d093'];
 let token=sessionStorage.getItem('dreame-token')||localStorage.getItem('dreame-token')||'';
-let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,properties=new Map(),toastTimer=null,fanDirty=false,volumeDirty=false,guardDirty=false;
+let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false,guardDirty=false;
 let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
 const activeReads=new Set(),settingsDirty=new Set();
 const canvas=$('map'),ctx=canvas.getContext('2d');
@@ -17,10 +19,11 @@ export function roomCommand(ids,fan,water,repeats=1){
  if(!ids.length||!ids.every(id=>Number.isInteger(id)&&id>0))throw Error('Выбери комнаты');
  if(!Number.isInteger(fan)||fan<0||fan>3||!Number.isInteger(water)||water<1||water>3)throw Error('Параметры уборки ещё не получены от робота');
  if(!Number.isInteger(repeats)||repeats<1||repeats>3)throw Error('Допустимо от 1 до 3 повторов');
- return {siid:4,aiid:1,in:[{piid:1,value:18},{piid:10,value:JSON.stringify({selects:ids.map(id=>[id,repeats,fan,water,1])})}]};
+ return {name:'clean_rooms',rooms:ids,repeats,suction:fan,water};
 }
+const command=(name,args={})=>control('/api/v1/command',{name,...args});
 function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
-function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.maps'||method.endsWith('_status');}
+function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
 async function api(method,params=null){
  const read=isRead(method),requestID=read?null:Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
@@ -28,7 +31,9 @@ async function api(method,params=null){
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort('timeout'),read?15000:40000);
   if(read)activeReads.add(controller);
   try{
-   const response=await fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,...(requestID?{'X-Dreame-Request-ID':requestID}:{})},body:JSON.stringify({method,params}),credentials:'omit',cache:'no-store',signal:controller.signal});
+   // "/api/v1/..." methods are agent paths (GET without params); everything else is a /rpc method.
+   const v1=method.startsWith('/api/v1/'),post=!v1||params!==null;
+   const response=await fetch(v1?method:'/rpc',{method:post?'POST':'GET',headers:{...(post?{'Content-Type':'application/json'}:{}),'Authorization':'Bearer '+token,...(requestID?{'X-Dreame-Request-ID':requestID}:{})},body:post?JSON.stringify(v1?params:{method,params}):undefined,credentials:'omit',cache:'no-store',signal:controller.signal});
    const body=await response.json();if(!response.ok){const error=Error(body.error||'Ошибка HTTP '+response.status);error.status=response.status;throw error;}return body.result;
   }catch(e){
    if(controller.signal.reason==='suspend'||controller.signal.reason==='logout'){const error=Error('Чтение приостановлено');error.suspended=true;throw error;}
@@ -63,9 +68,7 @@ function disableControls(disabled){
  $('delete-threshold').disabled=disabled||!$('threshold-choice').value||!view?.thresholds_editable;
  $('draw-threshold').disabled=disabled||!view?.thresholds_editable;
 }
-const action=(siid,aiid,input=[])=>control('action',{siid,aiid,in:input});
-function renderRegion(values){
- const region=values.get('4/19'),code=values.get('14/3');
+function renderRegion(region,code){
  const clear=region==='matched'&&code===200,locked=region==='mismatched'&&code===401;
  $('region-status').textContent=clear?'Блокировка снята':locked?'Региональная блокировка активна':'Статус не подтверждён';
  $('region-values').textContent='Регион: '+(region??'недоступен')+' · код: '+(code??'недоступен');
@@ -83,7 +86,7 @@ async function changeRegion(){
    const rows=await api('get_properties',[{siid:4,piid:19},{siid:14,piid:3}]);
    if(!Array.isArray(rows))throw Error('Некорректный ответ статуса');
    const values=new Map(rows.filter(r=>r.code===0&&'value'in r).map(r=>[r.siid+'/'+r.piid,r.value]));
-   renderRegion(values);
+   renderRegion(values.get('4/19'),values.get('14/3'));
    confirmed=values.get('14/3')===code&&values.get('4/19')===(code===200?'matched':'mismatched');
    if(confirmed)break;
   }
@@ -117,22 +120,23 @@ $('wifi-form').onsubmit=async e=>{
 async function refresh(){
  if(!token||refreshing||busy||document.hidden)return;refreshing=true;const epoch=viewEpoch;
  try{
-  const pairs=[[2,1],[2,2],[3,1],[4,1],[4,4],[4,5],[4,19],[14,3],[4,25],[7,1]];
-  const rows=await api('get_properties',pairs.map(([siid,piid])=>({siid,piid})));
+  // The agent polls the robot; this reads its cached snapshot.
+  const snap=await api('/api/v1/state');
   if(epoch!==viewEpoch||!token)return;
-  if(!Array.isArray(rows))throw Error('Некорректный ответ статуса');
-  properties=new Map(rows.filter(r=>r.code===0&&r.siid&&r.piid&&'value'in r).map(r=>[r.siid+'/'+r.piid,r.value]));
-  const value=k=>properties.get(k);
-  $('status').textContent=statusNames[value('4/1')]||('Статус '+(value('4/1')??'недоступен'));
-  $('battery').textContent=value('3/1')===undefined?'—':value('3/1')+'%';
-  $('updated').textContent='Обновлено '+new Date().toLocaleTimeString();
-  if(!fanDirty&&document.activeElement!==$('fan')&&value('4/4')!==undefined)$('fan').value=String(value('4/4'));
-  if(!volumeDirty&&document.activeElement!==$('volume')&&value('7/1')!==undefined){$('volume').value=value('7/1');$('volume-value').textContent=value('7/1')+'%';}
-  if(!roomOptionsDirty){if(Number.isInteger(value('4/4')))$('room-fan').value=value('4/4');const water=value('4/5');if(Number.isInteger(water)&&water>=1&&water<=3)$('room-water').value=water;}
-  $('station').textContent=value('4/25')===undefined?'Состояние станции недоступно':'Состояние станции: '+value('4/25');
-  renderRegion(properties);
+  if(!snap?.state||typeof snap.state!=='object')throw Error('Некорректный ответ статуса');
+  if(snap.stale&&!snap.updated_at)throw Error(snap.error||'Агент ещё не прочитал состояние робота');
+  const s=snap.state;
+  $('status').textContent=statusNames[s.status]||('Статус '+(s.status??'недоступен'));
+  $('battery').textContent=s.battery===undefined?'—':s.battery+'%';
+  $('updated').textContent='Обновлено '+new Date(snap.updated_at).toLocaleTimeString();
+  if(!fanDirty&&document.activeElement!==$('fan')&&s.suction!==undefined)$('fan').value=String(s.suction);
+  if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
+  if(!roomOptionsDirty){if(Number.isInteger(s.suction))$('room-fan').value=s.suction;if(Number.isInteger(s.water)&&s.water>=1&&s.water<=3)$('room-water').value=s.water;}
+  $('station').textContent=s.station===undefined?'Состояние станции недоступно':'Состояние станции: '+(stationNames[s.station]||s.station);
+  renderRegion(s.region,s.region_code);
   const wifi=await api('local.wifi_status'),guard=await api('local.region_guard_status');if(epoch!==viewEpoch||!token)return;renderNetwork(wifi,guard);
-  $('diagnostics').textContent='Регион: '+(value('4/19')??'—')+' · код доступа: '+(value('14/3')??'—')+' · ошибка робота: '+(value('2/2')??'—');
+  $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—');
+  if(snap.stale){connectionLost(snap.error||'Нет свежих данных от робота');return;}
   $('connection').textContent='Подключён';$('connection').classList.remove('connection-offline');$('reconnect').hidden=true;
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('region-status').textContent='Статус недоступен: нет связи';connectionLost(e.message);}}finally{if(epoch===viewEpoch)refreshing=false;}
 }
@@ -184,8 +188,15 @@ canvas.onclick=e=>{
  const px=Math.min(view.width-1,Math.max(0,Math.floor(x))),py=Math.min(view.height-1,Math.max(0,Math.floor(y))),id=view.grid[py*view.width+px];
  if(view.rooms.some(r=>r.id===id))selectRoom(id);
 };
+// Show only what this robot supports: commands the hardware table rules out and properties the robot never answers are hidden.
+export function applyCapabilities(caps){
+ const id=caps.identity||{};
+ $('model').textContent=(id.model||'Неизвестная модель')+' · '+(id.fw_ver||'?')+(caps.firmware?.verified?'':' · прошивка не проверена');
+ for(const button of document.querySelectorAll('[data-command]')){const c=caps.commands?.[button.dataset.command];button.hidden=c?.available===false;if(c?.reason)button.title=c.reason;}
+ for(const [prop,input,apply] of [['suction','fan','save-fan'],['volume','volume','save-volume']]){const hide=caps.properties?.[prop]?.readable===false;$(input).closest('label').hidden=hide;$(apply).hidden=hide;}
+}
 async function login(){
- const epoch=viewEpoch,loginToken=token,info=await api('miIO.info');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('dashboard').append($('wifi-panel'));$('model').textContent=info.model+' · '+info.fw_ver;
+ const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('dashboard').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
  await refresh();await refreshMap();clearInterval(timer);timer=setInterval(()=>refresh(),5000);
@@ -193,20 +204,16 @@ async function login(){
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
 for(const button of document.querySelectorAll('[data-command]'))button.onclick=async()=>{
- try{switch(button.dataset.command){
-  case 'reboot':await rebootRobot();break;
-  case 'start':await action(2,1);break;case 'pause':await action(2,2);break;case 'stop':await action(4,2);break;case 'dock':await action(3,1);break;case 'locate':await action(7,1);break;
-  case 'mapping':await action(4,1,[{piid:1,value:21}]);break;case 'empty':await action(15,1);break;
-  case 'wash':await action(4,4,[{piid:10,value:'2,1'}]);break;case 'dry':await action(4,4,[{piid:10,value:'3,1'}]);break;case 'stop-dry':await action(4,4,[{piid:10,value:'3,0'}]);break;
- }}catch{}
+ // data-command values are the agent's command names.
+ try{if(button.dataset.command==='reboot')await rebootRobot();else await command(button.dataset.command);}catch{}
 };
 $('fan').onchange=()=>{fanDirty=true;};
-$('save-fan').onclick=async()=>{try{await control('set_properties',[{siid:4,piid:4,value:Number($('fan').value)}]);fanDirty=false;}catch{}};
+$('save-fan').onclick=async()=>{try{await command('set_suction',{value:Number($('fan').value)});fanDirty=false;}catch{}};
 $('volume').oninput=()=>{volumeDirty=true;$('volume-value').textContent=$('volume').value+'%';};
-$('save-volume').onclick=async()=>{try{await control('set_properties',[{siid:7,piid:1,value:Number($('volume').value)}]);volumeDirty=false;}catch{}};
+$('save-volume').onclick=async()=>{try{await command('set_volume',{value:Number($('volume').value)});volumeDirty=false;}catch{}};
 $('refresh-map').onclick=()=>refreshMap();
 $('clear-selection').onclick=()=>{selected.clear();points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);};
-$('clean-rooms').onclick=async()=>{try{const ids=[...selected],mapID=view?.map_id;const command=roomCommand(ids,Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));await control('action',command,async()=>{const current=await api('local.map_view');if(current.map_id!==mapID||!ids.every(id=>current.rooms.some(r=>r.id===id)))throw Error('Комнаты изменились. Обнови карту и выбери их заново.');});}catch(e){toast(e.message,true);}};
+$('clean-rooms').onclick=async()=>{try{const ids=[...selected],mapID=view?.map_id;const args=roomCommand(ids,Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));await control('/api/v1/command',args,async()=>{const current=await api('local.map_view');if(current.map_id!==mapID||!ids.every(id=>current.rooms.some(r=>r.id===id)))throw Error('Комнаты изменились. Обнови карту и выбери их заново.');});}catch(e){toast(e.message,true);}};
 for(const id of ['room-fan','room-water','room-repeats'])$(id).onchange=()=>{roomOptionsDirty=true;};
 $('map-operation').onchange=()=>{thresholdDrawing=false;thresholdDraft=null;selected.clear();points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);};
 $('prepare-map-edit').onclick=()=>{

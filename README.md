@@ -18,7 +18,7 @@
 
 Все запросы с заголовком `Authorization: Bearer <token>`, ответ `{"result": ...}` или `{"error": ...}`.
 
-- `GET /api/v1/state` — кэш состояния. Агент сам опрашивает робот раз в 5 с и сразу после команды, клиенты робот не нагружают. Поля: `activity` (`cleaning|paused|returning|docked|idle|error`), `status`/`status_name`, `battery`, `charging`, `suction`, `water`, `station`, `volume`, `error`. Свойства, на которые робот не ответил, отсутствуют. `stale: true` — последний опрос не удался, `seq` растёт при каждом изменении.
+- `GET /api/v1/state` — кэш состояния. Агент сам опрашивает робот раз в 5 с и сразу после команды, клиенты робот не нагружают. Поля: `activity` (`cleaning|paused|returning|docked|idle|error`), `status`/`status_name`, `battery`, `charging`, `suction`, `water`, `station`, `volume`, `error`, `region`, `region_code`. Свойства, на которые робот не ответил, отсутствуют. `stale: true` — последний опрос не удался, `seq` растёт при каждом изменении.
 - `GET /api/v1/capabilities` — модель и прошивка, совпадение прошивки с проверенным профилем (`firmware.verified`), аппаратная таблица модели из самой прошивки (`/ava/conf/dconf_runtime.json`), читаемые свойства и доступность команд.
 - `POST /api/v1/command` — `{"name": "start|pause|stop|dock|locate|mapping|empty|wash_mop|dry_start|dry_stop"}`, `{"name": "set_suction|set_volume", "value": N}`, `{"name": "clean_rooms", "rooms": [ids], "repeats": 1..3, "suction": 0..3, "water": 1..3}`. Те же правила, что у `/rpc`: нужен `allow_control`, поддерживается `X-Dreame-Request-ID`, ненулевой код робота возвращается ошибкой. Команда блокируется, только если аппаратная таблица явно говорит, что узла нет.
 
