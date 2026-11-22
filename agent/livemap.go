@@ -38,7 +38,8 @@ type livePose struct {
 	Robot     []int      `json:"robot,omitempty"`
 	Angle     *int       `json:"angle,omitempty"`
 	Charger   []int      `json:"charger,omitempty"`
-	Path      [][]int    `json:"path,omitempty"` // [x, y, mop]: mop 1 where the robot mopped
+	Path      [][]int    `json:"path,omitempty"`  // [x, y, mop]: mop 1 where the robot mopped
+	Spots     [][]int    `json:"spots,omitempty"` // spot cleaning centres [x, y]
 }
 
 type liveFrame struct {
@@ -47,6 +48,7 @@ type liveFrame struct {
 	robot, charger []int
 	path, run      string
 	full           bool // I frame
+	spots          [][]int
 }
 
 func parseLiveFrame(encoded string) (liveFrame, bool) {
@@ -66,12 +68,21 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 		TimeMS  int64           `json:"timestamp_ms"`
 		// Saved map id ("2"); the header id is a per-run counter and may differ from it.
 		Map json.Number `json:"curid"`
+		// Spot cleaning: [[x, y, repeats, suction, water]].
+		Spots json.RawMessage `json:"sp"`
 	}
 	if 27+w*h > len(raw) || json.Unmarshal(raw[27+w*h:], &meta) != nil || meta.TimeMS == 0 {
 		return liveFrame{}, false
 	}
 	if p := point(meta.Robot); p != nil {
 		f.robot = p
+	}
+	var spots [][]int
+	_ = json.Unmarshal(meta.Spots, &spots) // an odd value must not drop the frame
+	for _, s := range spots {
+		if len(s) >= 2 {
+			f.spots = append(f.spots, s[:2])
+		}
 	}
 	if id, err := meta.Map.Int64(); err == nil {
 		f.mapID = int(id)
@@ -146,7 +157,7 @@ func (a *agent) livePose() livePose {
 	if time.Since(last.at) > liveFrameMaxAge {
 		return livePose{}
 	}
-	pose := livePose{Live: true, UpdatedAt: &last.at, MapID: last.mapID, Robot: last.robot, Angle: &last.angle}
+	pose := livePose{Live: true, UpdatedAt: &last.at, MapID: last.mapID, Robot: last.robot, Angle: &last.angle, Spots: last.spots}
 	mop := 0
 	for _, f := range frames {
 		if f.run != last.run {

@@ -276,6 +276,8 @@ function drawLive(){
  ctx.save();
  const current=live?.live&&live.map_id===view.map_id?live:null;
  if(current?.path?.length>1){drawMopped(current.path,px);ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=1.5;ctx.beginPath();current.path.forEach((p,i)=>{const [x,y]=px(...p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
+ // Spot area: the app cleans 1.5 x 1.5 m around the chosen point.
+ (current?.spots||[]).forEach(([x,y])=>{const [x0,y0]=px(x-750,y+750),[x1,y1]=px(x+750,y-750);ctx.strokeStyle='#ffb02e';ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.strokeRect(x0,y0,x1-x0,y1-y0);ctx.setLineDash([]);});
  const charger=current?.charger||view.charger;if(charger)dot(charger,'#55f2aa',5);
  if(current?.robot)dot(current.robot,'#4da3ff',7);
  ctx.restore();
@@ -372,7 +374,7 @@ function draw(){
  ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
  for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
  drawThresholds();drawRestrictions();drawLive();
- if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(a.x*scale,(view.height-a.y)*scale,15*scale*50/view.grid_size,0,Math.PI*2);ctx.fill();ctx.stroke();}
+ if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const h=750/view.grid_size*scale;ctx.beginPath();ctx.rect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);ctx.fill();ctx.stroke();}
  else if(zone.length){const [a,b=a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
 }

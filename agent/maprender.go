@@ -17,7 +17,10 @@ var (
 	pathColour    = color.RGBA{0xff, 0xff, 0xff, 200}
 	robotColour   = color.RGBA{0x4d, 0xa3, 0xff, 255}
 	chargerColour = color.RGBA{0x55, 0xf2, 0xaa, 255}
+	spotColour    = color.RGBA{0xff, 0xb0, 0x2e, 255}
 )
+
+const spotHalf = 750 // spot cleaning covers 1.5 x 1.5 m around the point
 
 const mapScale = 3 // output pixels per map cell, as the web UI draws it
 
@@ -77,6 +80,13 @@ func (a *agent) mapPNG() ([]byte, error) {
 		x0, y0 := px(live.Path[i-1])
 		x1, y1 := px(live.Path[i])
 		line(img, x0, y0, x1, y1, pathColour)
+	}
+	for _, s := range live.Spots {
+		x0, y0 := px([]int{s[0] - spotHalf, s[1] + spotHalf})
+		x1, y1 := px([]int{s[0] + spotHalf, s[1] - spotHalf})
+		for _, e := range [][4]int{{x0, y0, x1, y0}, {x1, y0, x1, y1}, {x1, y1, x0, y1}, {x0, y1, x0, y0}} {
+			line(img, e[0], e[1], e[2], e[3], spotColour)
+		}
 	}
 	charger := view.Charger
 	if live.Charger != nil {

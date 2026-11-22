@@ -71,3 +71,13 @@ func TestParsePathMode(t *testing.T) {
 		t.Fatal("l keeps the mode", points)
 	}
 }
+
+func TestLiveFrameSpots(t *testing.T) {
+	f, ok := parseLiveFrame(testLiveFrame(t, 'P', `{"robot":[0,0],"sp":[[-4400,800,1,1,2]],"mtid":"r","timestamp_ms":1}`))
+	if !ok || !reflect.DeepEqual(f.spots, [][]int{{-4400, 800}}) {
+		t.Fatal(f.spots, ok)
+	}
+	if f, ok = parseLiveFrame(testLiveFrame(t, 'P', `{"robot":[0,0],"sp":"odd","mtid":"r","timestamp_ms":1}`)); !ok || f.spots != nil {
+		t.Fatal("an odd sp must not drop the frame", ok)
+	}
+}
