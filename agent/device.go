@@ -385,6 +385,7 @@ var commandTable = map[string]command{
 	"clean_rooms": {method: "action", siid: 4, id: 1, clearRooms: true},
 	// Built by detailCommand in details.go.
 	"clean_zone":       {detail: true},
+	"clean_spot":       {detail: true},
 	"reset_consumable": {detail: true},
 	"set_dnd":          {detail: true},
 }
@@ -397,6 +398,7 @@ type commandParams struct {
 	Suction    int     `json:"suction"`
 	Water      int     `json:"water"`
 	Zones      [][]int `json:"zones"`
+	Points     [][]int `json:"points"`
 	Consumable string  `json:"consumable"`
 	Enabled    *bool   `json:"enabled"`
 	Start      string  `json:"start"`

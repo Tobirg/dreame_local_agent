@@ -124,6 +124,12 @@ func (a *agent) detailCommand(p commandParams, did string) (string, any, error) 
 			map[string]any{"did": did, "siid": 5, "piid": 2, "value": p.Start},
 			map[string]any{"did": did, "siid": 5, "piid": 3, "value": p.End},
 		}, nil
+	case "clean_spot":
+		in, err := a.spotInput(p)
+		if err != nil {
+			return "", nil, err
+		}
+		return "action", map[string]any{"did": did, "siid": 4, "aiid": 1, "in": in}, nil
 	case "clean_zone":
 		in, err := a.zoneInput(p)
 		if err != nil {
@@ -165,6 +171,32 @@ func (a *agent) zoneInput(p commandParams) ([]any, error) {
 	}
 	value, _ := json.Marshal(map[string]any{"areas": areas})
 	return []any{map[string]any{"piid": 1, "value": 19}, map[string]any{"piid": 10, "value": string(value)}}, nil
+}
+
+// spotInput: status 20 (spot cleaning) with {"points": [[x, y, repeats, suction, water]]},
+// the Tasshack format; same start action and map checks as zones. Not yet run on r2505.
+func (a *agent) spotInput(p commandParams) ([]any, error) {
+	if p.Value != nil || p.Rooms != nil || p.Zones != nil || len(p.Points) == 0 || len(p.Points) > 3 || p.Repeats < 1 || p.Repeats > 3 ||
+		p.Suction < 0 || p.Suction > 3 || p.Water < 1 || p.Water > 3 {
+		return nil, errors.New("clean_spot requires 1..3 points [x, y], repeats 1..3, suction 0..3, water 1..3")
+	}
+	view, err := a.mapView()
+	if err != nil {
+		return nil, err
+	}
+	if view.Empty || len(view.Origin) != 2 {
+		return nil, errors.New("no saved map")
+	}
+	points := make([][]int, 0, len(p.Points))
+	for _, pt := range p.Points {
+		if len(pt) != 2 || pt[0] < view.Origin[0] || pt[1] < view.Origin[1] ||
+			pt[0] > view.Origin[0]+view.Width*view.GridSize || pt[1] > view.Origin[1]+view.Height*view.GridSize {
+			return nil, fmt.Errorf("point %v is not [x, y] on the map", pt)
+		}
+		points = append(points, []int{pt[0], pt[1], p.Repeats, p.Suction, p.Water})
+	}
+	value, _ := json.Marshal(map[string]any{"points": points})
+	return []any{map[string]any{"piid": 1, "value": 20}, map[string]any{"piid": 10, "value": string(value)}}, nil
 }
 
 // errorNames maps 2/2 codes to the names of the MIT Tasshack dreame-vacuum tables.

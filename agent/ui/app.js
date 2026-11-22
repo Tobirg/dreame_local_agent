@@ -9,7 +9,7 @@ let token=sessionStorage.getItem('dreame-token')||localStorage.getItem('dreame-t
 let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false;
 let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
 const activeReads=new Set(),settingsDirty=new Set();
-let zoneDrawing=false,zone=[],dndDirty=false,careShown='',restrictDraft=null,restrictDrawing=false,restrictPoint=null;
+let zoneDrawing=false,zoneSpot=false,zone=[],dndDirty=false,careShown='',restrictDraft=null,restrictDrawing=false,restrictPoint=null;
 const canvas=$('map'),ctx=canvas.getContext('2d');
 
 export function pixelToRobot(v,x,y){
@@ -64,7 +64,7 @@ async function control(method,params,before=null){
 function disableControls(disabled){
  document.querySelectorAll('[data-command],#stage-update,#apply-update,#rollback-update,#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-apply').forEach(b=>b.disabled=disabled);
  $('clean-rooms').disabled=disabled||selected.size===0;
- $('clean-zone').disabled=disabled||zone.length!==2;
+ $('clean-zone').disabled=disabled||zone.length!==(zoneSpot?1:2);
  $('save-restrict').disabled=disabled||!restrictDraft||!view?.restrictions_editable;
  $('draw-restrict').disabled=disabled||!view?.restrictions_editable;
  $('apply-map-edit').disabled=disabled||!pending;
@@ -330,7 +330,8 @@ function draw(){
  ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
  for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
  drawThresholds();drawRestrictions();
- if(zone.length){const [a,b=a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
+ if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(a.x*scale,(view.height-a.y)*scale,15*scale*50/view.grid_size,0,Math.PI*2);ctx.fill();ctx.stroke();}
+ else if(zone.length){const [a,b=a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
 }
 async function refreshMap(){
@@ -351,7 +352,7 @@ canvas.onclick=e=>{
  if(!view||view.empty||busy)return;
  const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)*view.width/rect.width,y=view.height-(e.clientY-rect.top)*view.height/rect.height;
  if(restrictDrawing){addRestrictionPoint(x,y);return;}
- if(zoneDrawing){zone.push({x,y});if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
+ if(zoneDrawing){zone.push({x,y});if(zoneSpot){zoneDrawing=false;$('zone-status').textContent='Точка выбрана. Повторы, мощность и влажность — как для комнат.';}else if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
  if($('map-operation').value==='split'&&selected.size===1){if(points.length===2)points=[];points.push({x,y,robot:pixelToRobot(view,x,y)});invalidateEdit();draw();return;}
@@ -386,10 +387,12 @@ $('clear-selection').onclick=()=>{selected.clear();points=[];invalidateEdit();re
 $('clean-rooms').onclick=async()=>{try{const ids=[...selected],mapID=view?.map_id;const args=roomCommand(ids,Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));await control('/api/v1/command',args,async()=>{const current=await api('local.map_view');if(current.map_id!==mapID||!ids.every(id=>current.rooms.some(r=>r.id===id)))throw Error('Комнаты изменились. Обнови карту и выбери их заново.');});}catch(e){toast(e.message,true);}};
 for(const id of ['room-fan','room-water','room-repeats'])$(id).onchange=()=>{roomOptionsDirty=true;};
 // ---- Zone cleaning: two opposite corners on the map; the agent checks the rectangle against the saved map.
-$('draw-zone').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zone=[];$('zone-status').textContent='Нажми на два противоположных угла зоны.';disableControls(busy);draw();};
+$('draw-zone').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zoneSpot=false;zone=[];$('clean-zone').textContent='Убрать зону';$('zone-status').textContent='Нажми на два противоположных угла зоны.';disableControls(busy);draw();};
+$('draw-spot').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zoneSpot=true;zone=[];$('clean-zone').textContent='Убрать вокруг точки';$('zone-status').textContent='Нажми на точку на карте.';disableControls(busy);draw();};
 $('clean-zone').onclick=async()=>{
  try{const [a,b]=zone.map(p=>pixelToRobot(view,p.x,p.y)),mapID=view.map_id;
-  await control('/api/v1/command',{name:'clean_zone',zones:[[a[0],a[1],b[0],b[1]]],repeats:Number($('room-repeats').value),suction:Number($('room-fan').value),water:Number($('room-water').value)},async()=>{const current=await api('local.map_view');if(current.map_id!==mapID)throw Error('Карта изменилась. Выбери зону заново.');});}
+  const target=zoneSpot?{name:'clean_spot',points:[a]}:{name:'clean_zone',zones:[[a[0],a[1],b[0],b[1]]]};
+  await control('/api/v1/command',{...target,repeats:Number($('room-repeats').value),suction:Number($('room-fan').value),water:Number($('room-water').value)},async()=>{const current=await api('local.map_view');if(current.map_id!==mapID)throw Error('Карта изменилась. Выбери зону заново.');});}
  catch(e){toast(e.message,true);}
 };
 $('map-operation').onchange=()=>{thresholdDrawing=false;thresholdDraft=null;selected.clear();points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);};
