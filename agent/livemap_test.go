@@ -44,7 +44,7 @@ func TestLivePose(t *testing.T) {
 	if !p.Live || p.MapID != 7 || !reflect.DeepEqual(p.Robot, []int{-2793, -1627}) || !reflect.DeepEqual(p.Charger, []int{5, 455}) {
 		t.Fatalf("%+v", p)
 	}
-	if !reflect.DeepEqual(p.Path, [][]int{{-2942, -1623}, {-2891, -1623}, {-2840, -1624}, {-1687, -653}, {-1697, -653}}) {
+	if !reflect.DeepEqual(p.Path, [][]int{{-2942, -1623, 0}, {-2891, -1623, 0}, {-2840, -1624, 0}, {-1687, -653, 1}, {-1697, -653, 1}}) {
 		t.Fatal("path of this run only, first point absolute and the rest relative:", p.Path)
 	}
 	// The next run starts with an I frame that still carries run1's mtid: no old path.
@@ -59,5 +59,15 @@ func TestLivePose(t *testing.T) {
 	writeFile(t, a, "/data/log/ava_iot-20261122-182530.log", "")
 	if a.livePose().Live {
 		t.Fatal("stale frames reported as live")
+	}
+}
+
+func TestParsePathMode(t *testing.T) {
+	points, mop := parsePath("S-10,0L5,0", 1)
+	if mop != 0 || !reflect.DeepEqual(points, [][]int{{-10, 0, 0}, {-5, 0, 0}}) {
+		t.Fatal(points, mop)
+	}
+	if points, mop = parsePath("l0,0L1,1", 1); mop != 1 || points[1][2] != 1 {
+		t.Fatal("l keeps the mode", points)
 	}
 }

@@ -256,12 +256,26 @@ function followLive(active){
  if(active&&!liveTimer){refreshLive();liveTimer=setInterval(()=>{if(!document.hidden)refreshLive();},3000);}
  else if(!active&&liveTimer){clearInterval(liveTimer);liveTimer=null;refreshLive();}
 }
+// Mopped floor, tinted deeper for each pass of the 300 mm mop pads; same rules as mopPasses in maprender.go.
+function drawMopped(path,px){
+ const w=canvas.width,h=canvas.height,r=Math.round(150*3/view.grid_size),count=new Uint8Array(w*h),last=new Float64Array(w*h);let travelled=0;
+ for(let i=1;i<path.length;i++){
+  travelled+=Math.hypot(path[i][0]-path[i-1][0],path[i][1]-path[i-1][1]);if(path[i][2]!==1)continue;
+  const [x0,y0]=px(path[i-1][0],path[i-1][1]),[x1,y1]=px(path[i][0],path[i][1]),n=Math.max(Math.abs(x1-x0),Math.abs(y1-y0),1);
+  for(let s=0;s<=n;s++){const cx=Math.round(x0+(x1-x0)*s/n),cy=Math.round(y0+(y1-y0)*s/n);
+   for(let y=Math.max(cy-r,0);y<=Math.min(cy+r,h-1);y++)for(let x=Math.max(cx-r,0);x<=Math.min(cx+r,w-1);x++){
+    if((x-cx)**2+(y-cy)**2>r*r)continue;const k=y*w+x;if(!count[k]||travelled-last[k]>600)count[k]=Math.min(count[k]+1,3);last[k]=travelled;}}
+ }
+ const img=ctx.getImageData(0,0,w,h),d=img.data,alpha=[0,70,120,165];
+ for(let k=0;k<count.length;k++){if(!count[k]||!d[k*4+3])continue;const a=alpha[count[k]]/255;d[k*4]+= (77-d[k*4])*a;d[k*4+1]+=(163-d[k*4+1])*a;d[k*4+2]+=(255-d[k*4+2])*a;}
+ ctx.putImageData(img,0,0);
+}
 function drawLive(){
  const px=(x,y)=>{const p=robotToPixel(view,x,y);return [p[0]*3,(view.height-p[1])*3];};
  const dot=(p,color,r)=>{const [x,y]=px(...p);ctx.fillStyle=color;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.stroke();};
  ctx.save();
  const current=live?.live&&live.map_id===view.map_id?live:null;
- if(current?.path?.length>1){ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=1.5;ctx.beginPath();current.path.forEach((p,i)=>{const [x,y]=px(...p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
+ if(current?.path?.length>1){drawMopped(current.path,px);ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=1.5;ctx.beginPath();current.path.forEach((p,i)=>{const [x,y]=px(...p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
  const charger=current?.charger||view.charger;if(charger)dot(charger,'#55f2aa',5);
  if(current?.robot)dot(current.robot,'#4da3ff',7);
  ctx.restore();

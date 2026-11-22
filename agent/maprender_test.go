@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image/color"
 	"image/png"
 	"testing"
+	"time"
 )
 
 func TestMapPNG(t *testing.T) {
@@ -42,5 +44,25 @@ func TestMapPNG(t *testing.T) {
 	// The station at (-75,-175) is cell (0,0): bottom-left.
 	if got := color.RGBAModel.Convert(img.At(1, 7)).(color.RGBA); got != chargerColour {
 		t.Fatal("station", got)
+	}
+	// While mopping, the floor along the path is tinted blue.
+	room := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA)
+	frame := testLiveFrame(t, 'P', fmt.Sprintf(`{"robot":[5000,5000],"curid":"2","tr":"W-75,-125L50,0","mtid":"r","timestamp_ms":%d}`, time.Now().UnixMilli()))
+	writeFile(t, a, iotLogFile, `"siid":6,"piid":1,"value":"`+frame+`"`+"\n")
+	if b, err = a.mapPNG(); err != nil {
+		t.Fatal(err)
+	}
+	img, _ = png.Decode(bytes.NewReader(b))
+	if got := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA); got.B <= room.B || got.R >= room.R {
+		t.Fatal("mopped floor not tinted", room, got)
+	}
+	// Coming back over the same floor after driving away is a second pass: deeper tint.
+	once := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA)
+	frame = testLiveFrame(t, 'P', fmt.Sprintf(`{"robot":[5000,5000],"curid":"2","tr":"W-75,-125L50,0L1000,0L-1000,0","mtid":"r","timestamp_ms":%d}`, time.Now().UnixMilli()))
+	writeFile(t, a, iotLogFile, `"siid":6,"piid":1,"value":"`+frame+`"`+"\n")
+	b, _ = a.mapPNG()
+	img, _ = png.Decode(bytes.NewReader(b))
+	if got := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA); got.B <= once.B {
+		t.Fatal("second pass not deeper", once, got)
 	}
 }

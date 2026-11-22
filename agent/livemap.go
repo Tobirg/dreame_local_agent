@@ -38,7 +38,7 @@ type livePose struct {
 	Robot     []int      `json:"robot,omitempty"`
 	Angle     *int       `json:"angle,omitempty"`
 	Charger   []int      `json:"charger,omitempty"`
-	Path      [][]int    `json:"path,omitempty"`
+	Path      [][]int    `json:"path,omitempty"` // [x, y, mop]: mop 1 where the robot mopped
 }
 
 type liveFrame struct {
@@ -147,14 +147,17 @@ func (a *agent) livePose() livePose {
 		return livePose{}
 	}
 	pose := livePose{Live: true, UpdatedAt: &last.at, MapID: last.mapID, Robot: last.robot, Angle: &last.angle}
+	mop := 0
 	for _, f := range frames {
 		if f.run != last.run {
 			continue
 		}
 		if f.full { // a run starts with I frames; the first one still carries the previous run's mtid
-			pose.Path = nil
+			pose.Path, mop = nil, 0
 		}
-		pose.Path = append(pose.Path, parsePath(f.path)...)
+		var points [][]int
+		points, mop = parsePath(f.path, mop)
+		pose.Path = append(pose.Path, points...)
 		if f.charger != nil && f.charger[0] != 32767 { // 32767: not known in this frame
 			pose.Charger = f.charger
 		}
@@ -177,22 +180,27 @@ func point(raw json.RawMessage) []int {
 
 var pathStep = regexp.MustCompile(`([A-Za-z])(-?\d+),(-?\d+)`)
 
-// parsePath reads one frame's "tr": "L" points are offsets from the previous point, any other
-// letter ("l", "W") starts at an absolute point (seen on r2505: "l-2942,-1623L51,0", "W-1687,-653").
-// shortcut: the letter is the segment kind (W: sweep and mop, per the Tasshack decoder) and is
-// not shown yet; its meaning on r2505 needs a run without mopping to compare.
-func parsePath(tr string) [][]int {
+// parsePath reads one frame's "tr" into [x, y, mop] points. "L" points are offsets from the
+// previous point; any other letter starts at an absolute point. S, W and M also set the mode of
+// what follows until the next of them (checked on r2505: a vacuum-only run starts with "S" and
+// has moptype 0, mopping runs use "W"); "l" keeps it. mop is 1 for W (vacuum and mop) and M (mop).
+func parsePath(tr string, mop int) ([][]int, int) {
 	var out [][]int
 	x, y := 0, 0
 	for _, m := range pathStep.FindAllStringSubmatch(tr, 20000) {
 		dx, _ := strconv.Atoi(m[2])
 		dy, _ := strconv.Atoi(m[3])
-		if m[1] == "L" {
+		switch m[1] {
+		case "L":
 			x, y = x+dx, y+dy
-		} else {
+		case "W", "M":
+			x, y, mop = dx, dy, 1
+		case "S":
+			x, y, mop = dx, dy, 0
+		default:
 			x, y = dx, dy
 		}
-		out = append(out, []int{x, y})
+		out = append(out, []int{x, y, mop})
 	}
-	return out
+	return out, mop
 }
