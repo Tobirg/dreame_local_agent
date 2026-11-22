@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.12.0"
+var version = "0.13.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -279,14 +279,13 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 			return nil, errors.New("local.reboot takes no parameters")
 		}
 		return a.queueReboot()
-	case "local.thresholds", "local.restrictions":
+	case "local.thresholds", "local.restrictions", "local.room_settings":
 		if !a.controlAllowed() {
 			return nil, errors.New("map editing requires pinned identity and allow_control")
 		}
-		build := a.thresholdPatch
-		if req.Method == "local.restrictions" {
-			build = a.restrictionsPatch
-		}
+		build := map[string]func(json.RawMessage) (map[string]any, error){
+			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch,
+		}[req.Method]
 		patch, err := build(req.Params)
 		if err != nil {
 			return nil, err

@@ -31,21 +31,23 @@ type mapView struct {
 	Impassable         [][]int                    `json:"impassable_thresholds"`
 	VWS                map[string]json.RawMessage `json:"-"`
 	// Virtual walls (vw.line), no-go zones (vw.rect) and no-mop zones (vw.mop), robot millimetres.
-	RestrictionsEditable bool      `json:"restrictions_editable"`
-	Walls                [][]int   `json:"walls"`
-	NoGo                 [][]int   `json:"no_go_zones"`
-	NoMop                [][]int   `json:"no_mop_zones"`
-	Empty                bool      `json:"empty"`
-	MapID                int       `json:"map_id"`
-	Width                int       `json:"width"`
-	Height               int       `json:"height"`
-	GridSize             int       `json:"grid_size"`
-	Origin               []int     `json:"origin"`
-	Pixels               []byte    `json:"pixels"`
-	Rooms                []mapRoom `json:"rooms"`
-	Revision             string    `json:"revision"`
-	Source               string    `json:"source"`
-	Live                 bool      `json:"live"`
+	RestrictionsEditable bool    `json:"restrictions_editable"`
+	Walls                [][]int `json:"walls"`
+	NoGo                 [][]int `json:"no_go_zones"`
+	NoMop                [][]int `json:"no_mop_zones"`
+	// Per-room cleaning settings by room id, from /data/ri/setting.json2; see roomsettings.go.
+	RoomSettings map[string][]int `json:"room_settings"`
+	Empty        bool             `json:"empty"`
+	MapID        int              `json:"map_id"`
+	Width        int              `json:"width"`
+	Height       int              `json:"height"`
+	GridSize     int              `json:"grid_size"`
+	Origin       []int            `json:"origin"`
+	Pixels       []byte           `json:"pixels"`
+	Rooms        []mapRoom        `json:"rooms"`
+	Revision     string           `json:"revision"`
+	Source       string           `json:"source"`
+	Live         bool             `json:"live"`
 }
 
 func decodeSavedFrame(encoded string) ([]byte, error) {
@@ -216,7 +218,11 @@ func (a *agent) mapView() (mapView, error) {
 			return empty, err
 		}
 		if int(binary.LittleEndian.Uint16(raw[:2])) == *maps.Current {
-			return makeMapView(raw, a.cfg.ExpectedModel)
+			view, err := makeMapView(raw, a.cfg.ExpectedModel)
+			if err == nil {
+				view.RoomSettings = a.roomSettings(view.MapID)
+			}
+			return view, err
 		}
 	}
 	return empty, errors.New("selected saved map is missing")

@@ -48,7 +48,7 @@ async function api(method,params=null){
 export function assertCommand(result,method,params){
  const rows=Array.isArray(result)?result:[result];
  if(!rows.length||rows.some(r=>!r||r.code!==0))throw Error('Робот отклонил команду: '+JSON.stringify(result));
- if(method==='local.thresholds'||method==='local.restrictions'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
+ if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
   if(Array.isArray(result)||!Array.isArray(result.out))throw Error('Map operation result is missing; outcome unknown.');
   const operation=result.out.filter(row=>row&&row.piid===6);
   if(operation.length!==1||!Number.isSafeInteger(operation[0].value))throw Error('Map operation result is invalid; outcome unknown.');
@@ -321,14 +321,14 @@ async function refreshMap(){
  if(!token||busy)return;const epoch=viewEpoch;
  try{
   const next=await api('local.map_view');if(epoch!==viewEpoch||!token)return;
-  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();renderRestrictions();draw();disableControls(busy);return;}
+  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();draw();disableControls(busy);return;}
   if(!Number.isInteger(next.width)||!Number.isInteger(next.height)||next.width*next.height>4194304||!Array.isArray(next.rooms))throw Error('Некорректный формат карты');
   const bytes=atob(next.pixels);if(bytes.length!==next.width*next.height)throw Error('Некорректный размер карты');
   next.grid=Uint8Array.from(bytes,c=>c.charCodeAt(0));
   if(view?.revision!==next.revision){selected=view?.map_id===next.map_id?new Set([...selected].filter(id=>next.rooms.some(r=>r.id===id))):new Set();points=[];invalidateEdit();thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;}
   view=next;canvas.width=view.width*3;canvas.height=view.height*3;
   $('map-info').textContent='Карта '+view.map_id+' · комнат: '+view.rooms.length+' · '+view.width+' × '+view.height;
-  renderRoomButtons();renderThresholdChoices();renderRestrictions();draw();disableControls(busy);
+  renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();draw();disableControls(busy);
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('map-info').textContent=e.message;connectionLost(e.message);}}
 }
 canvas.onclick=e=>{
@@ -448,6 +448,35 @@ async function submitThreshold(remove=false){
  catch(e){toast(e.message,true);}
 }
 $('save-threshold').onclick=()=>submitThreshold();$('delete-threshold').onclick=()=>submitThreshold(true);
+// ---- Per-room settings: robot row [suction, water, repeats, order, mode, extra]; only changed rooms are sent.
+const roomFields=[['suction',0,{0:'Тихо',1:'Стандарт',2:'Сильный',3:'Турбо'}],['water',1,{1:'Низкая',2:'Средняя',3:'Высокая'}],['repeats',2,{1:'1 раз',2:'2 раза',3:'3 раза'}],['mode',4,{0:'Только сухая',1:'Только влажная',2:'Сухая и влажная'}]];
+function renderRoomSettings(){
+ const sets=view?.room_settings,rows=[];
+ $('room-settings-details').hidden=!sets;
+ for(const room of view?.rooms||[]){
+  const row=sets?.[room.id];if(!row)continue;
+  const line=document.createElement('div');line.className='row';line.dataset.room=room.id;
+  line.append(Object.assign(document.createElement('span'),{textContent:room.name}));
+  for(const [key,index,names] of roomFields){
+   const select=document.createElement('select');select.dataset.key=key;select.setAttribute('aria-label',room.name+': '+key);
+   for(const [value,label] of Object.entries(names))select.add(new Option(label,value));
+   if(!(row[index] in names))select.add(new Option(String(row[index]),row[index]));
+   select.value=String(row[index]);select.dataset.saved=select.value;select.onchange=()=>{$('save-room-settings').disabled=busy||!changedRooms().length;};
+   line.append(select);
+  }
+  rows.push(line);
+ }
+ $('room-settings').replaceChildren(...rows);$('save-room-settings').disabled=true;
+}
+function changedRooms(){
+ return [...$('room-settings').querySelectorAll('[data-room]')].filter(line=>[...line.querySelectorAll('select')].some(s=>s.value!==s.dataset.saved))
+  .map(line=>Object.fromEntries([['id',Number(line.dataset.room)],...[...line.querySelectorAll('select')].map(s=>[s.dataset.key,Number(s.value)])]));
+}
+$('save-room-settings').onclick=async()=>{
+ const rooms=changedRooms();if(!rooms.length)return;
+ try{await control('local.room_settings',{map_id:view.map_id,revision:view.revision,rooms});$('room-settings-status').textContent='Настройки сохранены.';await refreshMap();}
+ catch(e){$('room-settings-status').textContent=e.message;}
+};
 // ---- Virtual walls and zones: edited locally as a draft, then all three lists are saved at once.
 const restrictKinds={walls:'Стена',no_go_zones:'Запретная зона',no_mop_zones:'Без влажной уборки'};
 const restrictions=()=>restrictDraft||Object.fromEntries(Object.keys(restrictKinds).map(k=>[k,view?.[k]||[]]));
