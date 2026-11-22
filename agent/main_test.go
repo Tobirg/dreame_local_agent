@@ -37,7 +37,7 @@ func testAgent(t *testing.T) *agent {
 	if err := os.WriteFile(mock, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	return &agent{root: root, avacmd: mock, gate: make(chan struct{}, 1), modules: moduleHost{slots: make(chan struct{}, 4)}, cfg: config{Token: strings.Repeat("a", 40), ExpectedModel: "dreame.vacuum.r2505", ExpectedDID: "12345678", ExpectedMAC: "00:11:22:33:44:55", AllowControl: true}}
+	return &agent{root: root, avacmd: mock, gate: make(chan struct{}, 1), modules: moduleHost{slots: make(chan struct{}, 4)}, cfg: config{Token: strings.Repeat("a", 40), ExpectedModel: "dreame.vacuum.r2505", ExpectedDID: "12345678", ExpectedMAC: "00:11:22:33:44:55", AllowControl: true, AllowUnverifiedFirmware: true}}
 }
 func TestIdentityFiltersSecrets(t *testing.T) {
 	a := testAgent(t)

@@ -315,11 +315,14 @@ func (a *agent) capabilities() (map[string]any, error) {
 		available, reason := c.available(hw)
 		commands[name] = map[string]any{"available": available, "reason": reason}
 	}
+	// Hashes of the checked firmware files go into compatibility reports, so new profiles can be added.
+	firmware := a.firmwareProfile(info["model"], info["fw_ver"])
+	firmware["hashes"] = a.dev.hashes
 	caps := map[string]any{
 		"agent":      map[string]string{"version": version},
 		"identity":   map[string]string{"model": info["model"], "did": info["did"], "fw_ver": info["fw_ver"]},
-		"firmware":   a.firmwareProfile(info["model"], info["fw_ver"]),
-		"control":    a.controlAllowed(),
+		"firmware":   firmware,
+		"control":    a.robotWriteAllowed(info) == nil,
 		"hardware":   hw,
 		"properties": props,
 		"commands":   commands,

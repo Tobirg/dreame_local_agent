@@ -26,6 +26,19 @@ type networkJob struct {
 func (a *agent) controlAllowed() bool {
 	return a.cfg.AllowControl && a.cfg.ExpectedModel != "" && a.cfg.ExpectedDID != "" && a.cfg.ExpectedMAC != ""
 }
+
+// robotWriteAllowed gates commands and setting/map writes: besides control, the firmware must
+// match a checked profile (or the owner opted in), so unknown firmware is read-only by default.
+// Agent updates, modules, Wi-Fi and reboot only need controlAllowed.
+func (a *agent) robotWriteAllowed(info map[string]string) error {
+	if !a.controlAllowed() {
+		return errors.New("control requires allow_control and pinned model, did, mac")
+	}
+	if !a.cfg.AllowUnverifiedFirmware && a.firmwareProfile(info["model"], info["fw_ver"])["verified"] != true {
+		return errors.New("firmware " + info["fw_ver"] + " of " + info["model"] + " matches no checked profile; the agent stays read-only until allow_unverified_firmware is set in the config")
+	}
+	return nil
+}
 func atomicPrivate(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".agent-*")
 	if err != nil {

@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.16.0"
+var version = "0.17.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -34,14 +34,16 @@ var webAssets embed.FS
 const maxMap = 8 << 20
 
 type config struct {
-	Bind          string     `json:"bind"`
-	Port          int        `json:"port"`
-	Token         string     `json:"token"`
-	ExpectedModel string     `json:"expected_model"`
-	ExpectedDID   string     `json:"expected_did"`
-	ExpectedMAC   string     `json:"expected_mac"`
-	AllowControl  bool       `json:"allow_control"`
-	Tokens        []apiToken `json:"tokens,omitempty"`
+	Bind          string `json:"bind"`
+	Port          int    `json:"port"`
+	Token         string `json:"token"`
+	ExpectedModel string `json:"expected_model"`
+	ExpectedDID   string `json:"expected_did"`
+	ExpectedMAC   string `json:"expected_mac"`
+	AllowControl  bool   `json:"allow_control"`
+	// Commands and setting changes are refused on firmware that matches no checked profile unless this is set.
+	AllowUnverifiedFirmware bool       `json:"allow_unverified_firmware,omitempty"`
+	Tokens                  []apiToken `json:"tokens,omitempty"`
 }
 type request struct {
 	Method string          `json:"method"`
@@ -262,13 +264,13 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 	case "miIO.info":
 		return info, nil
 	case "local.setting":
-		if !a.controlAllowed() {
-			return nil, errors.New("setting changes require pinned identity and allow_control")
+		if err := a.robotWriteAllowed(info); err != nil {
+			return nil, err
 		}
 		return a.changeSetting(ctx, req.Params, info["did"])
 	case "local.command":
-		if !a.controlAllowed() {
-			return nil, errors.New("control requires pinned identity and allow_control")
+		if err := a.robotWriteAllowed(info); err != nil {
+			return nil, err
 		}
 		return a.runCommand(ctx, req.Params, info)
 	case "local.reboot":
@@ -280,8 +282,8 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 		}
 		return a.queueReboot()
 	case "local.thresholds", "local.restrictions", "local.room_settings":
-		if !a.controlAllowed() {
-			return nil, errors.New("map editing requires pinned identity and allow_control")
+		if err := a.robotWriteAllowed(info); err != nil {
+			return nil, err
 		}
 		build := map[string]func(json.RawMessage) (map[string]any, error){
 			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch,
@@ -338,8 +340,10 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !readOnly && (!a.cfg.AllowControl || a.cfg.ExpectedModel == "" || a.cfg.ExpectedDID == "" || a.cfg.ExpectedMAC == "") {
-		return nil, errors.New("control requires allow_control and pinned model, did, mac")
+	if !readOnly {
+		if err := a.robotWriteAllowed(info); err != nil {
+			return nil, err
+		}
 	}
 	for _, item := range items {
 		item["did"] = info["did"]

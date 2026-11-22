@@ -266,6 +266,13 @@ function drawLive(){
  if(current?.robot)dot(current.robot,'#4da3ff',7);
  ctx.restore();
 }
+// ---- Compatibility report: capabilities without the robot's id, saved as a file to share.
+$('compat-report').onclick=async()=>{
+ try{const caps=await api('/api/v1/capabilities');delete caps.identity?.did;delete caps.modules;
+  const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([JSON.stringify(caps,null,2)],{type:'application/json'}));
+  link.download='dreame-compat-'+(caps.identity?.model||'robot')+'-'+(caps.identity?.fw_ver||'')+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);}
+ catch(e){toast(e.message,true);}
+};
 // ---- Cleaning history kept by the agent, newest first.
 let wasActive=false;
 const runModes={cleaning:'Уборка',room_cleaning:'Уборка комнат',zone_cleaning:'Уборка зоны',spot_cleaning:'Точечная уборка',part_cleaning:'Локальная уборка',edge_cleaning:'Вдоль стен',mapping:'Построение карты'};

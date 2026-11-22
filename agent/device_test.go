@@ -249,3 +249,21 @@ func TestRefreshSoonWaitsForRobot(t *testing.T) {
 		}
 	}
 }
+
+func TestUnverifiedFirmwareIsReadOnly(t *testing.T) {
+	a := testAgent(t)
+	a.cfg.AllowUnverifiedFirmware = false // the test robot's firmware files match no profile
+	if _, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(`{"name":"locate"}`)}); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatal("command on unverified firmware", err)
+	}
+	if _, err := a.call(context.Background(), request{Method: "set_properties", Params: json.RawMessage(`[{"siid":7,"piid":1,"value":50}]`)}); err == nil {
+		t.Fatal("raw write on unverified firmware")
+	}
+	if _, err := a.call(context.Background(), request{Method: "get_properties", Params: json.RawMessage(`[{"siid":3,"piid":1}]`)}); err != nil {
+		t.Fatal("reads must stay allowed", err)
+	}
+	caps, _ := a.capabilities()
+	if caps["control"] != false {
+		t.Fatal("capabilities must report no control")
+	}
+}
