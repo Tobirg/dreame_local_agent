@@ -376,7 +376,7 @@ function draw(){
  ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
  for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
  drawThresholds();drawRestrictions();drawLive();
- if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(a.x*scale,(view.height-a.y)*scale,5,0,Math.PI*2);ctx.fill();ctx.stroke();}
+ if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const h=750/view.grid_size*scale;ctx.fillRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);ctx.strokeRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);}
  else if(zone.length){const [a,b=a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
 }
@@ -398,7 +398,7 @@ canvas.onclick=e=>{
  if(!view||view.empty||busy)return;
  const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)*view.width/rect.width,y=view.height-(e.clientY-rect.top)*view.height/rect.height;
  if(restrictDrawing){addRestrictionPoint(x,y);return;}
- if(zoneDrawing){zone.push({x,y});if(zoneSpot){zoneDrawing=false;$('zone-status').textContent='Точка выбрана. Повторы, мощность и влажность — как для комнат.';}else if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
+ if(zoneDrawing){zone.push({x,y});if(zoneSpot){zoneDrawing=false;$('zone-status').textContent='Будет убран квадрат 1,5 × 1,5 м вокруг точки. Повторы, мощность и влажность — как для комнат.';}else if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
  if($('map-operation').value==='split'&&selected.size===1){if(points.length===2)points=[];points.push({x,y,robot:pixelToRobot(view,x,y)});invalidateEdit();draw();return;}

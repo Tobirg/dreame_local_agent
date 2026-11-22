@@ -68,7 +68,7 @@ func TestDetailCommands(t *testing.T) {
 		t.Fatal("tiny zone accepted")
 	}
 	in, err = a.spotInput(commandParams{Points: [][]int{{500, 600}}, Repeats: 1, Suction: 2, Water: 1})
-	if got, _ := json.Marshal(in); err != nil || string(got) != `[{"piid":1,"value":20},{"piid":10,"value":"{\"points\":[[500,600,1,2,1]]}"}]` {
+	if got, _ := json.Marshal(in); err != nil || string(got) != `[{"piid":1,"value":19},{"piid":10,"value":"{\"areas\":[[-100,-150,1250,1300,1,2,1]]}"}]` {
 		t.Fatal(string(got), err)
 	}
 	for _, bad := range [][][]int{{{5000, 0}}, {{1, 2, 3}}, {}} {

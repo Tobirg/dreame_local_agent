@@ -173,11 +173,10 @@ func (a *agent) zoneInput(p commandParams) ([]any, error) {
 	return []any{map[string]any{"piid": 1, "value": 19}, map[string]any{"piid": 10, "value": string(value)}}, nil
 }
 
-// spotInput: status 20 (spot cleaning) with {"points": [[x, y, repeats, suction, water]]},
-// the Tasshack format; same start action and map checks as zones. Not yet run on r2505.
+// spotInput cleans a 1.5 x 1.5 m zone around each point, cut to the map edge. The X50 takes the
+// Tasshack spot command (status 20, {"points": ...}) but cleans the whole room instead.
 func (a *agent) spotInput(p commandParams) ([]any, error) {
-	if p.Value != nil || p.Rooms != nil || p.Zones != nil || len(p.Points) == 0 || len(p.Points) > 3 || p.Repeats < 1 || p.Repeats > 3 ||
-		p.Suction < 0 || p.Suction > 3 || p.Water < 1 || p.Water > 3 {
+	if p.Value != nil || p.Rooms != nil || p.Zones != nil || len(p.Points) == 0 || len(p.Points) > 3 {
 		return nil, errors.New("clean_spot requires 1..3 points [x, y], repeats 1..3, suction 0..3, water 1..3")
 	}
 	view, err := a.mapView()
@@ -187,17 +186,19 @@ func (a *agent) spotInput(p commandParams) ([]any, error) {
 	if view.Empty || len(view.Origin) != 2 {
 		return nil, errors.New("no saved map")
 	}
-	points := make([][]int, 0, len(p.Points))
+	minX, minY := view.Origin[0], view.Origin[1]
+	maxX, maxY := minX+view.Width*view.GridSize, minY+view.Height*view.GridSize
 	for _, pt := range p.Points {
-		if len(pt) != 2 || pt[0] < view.Origin[0] || pt[1] < view.Origin[1] ||
-			pt[0] > view.Origin[0]+view.Width*view.GridSize || pt[1] > view.Origin[1]+view.Height*view.GridSize {
+		if len(pt) != 2 || pt[0] < minX || pt[1] < minY || pt[0] > maxX || pt[1] > maxY {
 			return nil, fmt.Errorf("point %v is not [x, y] on the map", pt)
 		}
-		points = append(points, []int{pt[0], pt[1], p.Repeats, p.Suction, p.Water})
+		p.Zones = append(p.Zones, []int{max(pt[0]-spotHalf, minX), max(pt[1]-spotHalf, minY), min(pt[0]+spotHalf, maxX), min(pt[1]+spotHalf, maxY)})
 	}
-	value, _ := json.Marshal(map[string]any{"points": points})
-	return []any{map[string]any{"piid": 1, "value": 20}, map[string]any{"piid": 10, "value": string(value)}}, nil
+	p.Points = nil
+	return a.zoneInput(p)
 }
+
+const spotHalf = 750 // half the side of the zone cleaned around a spot point, mm
 
 // errorNames maps 2/2 codes to the names of the MIT Tasshack dreame-vacuum tables.
 var errorNames = map[int64]string{
