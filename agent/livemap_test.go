@@ -1,33 +1,55 @@
 package main
 
 import (
-	"os"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+// testLiveFrame builds a frame of the given kind ('I' or 'P') like the r2505 ones.
+func testLiveFrame(t *testing.T, kind byte, meta string) string {
+	t.Helper()
+	raw, err := decodeSavedFrame(syntheticFrame(t, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[4] = kind
+	return strings.TrimRight(encodeTestFrame(t, append(raw[:36], []byte(meta)...)), "=")
+}
 
 func TestLivePose(t *testing.T) {
 	a := testAgent(t)
 	if p := a.livePose(); p.Live {
 		t.Fatal("live without frames")
 	}
-	raw, err := decodeSavedFrame(syntheticFrame(t, 2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw = append(raw[:36], []byte(`{"origin":[-100,-200],"robot":[-40,-120],"charger":[5,455],"tr":"M-50,-150L-40,-150l0,30l-10,0"}`)...)
-	writeFile(t, a, liveFrameFiles[1], encodeTestFrame(t, raw))
-	p := a.livePose()
-	if !p.Live || p.MapID != 2 || !reflect.DeepEqual(p.Robot, []int{-40, -120}) || !reflect.DeepEqual(p.Charger, []int{5, 455}) {
+	now := time.Now().UnixMilli()
+	// Start of a run: an I frame with the positions as strings and no path yet.
+	writeFile(t, a, liveFrameFiles[1], testLiveFrame(t, 'I', fmt.Sprintf(`{"robot":"[5,455]","charger":"[5,455]","tr":"","mtid":"run1","timestamp_ms":%d}`, now-9000)))
+	if p := a.livePose(); !p.Live || !reflect.DeepEqual(p.Robot, []int{5, 455}) || !reflect.DeepEqual(p.Charger, []int{5, 455}) || len(p.Path) != 0 {
 		t.Fatalf("%+v", p)
 	}
-	if !reflect.DeepEqual(p.Path, [][]int{{-50, -150}, {-40, -150}, {-40, -120}, {-50, -120}}) {
-		t.Fatal(p.Path)
+	// Moving: P frames in the IoT log, each with the path since the previous one.
+	line := func(ms int64, robot, tr, run string) string {
+		frame := testLiveFrame(t, 'P', fmt.Sprintf(`{"robot":%s,"charger":[32767,32767],"tr":%q,"mtid":%q,"timestamp_ms":%d}`, robot, tr, run, ms))
+		return `2026-11-22 18:11:54.550888 AVA_IOT[1811]:  [I] <AvaSendSimpleMsg> msgcvt>iot]{"id":1,"method":"properties_changed","params":[{"did":"1","siid":4,"piid":63,"value":41},{"did":"1","siid":6,"piid":1,"value":"` + frame + `"}]}` + "\n"
 	}
-	old := time.Now().Add(-2 * liveFrameMaxAge)
-	_ = os.Chtimes(a.path(liveFrameFiles[1]), old, old)
+	writeFile(t, a, iotLogFile, line(now-60*60000, "[0,0]", "l0,0L5,5", "old run")+
+		line(now-6000, "[-2877,-1622]", "l-2942,-1623L51,0", "run1")+
+		`unrelated log line "siid":6,"piid":8,"value":"x"`+"\n"+
+		line(now-3000, "[-2793,-1627]", "l-2840,-1624", "run1"))
+	p := a.livePose()
+	if !p.Live || !reflect.DeepEqual(p.Robot, []int{-2793, -1627}) || !reflect.DeepEqual(p.Charger, []int{5, 455}) {
+		t.Fatalf("%+v", p)
+	}
+	if !reflect.DeepEqual(p.Path, [][]int{{-2942, -1623}, {-2891, -1623}, {-2840, -1624}}) {
+		t.Fatal("path of this run only, first point absolute and the rest relative:", p.Path)
+	}
+	// After the run nothing new arrives.
+	writeFile(t, a, iotLogFile, line(now-2*int64(liveFrameMaxAge/time.Millisecond), "[1,1]", "", "run1"))
+	writeFile(t, a, liveFrameFiles[1], "")
 	if a.livePose().Live {
-		t.Fatal("stale frame reported as live")
+		t.Fatal("stale frames reported as live")
 	}
 }

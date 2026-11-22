@@ -52,8 +52,17 @@ type mapView struct {
 }
 
 func decodeSavedFrame(encoded string) ([]byte, error) {
-	encoded = strings.NewReplacer("_", "/", "-", "+").Replace(strings.TrimSpace(encoded))
-	packed, err := base64.StdEncoding.DecodeString(encoded)
+	raw, err := decodeFrame(encoded)
+	if err == nil && raw[4] != 'I' {
+		return nil, errors.New("saved map is not a full I frame")
+	}
+	return raw, err
+}
+
+// decodeFrame unpacks any map frame: I (full) or P (changes, sent while cleaning).
+func decodeFrame(encoded string) ([]byte, error) {
+	encoded = strings.NewReplacer("_", "/", "-", "+").Replace(strings.TrimRight(strings.TrimSpace(encoded), "="))
+	packed, err := base64.RawStdEncoding.DecodeString(encoded) // padding is optional in the firmware's frames
 	if err != nil {
 		return nil, errors.New("map frame is not base64")
 	}
@@ -65,9 +74,6 @@ func decodeSavedFrame(encoded string) ([]byte, error) {
 	raw, err := io.ReadAll(io.LimitReader(r, (32<<20)+1))
 	if err != nil || len(raw) > 32<<20 || len(raw) < 27 {
 		return nil, errors.New("invalid map frame size")
-	}
-	if raw[4] != 'I' {
-		return nil, errors.New("saved map is not a full I frame")
 	}
 	return raw, nil
 }
