@@ -30,17 +30,22 @@ type mapView struct {
 	Passable           [][]int                    `json:"passable_thresholds"`
 	Impassable         [][]int                    `json:"impassable_thresholds"`
 	VWS                map[string]json.RawMessage `json:"-"`
-	Empty              bool                       `json:"empty"`
-	MapID              int                        `json:"map_id"`
-	Width              int                        `json:"width"`
-	Height             int                        `json:"height"`
-	GridSize           int                        `json:"grid_size"`
-	Origin             []int                      `json:"origin"`
-	Pixels             []byte                     `json:"pixels"`
-	Rooms              []mapRoom                  `json:"rooms"`
-	Revision           string                     `json:"revision"`
-	Source             string                     `json:"source"`
-	Live               bool                       `json:"live"`
+	// Virtual walls (vw.line), no-go zones (vw.rect) and no-mop zones (vw.mop), robot millimetres.
+	RestrictionsEditable bool      `json:"restrictions_editable"`
+	Walls                [][]int   `json:"walls"`
+	NoGo                 [][]int   `json:"no_go_zones"`
+	NoMop                [][]int   `json:"no_mop_zones"`
+	Empty                bool      `json:"empty"`
+	MapID                int       `json:"map_id"`
+	Width                int       `json:"width"`
+	Height               int       `json:"height"`
+	GridSize             int       `json:"grid_size"`
+	Origin               []int     `json:"origin"`
+	Pixels               []byte    `json:"pixels"`
+	Rooms                []mapRoom `json:"rooms"`
+	Revision             string    `json:"revision"`
+	Source               string    `json:"source"`
+	Live                 bool      `json:"live"`
 }
 
 func decodeSavedFrame(encoded string) ([]byte, error) {
@@ -79,7 +84,12 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 	var meta struct {
 		Origin []int                      `json:"origin"`
 		VWS    map[string]json.RawMessage `json:"vws"`
-		Walls  struct {
+		VW     *struct {
+			Line [][]int `json:"line"`
+			Rect [][]int `json:"rect"`
+			Mop  [][]int `json:"mop"`
+		} `json:"vw"`
+		Walls struct {
 			Version int `json:"version_flag"`
 		} `json:"walls_info"`
 		Segments map[string]struct {
@@ -91,6 +101,26 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		return view, errors.New("invalid map metadata")
 	}
 	view.VWS = meta.VWS
+	view.Walls, view.NoGo, view.NoMop = [][]int{}, [][]int{}, [][]int{}
+	if vw := meta.VW; vw != nil {
+		view.RestrictionsEditable = true
+		for _, list := range []*[][]int{&vw.Line, &vw.Rect, &vw.Mop} {
+			for _, row := range *list {
+				if len(row) != 4 {
+					view.RestrictionsEditable = false // unknown row shape: do not rewrite it
+				}
+			}
+		}
+		if vw.Line != nil {
+			view.Walls = vw.Line
+		}
+		if vw.Rect != nil {
+			view.NoGo = vw.Rect
+		}
+		if vw.Mop != nil {
+			view.NoMop = vw.Mop
+		}
+	}
 	view.Passable = [][]int{}
 	view.Impassable = [][]int{}
 	if meta.VWS != nil {
