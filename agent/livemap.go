@@ -3,6 +3,7 @@
 //     /tmp/log/fds_tmp_file_0 and _1 for its cloud upload (fds_hook.sh, /data/log/fds.log);
 //   - while the robot moves it sends a P frame every ~3 s as property 6/1 and logs each one,
 //     in full, to /data/log/ava_iot.log ("msgcvt>iot] ... properties_changed").
+//
 // Both are the saved-map base64/zlib frame. The metadata carries the robot and station
 // position and "tr", the piece of path since the previous frame; frames of one run share "mtid".
 package main
@@ -10,9 +11,13 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,6 +46,7 @@ type liveFrame struct {
 	mapID, angle   int
 	robot, charger []int
 	path, run      string
+	full           bool // I frame
 }
 
 func parseLiveFrame(encoded string) (liveFrame, bool) {
@@ -48,7 +54,7 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 	if err != nil {
 		return liveFrame{}, false
 	}
-	f := liveFrame{mapID: int(binary.LittleEndian.Uint16(raw[0:2])), angle: int(int16(binary.LittleEndian.Uint16(raw[9:11]))),
+	f := liveFrame{full: raw[4] == 'I', mapID: int(binary.LittleEndian.Uint16(raw[0:2])), angle: int(int16(binary.LittleEndian.Uint16(raw[9:11]))),
 		// header pose: int16 x, y at bytes 5..8, used when the metadata has none
 		robot: []int{int(int16(binary.LittleEndian.Uint16(raw[5:7]))), int(int16(binary.LittleEndian.Uint16(raw[7:9])))}}
 	w, h := int(binary.LittleEndian.Uint16(raw[19:21])), int(binary.LittleEndian.Uint16(raw[21:23]))
@@ -69,8 +75,54 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 	return f, true
 }
 
+type logFrames struct {
+	size   int64
+	mod    time.Time
+	frames []liveFrame
+}
+
+var (
+	logFramesMu    sync.Mutex
+	logFramesCache = map[string]logFrames{} // rotated logs never change, so they are parsed once
+)
+
+// iotLogFrames reads the P frames of the IoT log and its rotated copies (ava_iot-<date>.log,
+// ~1 MB each, about half an hour of cleaning), so a long run keeps its early path.
+func (a *agent) iotLogFrames() []liveFrame {
+	rotated, _ := filepath.Glob(a.path(strings.TrimSuffix(iotLogFile, ".log") + "-*.log"))
+	logFramesMu.Lock()
+	defer logFramesMu.Unlock()
+	var frames []liveFrame
+	seen := map[string]bool{}
+	for _, file := range append(rotated, a.path(iotLogFile)) {
+		st, err := os.Stat(file)
+		if err != nil {
+			continue
+		}
+		seen[file] = true
+		c, ok := logFramesCache[file]
+		if !ok || c.size != st.Size() || !c.mod.Equal(st.ModTime()) {
+			c = logFrames{size: st.Size(), mod: st.ModTime()}
+			if b, err := readLimited(file, 8<<20); err == nil {
+				for _, m := range mapPropValue.FindAllSubmatch(b, -1) {
+					if f, ok := parseLiveFrame(string(m[1])); ok {
+						c.frames = append(c.frames, f)
+					}
+				}
+			}
+			logFramesCache[file] = c
+		}
+		frames = append(frames, c.frames...)
+	}
+	for file := range logFramesCache {
+		if !seen[file] {
+			delete(logFramesCache, file)
+		}
+	}
+	return frames
+}
+
 // livePose returns {"live": false} when the robot sent no frame recently (not cleaning).
-// shortcut: frames in a rotated ava_iot log are not read, so a very long run loses its early path.
 func (a *agent) livePose() livePose {
 	var frames []liveFrame
 	for _, file := range liveFrameFiles {
@@ -80,13 +132,7 @@ func (a *agent) livePose() livePose {
 			}
 		}
 	}
-	if b, err := readLimited(a.path(iotLogFile), 8<<20); err == nil {
-		for _, m := range mapPropValue.FindAllSubmatch(b, -1) {
-			if f, ok := parseLiveFrame(string(m[1])); ok {
-				frames = append(frames, f)
-			}
-		}
-	}
+	frames = append(frames, a.iotLogFrames()...)
 	if len(frames) == 0 {
 		return livePose{}
 	}
@@ -99,6 +145,9 @@ func (a *agent) livePose() livePose {
 	for _, f := range frames {
 		if f.run != last.run {
 			continue
+		}
+		if f.full { // a run starts with I frames; the first one still carries the previous run's mtid
+			pose.Path = nil
 		}
 		pose.Path = append(pose.Path, parsePath(f.path)...)
 		if f.charger != nil && f.charger[0] != 32767 { // 32767: not known in this frame
