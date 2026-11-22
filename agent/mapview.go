@@ -37,6 +37,7 @@ type mapView struct {
 	NoMop                [][]int `json:"no_mop_zones"`
 	// Per-room cleaning settings by room id, from /data/ri/setting.json2; see roomsettings.go.
 	RoomSettings map[string][]int `json:"room_settings"`
+	Charger      []int            `json:"charger,omitempty"` // station position, robot millimetres
 	Empty        bool             `json:"empty"`
 	MapID        int              `json:"map_id"`
 	Width        int              `json:"width"`
@@ -94,6 +95,7 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		Walls struct {
 			Version int `json:"version_flag"`
 		} `json:"walls_info"`
+		Charger  []int `json:"charger"`
 		Segments map[string]struct {
 			Name string `json:"name"`
 			Type int    `json:"type"`
@@ -145,6 +147,9 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 				}
 			}
 		}
+	}
+	if len(meta.Charger) == 2 {
+		view.Charger = meta.Charger
 	}
 	view.Origin = []int{int(int16(binary.LittleEndian.Uint16(raw[23:25]))), int(int16(binary.LittleEndian.Uint16(raw[25:27])))}
 	if len(meta.Origin) == 2 {

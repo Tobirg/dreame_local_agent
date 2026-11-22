@@ -24,7 +24,7 @@ export function roomCommand(ids,fan,water,repeats=1){
 }
 const command=(name,args={})=>control('/api/v1/command',{name,...args});
 function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
-function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update';}
+function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.live_pose'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
 async function api(method,params=null){
  const read=isRead(method),requestID=read?null:Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
@@ -240,10 +240,31 @@ function renderState(snap){
   $('robot-error').hidden=!s.error;$('robot-error').textContent=s.error?'Ошибка '+s.error+': '+errorText(s):'';
   renderCare(s);
   // The agent records a finished run after its next totals read; reload the history then.
-  const active=['cleaning','paused','returning'].includes(s.activity);if(wasActive&&!active)setTimeout(()=>loadHistory().catch(()=>{}),12000);wasActive=active;
+  const active=['cleaning','paused','returning'].includes(s.activity);if(wasActive&&!active)setTimeout(()=>loadHistory().catch(()=>{}),12000);wasActive=active;followLive(active);
   for(const listener of stateListeners)try{listener.fn(s);}catch{}
   if(snap.stale){connectionLost(snap.error||'Нет свежих данных от робота');return;}
   $('connection').textContent='Подключён';$('connection').classList.remove('connection-offline');$('reconnect').hidden=true;
+}
+// ---- Live position: while the robot is out, read the newest frame the firmware wrote for the cloud.
+let live=null,liveTimer=null;
+async function refreshLive(){
+ try{live=await api('local.live_pose');}catch{live=null;}
+ $('live-info').textContent=live?.live?'Положение робота обновлено '+new Date(live.updated_at).toLocaleTimeString():'Сохранённая карта · положение робота и путь видны во время уборки';
+ draw();
+}
+function followLive(active){
+ if(active&&!liveTimer){refreshLive();liveTimer=setInterval(()=>{if(!document.hidden)refreshLive();},3000);}
+ else if(!active&&liveTimer){clearInterval(liveTimer);liveTimer=null;refreshLive();}
+}
+function drawLive(){
+ const px=(x,y)=>{const p=robotToPixel(view,x,y);return [p[0]*3,(view.height-p[1])*3];};
+ const dot=(p,color,r)=>{const [x,y]=px(...p);ctx.fillStyle=color;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.stroke();};
+ ctx.save();
+ const current=live?.live&&live.map_id===view.map_id?live:null;
+ if(current?.path?.length>1){ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=1.5;ctx.beginPath();current.path.forEach((p,i)=>{const [x,y]=px(...p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
+ const charger=current?.charger||view.charger;if(charger)dot(charger,'#55f2aa',5);
+ if(current?.robot)dot(current.robot,'#4da3ff',7);
+ ctx.restore();
 }
 // ---- Cleaning history kept by the agent, newest first.
 let wasActive=false;
@@ -329,7 +350,7 @@ function draw(){
  bc.putImageData(image,0,0);ctx.imageSmoothingEnabled=false;ctx.drawImage(buffer,0,0,canvas.width,canvas.height);
  ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
  for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
- drawThresholds();drawRestrictions();
+ drawThresholds();drawRestrictions();drawLive();
  if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(a.x*scale,(view.height-a.y)*scale,15*scale*50/view.grid_size,0,Math.PI*2);ctx.fill();ctx.stroke();}
  else if(zone.length){const [a,b=a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}

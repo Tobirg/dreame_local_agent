@@ -18,7 +18,7 @@ type commandMemo struct {
 }
 
 func requestIsRead(req request) bool {
-	if req.Method == "get_properties" || req.Method == "miIO.info" || req.Method == "local.maps" || req.Method == "local.map_view" || strings.HasSuffix(req.Method, "_status") {
+	if req.Method == "get_properties" || req.Method == "miIO.info" || req.Method == "local.maps" || req.Method == "local.map_view" || req.Method == "local.live_pose" || strings.HasSuffix(req.Method, "_status") {
 		return true
 	}
 	return false

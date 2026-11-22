@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.15.0"
+var version = "0.16.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -303,6 +303,11 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 		return a.wifiStatus(), nil
 	case "local.wifi_setup":
 		return a.setupWiFi(ctx, req.Params)
+	case "local.live_pose":
+		if params != nil {
+			return nil, errors.New("local.live_pose takes no parameters")
+		}
+		return a.livePose(), nil
 	case "local.map_view":
 		if params != nil {
 			return nil, errors.New("local.map_view takes no parameters")
