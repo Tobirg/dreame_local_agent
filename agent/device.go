@@ -63,11 +63,12 @@ func activity(status int64, charging int64, hasCharging bool) string {
 }
 
 type snapshot struct {
-	Seq       uint64         `json:"seq"`
-	UpdatedAt *time.Time     `json:"updated_at"`
-	Stale     bool           `json:"stale"`
-	Error     string         `json:"error,omitempty"`
-	State     map[string]any `json:"state"`
+	Seq       uint64          `json:"seq"`
+	UpdatedAt *time.Time      `json:"updated_at"`
+	Stale     bool            `json:"stale"`
+	Error     string          `json:"error,omitempty"`
+	State     map[string]any  `json:"state"`
+	Command   *commandOutcome `json:"command,omitempty"` // see outcome.go
 }
 
 type device struct {
@@ -130,10 +131,10 @@ func (a *agent) poll(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
-	if a.dev.snap.Stale || !reflect.DeepEqual(a.dev.snap.State, state) {
+	if a.settleCommandLocked(state, now) || a.dev.snap.Stale || !reflect.DeepEqual(a.dev.snap.State, state) {
 		a.bumpLocked()
 	}
-	a.dev.snap = snapshot{Seq: a.dev.snap.Seq, UpdatedAt: &now, State: state}
+	a.dev.snap = snapshot{Seq: a.dev.snap.Seq, UpdatedAt: &now, State: state, Command: a.dev.snap.Command}
 	a.dev.polled = true
 	a.trackRun(state, withDetails)
 }
@@ -473,7 +474,11 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 		return nil, err
 	}
 	a.refreshSoon()
-	return result, rejected(result)
+	if err := rejected(result); err != nil {
+		return result, err
+	}
+	a.noteCommand(p)
+	return result, nil
 }
 
 // rejected reports a non-zero MIOT code; code0 is acceptance only, not physical completion.

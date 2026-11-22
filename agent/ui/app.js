@@ -226,6 +226,14 @@ async function refresh(){
   const wifi=await api('local.wifi_status');if(epoch!==viewEpoch||!token)return;renderNetwork(wifi);
  }catch(e){if(!e.suspended&&epoch===viewEpoch){connectionLost(e.message);}}finally{if(epoch===viewEpoch)refreshing=false;}
 }
+// The agent reports whether the robot's state showed the last accepted command's effect (outcome.go).
+let commandSeen=null;
+function renderCommand(c){
+  const key=c?c.at+c.outcome:'';
+  if(commandSeen!==null&&key!==commandSeen&&c?.outcome==='executed')toast('Робот выполнил команду');
+  if(commandSeen!==null&&key!==commandSeen&&c?.outcome==='unknown')toast('Робот принял команду, но за 30 с не видно, что она выполнена',true);
+  commandSeen=key;
+}
 function renderState(snap){
   if(!snap?.state||typeof snap.state!=='object')throw Error('Некорректный ответ статуса');
   if(snap.stale&&!snap.updated_at)throw Error(snap.error||'Агент ещё не прочитал состояние робота');
@@ -243,6 +251,7 @@ function renderState(snap){
   // The agent records a finished run after its next totals read; reload the history then.
   const active=['cleaning','paused','returning'].includes(s.activity);if(wasActive&&!active)setTimeout(()=>loadHistory().catch(()=>{}),12000);wasActive=active;followLive(active);
   for(const listener of stateListeners)try{listener.fn(s);}catch{}
+  renderCommand(snap.command);
   if(snap.stale){connectionLost(snap.error||'Нет свежих данных от робота');return;}
   $('connection').textContent='Подключён';$('connection').classList.remove('connection-offline');$('reconnect').hidden=true;
 }

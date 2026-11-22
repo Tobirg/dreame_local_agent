@@ -53,7 +53,11 @@ func TestModuleServiceLifecycle(t *testing.T) {
 	}
 	data := a.moduleDataDir("svc")
 	runs := func() []string { b, _ := os.ReadFile(filepath.Join(data, "runs")); return strings.Fields(string(b)) }
-	pid := func() int { b, _ := os.ReadFile(filepath.Join(data, "pid")); n, _ := strconv.Atoi(strings.TrimSpace(string(b))); return n }
+	pid := func() int {
+		b, _ := os.ReadFile(filepath.Join(data, "pid"))
+		n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+		return n
+	}
 	alive := func(p int) bool { return p > 0 && syscall.Kill(p, 0) == nil }
 
 	install("1.0.0")
