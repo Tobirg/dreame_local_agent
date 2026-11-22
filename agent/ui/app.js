@@ -65,6 +65,7 @@ function disableControls(disabled){
  document.querySelectorAll('[data-command],#stage-update,#apply-update,#rollback-update,#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-apply').forEach(b=>b.disabled=disabled);
  $('clean-rooms').disabled=disabled||selected.size===0;
  $('clean-zone').disabled=disabled||zone.length!==(zoneSpot?1:2);
+ $('cancel-zone').disabled=!zoneDrawing&&!zone.length;
  $('save-restrict').disabled=disabled||!restrictDraft||!view?.restrictions_editable;
  $('draw-restrict').disabled=disabled||!view?.restrictions_editable;
  $('apply-map-edit').disabled=disabled||!pending;
@@ -435,6 +436,7 @@ for(const id of ['room-fan','room-water','room-repeats'])$(id).onchange=()=>{roo
 // ---- Zone cleaning: two opposite corners on the map; the agent checks the rectangle against the saved map.
 $('draw-zone').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zoneSpot=false;zone=[];$('clean-zone').textContent='Убрать зону';$('zone-status').textContent='Нажми на два противоположных угла зоны.';disableControls(busy);draw();};
 $('draw-spot').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zoneSpot=true;zone=[];$('clean-zone').textContent='Убрать вокруг точки';$('zone-status').textContent='Нажми на точку на карте.';disableControls(busy);draw();};
+$('cancel-zone').onclick=()=>{zoneDrawing=false;zone=[];$('zone-status').textContent='Выбор снят.';disableControls(busy);draw();};
 $('clean-zone').onclick=async()=>{
  try{const [a,b]=zone.map(p=>pixelToRobot(view,p.x,p.y)),mapID=view.map_id;
   const target=zoneSpot?{name:'clean_spot',points:[a]}:{name:'clean_zone',zones:[[a[0],a[1],b[0],b[1]]]};
