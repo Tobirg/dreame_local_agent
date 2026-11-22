@@ -206,10 +206,69 @@ func (a *agent) mapCard() (map[string]any, error) {
 		y := float64(view.Height*view.GridSize-(p[1]-view.Origin[1])) * mapScale / float64(view.GridSize)
 		points = append(points, map[string]any{"vacuum": map[string]int{"x": p[0], "y": p[1]}, "map": map[string]float64{"x": x, "y": y}})
 	}
-	rooms := map[string]any{} // id -> name and centre in robot millimetres, for card labels
+	// id -> name, centre and outline in robot millimetres: the card's "Generate rooms config" reads these.
+	rooms := map[string]any{}
 	for _, r := range view.Rooms {
-		rooms[strconv.Itoa(r.ID)] = map[string]any{"name": r.Name,
+		outline := [][2]int{}
+		for _, p := range roomOutline(view, r.ID) {
+			outline = append(outline, [2]int{view.Origin[0] + p[0]*view.GridSize, view.Origin[1] + p[1]*view.GridSize})
+		}
+		rooms[strconv.Itoa(r.ID)] = map[string]any{"name": r.Name, "outline": outline,
 			"x": view.Origin[0] + int(r.X*float64(view.GridSize)), "y": view.Origin[1] + int(r.Y*float64(view.GridSize))}
 	}
 	return map[string]any{"map_id": view.MapID, "calibration_points": points, "rooms": rooms}, nil
+}
+
+// roomOutline is the longest boundary loop of the room's cells, as cell-corner coordinates
+// with straight runs merged. shortcut: holes and separate pieces of a room are left out.
+func roomOutline(view mapView, id int) [][2]int {
+	in := func(x, y int) bool {
+		return x >= 0 && y >= 0 && x < view.Width && y < view.Height && int(view.Pixels[y*view.Width+x]) == id
+	}
+	next := map[[2]int][][2]int{} // boundary edges, counter-clockwise around the room
+	edge := func(a, b [2]int) { next[a] = append(next[a], b) }
+	for y := 0; y < view.Height; y++ {
+		for x := 0; x < view.Width; x++ {
+			if !in(x, y) {
+				continue
+			}
+			if !in(x, y-1) {
+				edge([2]int{x, y}, [2]int{x + 1, y})
+			}
+			if !in(x+1, y) {
+				edge([2]int{x + 1, y}, [2]int{x + 1, y + 1})
+			}
+			if !in(x, y+1) {
+				edge([2]int{x + 1, y + 1}, [2]int{x, y + 1})
+			}
+			if !in(x-1, y) {
+				edge([2]int{x, y + 1}, [2]int{x, y})
+			}
+		}
+	}
+	var best [][2]int
+	for y := 0; y <= view.Height; y++ {
+		for x := 0; x <= view.Width; x++ {
+			start := [2]int{x, y}
+			loop := [][2]int{}
+			for p := start; len(next[p]) > 0; {
+				q := next[p][len(next[p])-1]
+				next[p] = next[p][:len(next[p])-1]
+				loop = append(loop, p)
+				p = q
+			}
+			if len(loop) > len(best) {
+				best = loop
+			}
+		}
+	}
+	out := [][2]int{}
+	for i, p := range best {
+		a, b := best[(i+len(best)-1)%len(best)], best[(i+1)%len(best)]
+		if (a[0] == p[0] && p[0] == b[0]) || (a[1] == p[1] && p[1] == b[1]) {
+			continue // middle of a straight run
+		}
+		out = append(out, p)
+	}
+	return out
 }

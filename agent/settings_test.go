@@ -137,4 +137,9 @@ func TestMapCardCalibration(t *testing.T) {
 	if x, _ := room["x"].(int); room == nil || x < -100 || x > 0 {
 		t.Fatal(card["rooms"])
 	}
+	// The L of three cells: six corners, counter-clockwise from the bottom-left, in millimetres.
+	want := [][2]int{{-100, -200}, {0, -200}, {0, -150}, {-50, -150}, {-50, -100}, {-100, -100}}
+	if got := room["outline"]; !reflect.DeepEqual(got, want) {
+		t.Fatal(got)
+	}
 }
