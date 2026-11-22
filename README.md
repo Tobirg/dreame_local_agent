@@ -83,6 +83,8 @@ go vet ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o dreame-local-agent-linux-arm64 .
 ```
 
+Релизная сборка с версией из `agent/main.go` и SHA-256: `sh build.sh` → `dist/dreame-local-agent-<версия>-linux-arm64` и `.sha256`. На GitHub (`.github/workflows/ci.yml`) тесты идут при каждой отправке кода, а тег `v<версия>` публикует релиз с этими файлами; версия тега должна совпадать с версией агента.
+
 ## Установка
 
 Создай `bridge/config.json` на основе `bridge/config.example.json`; задай случайный `token` длиной не менее 32 символов и значения `expected_model`, `expected_did`, `expected_mac`, соответствующие твоему устройству. **Не публикуй этот файл**.
