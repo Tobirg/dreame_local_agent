@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.13.0"
+var version = "0.14.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -459,6 +459,13 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/api/v1/history":
+		if r.Method != "GET" {
+			send(405, map[string]string{"error": "GET required"})
+			return
+		}
+		send(200, map[string]any{"result": a.readHistory()})
+		return
 	case "/api/v1/events":
 		if r.Method != "GET" {
 			send(405, map[string]string{"error": "GET required"})

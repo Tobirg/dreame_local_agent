@@ -79,6 +79,7 @@ type device struct {
 	hashes    map[string]string
 	details   map[string]any // consumables, stats, dnd; see details.go
 	detailsAt time.Time
+	run       *cleanRun     // cleaning in progress; see history.go
 	changed   chan struct{} // closed on the next snapshot change; see watch
 	streams   atomic.Int32
 }
@@ -134,6 +135,7 @@ func (a *agent) poll(ctx context.Context) {
 	}
 	a.dev.snap = snapshot{Seq: a.dev.snap.Seq, UpdatedAt: &now, State: state}
 	a.dev.polled = true
+	a.trackRun(state, withDetails)
 }
 
 func normalize(result any) (map[string]any, error) {

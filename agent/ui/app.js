@@ -239,10 +239,26 @@ function renderState(snap){
   $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—')+(s.error_name?' ('+s.error_name+')':'');
   $('robot-error').hidden=!s.error;$('robot-error').textContent=s.error?'Ошибка '+s.error+': '+errorText(s):'';
   renderCare(s);
+  // The agent records a finished run after its next totals read; reload the history then.
+  const active=['cleaning','paused','returning'].includes(s.activity);if(wasActive&&!active)setTimeout(()=>loadHistory().catch(()=>{}),12000);wasActive=active;
   for(const listener of stateListeners)try{listener.fn(s);}catch{}
   if(snap.stale){connectionLost(snap.error||'Нет свежих данных от робота');return;}
   $('connection').textContent='Подключён';$('connection').classList.remove('connection-offline');$('reconnect').hidden=true;
 }
+// ---- Cleaning history kept by the agent, newest first.
+let wasActive=false;
+const runModes={cleaning:'Уборка',room_cleaning:'Уборка комнат',zone_cleaning:'Уборка зоны',spot_cleaning:'Точечная уборка',part_cleaning:'Локальная уборка',edge_cleaning:'Вдоль стен',mapping:'Построение карты'};
+async function loadHistory(){
+ const runs=await api('/api/v1/history'),rows=runs.slice(0,30).map(r=>{
+  const row=document.createElement('div'),start=new Date(r.start),minutes=r.minutes??(r.end?Math.round((new Date(r.end)-start)/60000):null);
+  row.className='module-row';
+  row.textContent=start.toLocaleString([], {dateStyle:'short',timeStyle:'short'})+' · '+(runModes[r.mode]||r.mode||'Уборка')+(minutes!==null?' · '+Math.round(minutes)+' мин':'')+(r.area!==undefined?' · '+r.area+' м²':'')+' · '+(r.result==='error'?'ошибка: '+errorText({error_name:r.error}):r.result==='docked'?'на базе':'остановлена');
+  return row;
+ });
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Уборок пока не было.'}));
+ $('history').replaceChildren(...rows);
+}
+$('refresh-history').onclick=()=>loadHistory().catch(e=>toast(e.message,true));
 // ---- Maintenance: consumables, totals and do-not-disturb come with the state once a minute.
 const consumableNames={main_brush:'Основная щётка',side_brush:'Боковая щётка',filter:'Фильтр',sensor:'Датчики',tank_filter:'Фильтр бака',mop_pad:'Салфетки',silver_ion:'Ионы серебра',detergent:'Моющее средство',squeegee:'Скребок',dirty_water_channel:'Канал грязной воды',onboard_dirty_water_tank:'Бак грязной воды робота',deodorizer:'Дезодоратор',wheel:'Колёса',scale_inhibitor:'Антинакипин',fluffing_roller:'Взбивающий валик',roller_mop_filter:'Фильтр валика',water_outlet_filter:'Фильтр слива',track:'Направляющие',washboard:'Поддон мойки',filter_cleaning:'Очистка фильтра'};
 // Russian texts for common error codes; others show the agent's English name.
@@ -353,7 +369,7 @@ async function login(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('main-page').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
+ await refresh();await refreshMap();await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
