@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.21.1"
+var version = "0.22.1"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -263,6 +263,8 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 	switch req.Method {
 	case "miIO.info":
 		return info, nil
+	case "local.settings":
+		return a.readSettings(ctx, info["did"])
 	case "local.setting":
 		if err := a.robotWriteAllowed(info); err != nil {
 			return nil, err
@@ -480,6 +482,30 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(img)
+		return
+	case "/api/v1/map":
+		if r.Method != "GET" {
+			send(405, map[string]string{"error": "GET required"})
+			return
+		}
+		card, err := a.mapCard()
+		if err != nil {
+			send(404, map[string]string{"error": err.Error()})
+			return
+		}
+		send(200, map[string]any{"result": card})
+		return
+	case "/api/v1/settings":
+		if r.Method != "GET" {
+			send(405, map[string]string{"error": "GET required"})
+			return
+		}
+		result, err := a.call(r.Context(), request{Method: "local.settings", Params: json.RawMessage("null")})
+		if err != nil {
+			send(502, rpcErrorResponse(err))
+			return
+		}
+		send(200, map[string]any{"result": result})
 		return
 	case "/api/v1/history":
 		if r.Method != "GET" {

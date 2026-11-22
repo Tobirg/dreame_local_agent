@@ -9,7 +9,7 @@ let token=sessionStorage.getItem('dreame-token')||localStorage.getItem('dreame-t
 let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false;
 let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
 const activeReads=new Set(),settingsDirty=new Set();
-let zoneDrawing=false,zoneSpot=false,zone=[],dndDirty=false,careShown='',restrictDraft=null,restrictDrawing=false,restrictPoint=null;
+let zoneDrawing=false,zoneSpot=false,zone=[],zoneHover=null,zoneDrag=null,dndDirty=false,careShown='',restrictDraft=null,restrictDrawing=false,restrictPoint=null;
 const canvas=$('map'),ctx=canvas.getContext('2d');
 
 export function pixelToRobot(v,x,y){
@@ -365,6 +365,7 @@ function renderRoomButtons(){
  for(const room of view?.rooms||[]){const b=document.createElement('button');b.textContent=room.name+' · '+room.id;b.classList.toggle('selected',selected.has(room.id));b.setAttribute('aria-pressed',String(selected.has(room.id)));b.onclick=()=>selectRoom(room.id);$('rooms').append(b);}
 }
 function draw(){
+ canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
  ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;
  const grid=view.grid,scale=3,buffer=document.createElement('canvas');buffer.width=view.width;buffer.height=view.height;const bc=buffer.getContext('2d'),image=bc.createImageData(view.width,view.height);
  for(let i=0;i<grid.length;i++){
@@ -378,7 +379,7 @@ function draw(){
  for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
  drawThresholds();drawRestrictions();drawLive();
  if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const h=750/view.grid_size*scale;ctx.fillRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);ctx.strokeRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);}
- else if(zone.length){const [a,b=a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
+ else if(zone.length){const [a,b=zoneHover||a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
 }
 async function refreshMap(){
@@ -395,9 +396,30 @@ async function refreshMap(){
   renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();draw();disableControls(busy);
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('map-info').textContent=e.message;connectionLost(e.message);}}
 }
+function mapPoint(e){const rect=canvas.getBoundingClientRect();return {x:(e.clientX-rect.left)*view.width/rect.width,y:view.height-(e.clientY-rect.top)*view.height/rect.height};}
+// Zone: the first press sets a corner, the opposite corner follows the pointer (a finger drags it)
+// and the next press, or releasing a drag, fixes it.
+canvas.onpointerdown=e=>{
+ if(!zoneDrawing||zoneSpot||!view||view.empty||busy)return;
+ const p=mapPoint(e);zoneDrag={second:zone.length===1,x:e.clientX,y:e.clientY,moved:false};
+ if(!zone.length){zone=[p];zoneHover=p;$('zone-status').textContent='Веди к противоположному углу и нажми ещё раз.';}
+ canvas.setPointerCapture?.(e.pointerId);draw();
+};
+canvas.onpointermove=e=>{
+ if(!zoneDrawing||zoneSpot||zone.length!==1)return;
+ if(zoneDrag&&Math.hypot(e.clientX-zoneDrag.x,e.clientY-zoneDrag.y)>8)zoneDrag.moved=true;
+ zoneHover=mapPoint(e);draw();
+};
+canvas.onpointerup=e=>{
+ const drag=zoneDrag;zoneDrag=null;
+ if(!drag||!zoneDrawing||zoneSpot||zone.length!==1||!(drag.second||drag.moved))return;
+ zone.push(mapPoint(e));zoneHover=null;zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';draw();disableControls(busy);
+};
+canvas.onpointercancel=()=>{zoneDrag=null;};
 canvas.onclick=e=>{
  if(!view||view.empty||busy)return;
- const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)*view.width/rect.width,y=view.height-(e.clientY-rect.top)*view.height/rect.height;
+ const {x,y}=mapPoint(e);
+ if(zoneDrawing&&!zoneSpot)return; // pointer handlers below
  if(restrictDrawing){addRestrictionPoint(x,y);return;}
  if(zoneDrawing){zone.push({x,y});if(zoneSpot){zoneDrawing=false;$('zone-status').textContent='Будет убран квадрат 1,5 × 1,5 м вокруг точки. Повторы, мощность и влажность — как для комнат.';}else if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
@@ -434,9 +456,9 @@ $('clear-selection').onclick=()=>{selected.clear();points=[];invalidateEdit();re
 $('clean-rooms').onclick=async()=>{try{const ids=[...selected],mapID=view?.map_id;const args=roomCommand(ids,Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));await control('/api/v1/command',args,async()=>{const current=await api('local.map_view');if(current.map_id!==mapID||!ids.every(id=>current.rooms.some(r=>r.id===id)))throw Error('Комнаты изменились. Обнови карту и выбери их заново.');});}catch(e){toast(e.message,true);}};
 for(const id of ['room-fan','room-water','room-repeats'])$(id).onchange=()=>{roomOptionsDirty=true;};
 // ---- Zone cleaning: two opposite corners on the map; the agent checks the rectangle against the saved map.
-$('draw-zone').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zoneSpot=false;zone=[];$('clean-zone').textContent='Убрать зону';$('zone-status').textContent='Нажми на два противоположных угла зоны.';disableControls(busy);draw();};
+$('draw-zone').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zoneSpot=false;zone=[];$('clean-zone').textContent='Убрать зону';$('zone-status').textContent='Нажми на угол зоны, затем на противоположный (на телефоне можно провести пальцем).';disableControls(busy);draw();};
 $('draw-spot').onclick=()=>{if(!view||view.empty||busy)return;zoneDrawing=true;zoneSpot=true;zone=[];$('clean-zone').textContent='Убрать вокруг точки';$('zone-status').textContent='Нажми на точку на карте.';disableControls(busy);draw();};
-$('cancel-zone').onclick=()=>{zoneDrawing=false;zone=[];$('zone-status').textContent='Выбор снят.';disableControls(busy);draw();};
+$('cancel-zone').onclick=()=>{zoneDrawing=false;zone=[];zoneHover=null;$('zone-status').textContent='Выбор снят.';disableControls(busy);draw();};
 $('clean-zone').onclick=async()=>{
  try{const [a,b]=zone.map(p=>pixelToRobot(view,p.x,p.y)),mapID=view.map_id;
   const target=zoneSpot?{name:'clean_spot',points:[a]}:{name:'clean_zone',zones:[[a[0],a[1],b[0],b[1]]]};

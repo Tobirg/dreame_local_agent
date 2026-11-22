@@ -54,7 +54,7 @@ func (a *agent) scopeOf(auth string) string {
 func limitedRoute(scope string, r *http.Request) bool {
 	p := r.URL.Path
 	switch {
-	case r.Method == "GET" && (p == "/api/v1/state" || p == "/api/v1/capabilities" || p == "/api/v1/events" || p == "/api/v1/history" || p == "/api/v1/map.png"):
+	case r.Method == "GET" && (p == "/api/v1/state" || p == "/api/v1/capabilities" || p == "/api/v1/events" || p == "/api/v1/history" || p == "/api/v1/map.png" || p == "/api/v1/settings" || p == "/api/v1/map"):
 		return true
 	case scope == "module":
 		return r.Method == "POST" && p == "/api/v1/firmware_message"

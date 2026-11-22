@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/png"
 	"math"
+	"strconv"
 )
 
 // Same colours as ui/app.js.
@@ -187,4 +188,28 @@ func abs(v int) int {
 		return -v
 	}
 	return v
+}
+
+// mapCard is what a Home Assistant map card needs next to map.png: how robot millimetres land
+// on the image (three points, the xiaomi-vacuum-map-card format) and the room names.
+func (a *agent) mapCard() (map[string]any, error) {
+	view, err := a.mapView()
+	if err != nil {
+		return nil, err
+	}
+	if view.Empty || len(view.Origin) != 2 {
+		return nil, errors.New("no saved map")
+	}
+	points := []map[string]any{}
+	for _, p := range [][2]int{{0, 0}, {1000, 0}, {0, 1000}} {
+		x := float64(p[0]-view.Origin[0]) * mapScale / float64(view.GridSize)
+		y := float64(view.Height*view.GridSize-(p[1]-view.Origin[1])) * mapScale / float64(view.GridSize)
+		points = append(points, map[string]any{"vacuum": map[string]int{"x": p[0], "y": p[1]}, "map": map[string]float64{"x": x, "y": y}})
+	}
+	rooms := map[string]any{} // id -> name and centre in robot millimetres, for card labels
+	for _, r := range view.Rooms {
+		rooms[strconv.Itoa(r.ID)] = map[string]any{"name": r.Name,
+			"x": view.Origin[0] + int(r.X*float64(view.GridSize)), "y": view.Origin[1] + int(r.Y*float64(view.GridSize))}
+	}
+	return map[string]any{"map_id": view.MapID, "calibration_points": points, "rooms": rooms}, nil
 }

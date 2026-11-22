@@ -406,6 +406,8 @@ type commandParams struct {
 	Enabled    *bool   `json:"enabled"`
 	Start      string  `json:"start"`
 	End        string  `json:"end"`
+	Setting    string  `json:"setting"` // set_setting: a ui/settings.js id
+	To         any     `json:"to"`      // set_setting: the new value
 }
 
 // runCommand is reached through call(), so it already holds the IPC gate and passed identity checks.
@@ -415,6 +417,13 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 	d.DisallowUnknownFields()
 	if d.Decode(&p) != nil {
 		return nil, errors.New("invalid command")
+	}
+	if p.Name == "set_setting" {
+		result, err := a.setSetting(ctx, p.Setting, p.To, info["did"])
+		if err == nil {
+			a.refreshSoon()
+		}
+		return result, err
 	}
 	c, ok := commandTable[p.Name]
 	if !ok {
