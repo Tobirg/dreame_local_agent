@@ -22,5 +22,23 @@ class HookTests(unittest.TestCase):
             install.prepare_hook('not a script')
 
 
+class ConfigTests(unittest.TestCase):
+    def test_identity_and_new_config(self):
+        ident = install.parse_identity('model=dreame.vacuum.r2505\ndid=123456789\nmac=AA:BB:CC:DD:EE:FF\n')
+        self.assertEqual(ident, {'model': 'dreame.vacuum.r2505', 'did': '123456789', 'mac': 'aa:bb:cc:dd:ee:ff'})
+        a, b = install.new_config(ident, True), install.new_config(ident, False)
+        self.assertGreaterEqual(len(a['token']), 32)
+        self.assertNotEqual(a['token'], b['token'])
+        self.assertEqual((a['expected_did'], a['allow_control'], b['allow_control']), ('123456789', True, False))
+        with self.assertRaises(RuntimeError):
+            install.parse_identity('model=x\n')
+
+    def test_reinstall_keeps_tokens(self):
+        installed = '{"token": "old", "tokens": [{"name": "ha"}], "allow_unverified_firmware": true}'
+        merged = install.merge_config(installed, {'token': 'new', 'port': 8765})
+        self.assertEqual(merged, {'token': 'new', 'port': 8765, 'tokens': [{'name': 'ha'}], 'allow_unverified_firmware': True})
+        self.assertEqual(install.merge_config('', {'token': 'new'}), {'token': 'new'})
+
+
 if __name__ == '__main__':
     unittest.main()
