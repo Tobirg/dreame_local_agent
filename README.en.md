@@ -1,0 +1,99 @@
+# Dreame Local Agent
+
+[Русский](README.md)
+
+A local service for rooted Dreame robot vacuums: control without the cloud, from a browser or from a smart home. Tested on the Dreame X50 Pioneer Edition (R2505), firmware 4.3.9_2021. The service does not provide a way to root the robot; it is installed on a robot that is already unlocked.
+
+The agent is written in Go and runs **on the vacuum itself**. It calls the firmware's own `avacmd` and serves an HTTP API and a built-in web interface. No extra computer is needed.
+
+## Features
+
+- State; cleaning of the whole home, rooms, a zone or a spot; the station (dust emptying, mop washing and drying); suction and volume.
+- Map: the saved map with rooms, the robot position and cleaned path while cleaning, merging and splitting rooms, thresholds, virtual walls, no-go and no-mop zones, per-room cleaning settings.
+- Consumables with remaining life and reset, totals, do-not-disturb, cleaning history, readable error texts, every setting the robot reports.
+- Detects the model and firmware by itself and shows only what the robot supports; on unknown firmware it only reads.
+- Event stream, tokens with read or control rights, agent updates from the browser with automatic rollback.
+- Modules installed from the web interface: [MQTT and Home Assistant](../dreame-module-mqtt), [region guard](../dreame-module-region).
+- Wi-Fi setup and a captive portal in access-point mode.
+
+Map and station commands are verified on R2505; zone and spot cleaning, history and the robot path are so far covered by tests only.
+
+## Install
+
+You need ADB with root on the robot and an agent build (`sh build.sh`, see below). One command:
+
+```sh
+python3 tools/install_agent.py --serial ROBOT_IP:4567
+```
+
+Without a config file (`bridge/config.json` or the one given with `--config`) the installer reads the model, `did` and `mac` from the robot, generates a random API token and saves the config with mode 600. **Do not publish this file.** `--read-only` turns control off (state and map only). On reinstall, fields of the installed config the installer does not manage (extra tokens, `allow_unverified_firmware`) are kept. At the end the installer reports whether the firmware matches a checked profile and whether control is on.
+
+The installer checks root, ARM64 and the robot identity, deploys the agent to `/data/dreame-local`, checks SHA-256 and the HTTP answer, and adds the agent start and the modules' `boot-env.sh` to the existing `/data/test/ava.sh` boot hook, keeping a backup. A firmware update renames `ava.sh` to `ava.sh_ok`: after it the agent and modules do not start until the hook is restored. `--no-boot-hook` installs without touching the hook.
+
+Web interface: `http://ROBOT_IP:8765/`. Do not expose port 8765 to the internet: the interface is meant for a trusted LAN.
+
+## API for adapters (`/api/v1`)
+
+Every request carries `Authorization: Bearer <token>`; the answer is `{"result": ...}` or `{"error": ...}`.
+
+- `GET /api/v1/state` — cached state. The agent polls the robot every 5 s and right after a command, so clients never load the robot. Fields: `activity` (`cleaning|paused|returning|docked|idle|error`), `status`/`status_name`, `battery`, `charging`, `suction`, `water`, `station`, `volume`, `error`/`error_name`, `region`, `region_code`; once a minute also `consumables` (`{"filter": {"left": %, "hours": h}}`, only what the model reports), `stats` (`cleanings`, `minutes`, `area` m²) and `dnd` (`enabled`, `start`, `end`). Properties the robot did not answer are absent. `stale: true` means the last poll failed; `seq` grows on every change.
+- `GET /api/v1/events` — the same snapshot as Server-Sent Events: the current one at once, then on every change (`id: <seq>`, `event: state`, `data: <snapshot>`), a keep-alive comment every 20 s, at most 8 streams.
+- `GET /api/v1/capabilities` — model and firmware, whether the firmware matches a checked profile (`firmware.verified`, with file hashes), the model's hardware table from the firmware itself (`/ava/conf/dconf_runtime.json`), readable properties and available commands.
+- `POST /api/v1/command` — `{"name": "start|pause|stop|dock|locate|mapping|empty|wash_mop|dry_start|dry_stop"}`, `{"name": "set_suction|set_volume", "value": N}`, `{"name": "clean_rooms", "rooms": [ids], "repeats": 1..3, "suction": 0..3, "water": 1..3}`, `{"name": "clean_zone", "zones": [[x0, y0, x1, y1]], ...}` (up to 5 rectangles in map millimetres, at least 30 cm), `{"name": "clean_spot", "points": [[x, y]], ...}` (up to 3), `{"name": "reset_consumable", "consumable": "filter"}`, `{"name": "set_dnd", "enabled": true, "start": "22:00", "end": "08:00"}`. Supports `X-Dreame-Request-ID`; a non-zero robot code is returned as an error.
+- `GET /api/v1/map.png` — picture of the saved map (rooms, station; while cleaning also the robot and its path).
+- `GET /api/v1/history` — cleaning history, newest first: `start`, `end`, `mode`, `result` (`docked`/`idle`/`error`), `error`, `minutes`, `area`. The firmware keeps these records for the cloud only, so the agent records runs itself; time and area are the change of the robot's lifetime totals, and runs while the agent is not running are missing.
+
+`/rpc` serves the web interface and debugging: MIOT properties (`get_properties`, `set_properties`, `action`) and local methods — `local.map_view`, `local.live_pose`, `local.thresholds`, `local.restrictions`, `local.room_settings`, `local.setting`, `local.wifi_status`, `local.wifi_setup`, `local.reboot`.
+
+### Unknown firmware
+
+The agent compares firmware files with checked profiles. On firmware without a profile, commands, setting writes and map edits are off: the agent only reads. To control such a robot at your own risk, set `"allow_unverified_firmware": true` in the config. Agent updates, modules, Wi-Fi and reboot work either way. To add a profile, download the compatibility report in "Diagnostics" and send it: it has the model, firmware and its file hashes, without the robot id.
+
+### Tokens with rights
+
+The main `token` from the config has full access. For a smart home or other devices create a separate token in the web interface ("Access") or with `POST /api/v1/system/tokens` `{"name": "ha", "scope": "read|control"}`. The token is shown once; the config keeps only its SHA-256. List: `GET /api/v1/system/tokens`; revoke: `DELETE /api/v1/system/tokens/<name>`; only the main token manages tokens.
+
+| Scope | Allowed |
+|---|---|
+| `read` | `GET state`, `capabilities`, `events`, `history`, `map.png`; reads through `/rpc` |
+| `control` | the same plus `POST /api/v1/command` |
+| main token | everything, including modules, agent updates, settings, Wi-Fi, reboot and writes through `/rpc` |
+
+## Modules
+
+A module is a `.tar.gz` package installed in the web interface: "Modules" → "Install module" → "Check package" → "Install". Before installing, the page shows the manifest, files, SHA-256 and the rights the module asks for. There are no signatures: a module runs on the robot as root, install only from a source you trust.
+
+The package is unpacked to `/data/dreame-local/modules/<name>/`:
+
+- `manifest.json` — `name` (`a-z0-9_-`), `version`, `title`, optional `description`, `handler`, `panel`, `read_actions`, `firmware_messages`, `control`, `service`;
+- `handler` — an executable run as `handler <action>`: JSON parameters on stdin, scalar ones also as `P_<key>` variables; JSON answer on stdout, a non-zero exit and `{"error": "..."}` on failure. Environment: `DREAME_MODULE_DIR` (replaced as a whole on update), `DREAME_MODULE_DATA` (`/data/dreame-local/module-data/<name>`, kept on update, removed with the module), `DREAME_API`, `DREAME_MODULE_TOKEN`. Lifecycle actions: `check` (before install; a failure cancels it), `install` (after copying; a failure restores the previous version; on update `DREAME_MODULE_PREVIOUS` points to the old version's directory), `uninstall`. Other actions are `POST /api/v1/m/<name>/<action>`;
+- `panel` — an ES module `export default function mount(element, ctx)` with `ctx.read/ctx.call(action, params)`, `ctx.rpc(method, params)`, `ctx.onState(fn)`, `ctx.toast(text, error)`;
+- `service` — an executable the agent keeps running as `<service> run` with the same environment: restarted on failure (2 s to 1 min back-off), stopped with SIGTERM on update, removal and agent exit; output goes to `service.log` in the data directory;
+- `boot-env.sh` — sourced from the boot hook before the firmware's `ava` starts (for example to preload a library); takes effect after a reboot.
+
+The module token is derived from the main token: it survives agent restarts and stops working when the module is removed or the main token changes. It allows `GET` state, capabilities, events, history and the map picture, and `POST /api/v1/firmware_message` with a `cmd` declared in `firmware_messages`; with `"control": true` also `POST /api/v1/command`.
+
+## Agent updates
+
+A new version is installed in the web interface: "Agent update" → choose the file → "Check file" → "Update". The agent accepts only a Linux executable for the robot's architecture that answers `--version` with `dreame-local-agent <version>`. A helper process stops the agent, installs the new file, keeps the old one as `dreame-local-agent.previous` and waits up to 45 s for the new version to answer; otherwise it restores the old one. "Restore version …" installs `.previous` the same way. Only the binary and its built-in web interface are updated.
+
+## Build and tests
+
+Go 1.24 or newer. `sh build.sh` builds `dist/dreame-local-agent-<version>-linux-arm64` with its `.sha256` (version from `agent/main.go`). On GitHub, `.github/workflows/ci.yml` runs the tests on every push and publishes a release for a `v<version>` tag.
+
+```sh
+cd agent && go vet ./... && go test ./...
+cd .. && python3 -m unittest discover -s tests -p 'test_*.py'
+node tests/test_web_ui.cjs && node tests/test_command_results.cjs   # need Playwright
+```
+
+Go tests are Linux-only (`Setsid`, a Python mock of `avacmd`); on Windows build the test binary with `GOOS=linux go test -c` and run it in WSL.
+
+## Contents
+
+- `agent/` — the Go service, built-in web interface and shell scripts.
+- `tools/install_agent.py` — ADB installer with identity checks.
+- `custom_components/dreame_local/` — a minimal Home Assistant integration over `/api/v1` (a `vacuum` entity and a battery sensor); the MQTT module covers more.
+- `tests/` — web interface and installer tests.
+
+Attribution is in `NOTICE.md` and the licence files. MIT licence.
