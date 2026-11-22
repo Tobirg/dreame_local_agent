@@ -175,20 +175,22 @@ func point(raw json.RawMessage) []int {
 	return p
 }
 
-var pathStep = regexp.MustCompile(`[A-Za-z](-?\d+),(-?\d+)`)
+var pathStep = regexp.MustCompile(`([A-Za-z])(-?\d+),(-?\d+)`)
 
-// parsePath reads one frame's "tr": the first point is absolute, the next ones are offsets from
-// the previous point (seen on r2505: "l-2942,-1623L51,0"). The letter is the segment kind and is ignored.
+// parsePath reads one frame's "tr": "L" points are offsets from the previous point, any other
+// letter ("l", "W") starts at an absolute point (seen on r2505: "l-2942,-1623L51,0", "W-1687,-653").
+// shortcut: the letter is the segment kind (W: sweep and mop, per the Tasshack decoder) and is
+// not shown yet; its meaning on r2505 needs a run without mopping to compare.
 func parsePath(tr string) [][]int {
 	var out [][]int
 	x, y := 0, 0
-	for i, m := range pathStep.FindAllStringSubmatch(tr, 20000) {
-		dx, _ := strconv.Atoi(m[1])
-		dy, _ := strconv.Atoi(m[2])
-		if i == 0 {
-			x, y = dx, dy
-		} else {
+	for _, m := range pathStep.FindAllStringSubmatch(tr, 20000) {
+		dx, _ := strconv.Atoi(m[2])
+		dy, _ := strconv.Atoi(m[3])
+		if m[1] == "L" {
 			x, y = x+dx, y+dy
+		} else {
+			x, y = dx, dy
 		}
 		out = append(out, []int{x, y})
 	}

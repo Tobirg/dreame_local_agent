@@ -39,12 +39,12 @@ func TestLivePose(t *testing.T) {
 	writeFile(t, a, "/data/log/ava_iot-20261122-182530.log", line(now-60*60000, "[0,0]", "l0,0L5,5", "old run")+
 		line(now-6000, "[-2877,-1622]", "l-2942,-1623L51,0", "run1"))
 	writeFile(t, a, iotLogFile, `unrelated log line "siid":6,"piid":8,"value":"x"`+"\n"+
-		line(now-3000, "[-2793,-1627]", "l-2840,-1624", "run1"))
+		line(now-3000, "[-2793,-1627]", "l-2840,-1624W-1687,-653L-10,0", "run1"))
 	p := a.livePose()
 	if !p.Live || p.MapID != 7 || !reflect.DeepEqual(p.Robot, []int{-2793, -1627}) || !reflect.DeepEqual(p.Charger, []int{5, 455}) {
 		t.Fatalf("%+v", p)
 	}
-	if !reflect.DeepEqual(p.Path, [][]int{{-2942, -1623}, {-2891, -1623}, {-2840, -1624}}) {
+	if !reflect.DeepEqual(p.Path, [][]int{{-2942, -1623}, {-2891, -1623}, {-2840, -1624}, {-1687, -653}, {-1697, -653}}) {
 		t.Fatal("path of this run only, first point absolute and the rest relative:", p.Path)
 	}
 	// The next run starts with an I frame that still carries run1's mtid: no old path.
