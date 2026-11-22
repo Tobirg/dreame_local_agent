@@ -64,12 +64,17 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 		Path    string          `json:"tr"`
 		Run     string          `json:"mtid"`
 		TimeMS  int64           `json:"timestamp_ms"`
+		// Saved map id ("2"); the header id is a per-run counter and may differ from it.
+		Map json.Number `json:"curid"`
 	}
 	if 27+w*h > len(raw) || json.Unmarshal(raw[27+w*h:], &meta) != nil || meta.TimeMS == 0 {
 		return liveFrame{}, false
 	}
 	if p := point(meta.Robot); p != nil {
 		f.robot = p
+	}
+	if id, err := meta.Map.Int64(); err == nil {
+		f.mapID = int(id)
 	}
 	f.charger, f.path, f.run, f.at = point(meta.Charger), meta.Path, meta.Run, time.UnixMilli(meta.TimeMS)
 	return f, true

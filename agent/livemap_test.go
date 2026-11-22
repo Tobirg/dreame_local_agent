@@ -32,7 +32,7 @@ func TestLivePose(t *testing.T) {
 	}
 	// Moving: P frames in the IoT log, each with the path since the previous one.
 	line := func(ms int64, robot, tr, run string) string {
-		frame := testLiveFrame(t, 'P', fmt.Sprintf(`{"robot":%s,"charger":[32767,32767],"tr":%q,"mtid":%q,"timestamp_ms":%d}`, robot, tr, run, ms))
+		frame := testLiveFrame(t, 'P', fmt.Sprintf(`{"robot":%s,"charger":[32767,32767],"curid":"7","tr":%q,"mtid":%q,"timestamp_ms":%d}`, robot, tr, run, ms))
 		return `2026-11-22 18:11:54.550888 AVA_IOT[1811]:  [I] <AvaSendSimpleMsg> msgcvt>iot]{"id":1,"method":"properties_changed","params":[{"did":"1","siid":4,"piid":63,"value":41},{"did":"1","siid":6,"piid":1,"value":"` + frame + `"}]}` + "\n"
 	}
 	// The log rotated during the run: its start is in ava_iot-<date>.log.
@@ -41,7 +41,7 @@ func TestLivePose(t *testing.T) {
 	writeFile(t, a, iotLogFile, `unrelated log line "siid":6,"piid":8,"value":"x"`+"\n"+
 		line(now-3000, "[-2793,-1627]", "l-2840,-1624", "run1"))
 	p := a.livePose()
-	if !p.Live || !reflect.DeepEqual(p.Robot, []int{-2793, -1627}) || !reflect.DeepEqual(p.Charger, []int{5, 455}) {
+	if !p.Live || p.MapID != 7 || !reflect.DeepEqual(p.Robot, []int{-2793, -1627}) || !reflect.DeepEqual(p.Charger, []int{5, 455}) {
 		t.Fatalf("%+v", p)
 	}
 	if !reflect.DeepEqual(p.Path, [][]int{{-2942, -1623}, {-2891, -1623}, {-2840, -1624}}) {
