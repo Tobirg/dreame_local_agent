@@ -41,6 +41,10 @@ type livePose struct {
 	Path      [][]int    `json:"path,omitempty"`  // [x, y, mop]: mop 1 where the robot mopped
 	Spots     [][]int    `json:"spots,omitempty"` // spot cleaning points [x, y]; the robot picks the area
 	Zones     [][]int    `json:"zones,omitempty"` // zone cleaning rectangles [x0, y0, x1, y1]
+	// Cells the run's own map has but the saved map lacks: [x, y, kind], the cell's lower-left corner
+	// in robot millimetres, kind 1 floor, 2 wall; cell size is grid_size. See liveCells.
+	NewCells [][]int `json:"new_cells,omitempty"`
+	GridSize int     `json:"grid_size,omitempty"`
 }
 
 type liveFrame struct {
@@ -50,6 +54,12 @@ type liveFrame struct {
 	path, run      string
 	full           bool // I frame
 	spots, zones   [][]int
+	// The frame's own grid: header map id and frame number (per run), cell size, origin and size
+	// in cells, and the cells: an I frame's are values, a P frame's are changes to add (mod 256).
+	run16, seq   int
+	grid, ox, oy int
+	w, h         int
+	cells        []byte
 }
 
 func parseLiveFrame(encoded string) (liveFrame, bool) {
@@ -61,6 +71,8 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 		// header pose: int16 x, y at bytes 5..8, used when the metadata has none
 		robot: []int{int(int16(binary.LittleEndian.Uint16(raw[5:7]))), int(int16(binary.LittleEndian.Uint16(raw[7:9])))}}
 	w, h := int(binary.LittleEndian.Uint16(raw[19:21])), int(binary.LittleEndian.Uint16(raw[21:23]))
+	f.run16, f.seq, f.grid, f.w, f.h = f.mapID, int(binary.LittleEndian.Uint16(raw[2:4])), int(binary.LittleEndian.Uint16(raw[17:19])), w, h
+	f.ox, f.oy = int(int16(binary.LittleEndian.Uint16(raw[23:25]))), int(int16(binary.LittleEndian.Uint16(raw[25:27])))
 	var meta struct {
 		Robot   json.RawMessage `json:"robot"`
 		Charger json.RawMessage `json:"charger"`
@@ -77,6 +89,7 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 	if 27+w*h > len(raw) || json.Unmarshal(raw[27+w*h:], &meta) != nil || meta.TimeMS == 0 {
 		return liveFrame{}, false
 	}
+	f.cells = raw[27 : 27+w*h]
 	if p := point(meta.Robot); p != nil {
 		f.robot = p
 	}
@@ -185,7 +198,76 @@ func (a *agent) livePose() livePose {
 			pose.Charger = f.charger
 		}
 	}
+	if view, err := a.mapView(); err == nil && !view.Empty && len(view.Origin) == 2 {
+		pose.NewCells, pose.GridSize = liveCells(frames, last.run16, view), view.GridSize
+	}
 	return pose
+}
+
+const maxNewCells = 20000
+
+// liveCells rebuilds the run's grid (its newest I frame plus the later P frames, measured on r2505:
+// a P frame's cells are differences, value = (old + change) & 0xff) and returns the cells the saved
+// map does not have. Run grid cells are room<<2 | flags, 252 (room 63) a wall; saved map 0 is nothing.
+func liveCells(frames []liveFrame, run16 int, view mapView) [][]int {
+	var base *liveFrame
+	for i := range frames {
+		f := &frames[i]
+		if f.full && f.run16 == run16 && f.cells != nil && (base == nil || f.seq > base.seq) {
+			base = f
+		}
+	}
+	if base == nil || base.grid != view.GridSize || base.grid <= 0 {
+		return nil
+	}
+	g := base.grid
+	type cell struct{ x, y int }
+	grid := map[cell]byte{}
+	put := func(f *liveFrame, add bool) {
+		for y := 0; y < f.h; y++ {
+			for x := 0; x < f.w; x++ {
+				c := cell{f.ox/g + x, f.oy/g + y}
+				if v := f.cells[y*f.w+x]; add {
+					grid[c] += v
+				} else {
+					grid[c] = v
+				}
+			}
+		}
+	}
+	put(base, false)
+	later := []*liveFrame{}
+	for i := range frames {
+		if f := &frames[i]; !f.full && f.run16 == run16 && f.seq > base.seq && f.grid == g && f.cells != nil {
+			later = append(later, f)
+		}
+	}
+	sort.SliceStable(later, func(i, j int) bool { return later[i].seq < later[j].seq })
+	for _, f := range later {
+		put(f, true)
+	}
+	saved := func(c cell) byte {
+		x, y := c.x-view.Origin[0]/g, c.y-view.Origin[1]/g
+		if x < 0 || y < 0 || x >= view.Width || y >= view.Height || len(view.Pixels) != view.Width*view.Height {
+			return 0
+		}
+		return view.Pixels[y*view.Width+x]
+	}
+	out := [][]int{}
+	for c, v := range grid {
+		if v == 0 || saved(c) != 0 {
+			continue
+		}
+		kind := 1
+		if v>>2 == 63 {
+			kind = 2
+		}
+		if out = append(out, []int{c.x * g, c.y * g, kind}); len(out) >= maxNewCells {
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i][1] < out[j][1] || out[i][1] == out[j][1] && out[i][0] < out[j][0] })
+	return out
 }
 
 // point reads [x, y]; I frames write it as a string, "[5,455]", P frames as an array.

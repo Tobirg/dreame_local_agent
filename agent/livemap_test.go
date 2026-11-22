@@ -86,3 +86,25 @@ func TestLiveFrameTargets(t *testing.T) {
 		t.Fatal(f.zones)
 	}
 }
+
+func TestLiveCells(t *testing.T) {
+	// Saved map: 2x1 cells of 50 mm from (0, 0), the left one room 1.
+	view := mapView{GridSize: 50, Origin: []int{0, 0}, Width: 2, Height: 1, Pixels: []byte{1, 0}}
+	frames := []liveFrame{
+		// The run's I frame: room 1 (4) on both cells and one more to the right, outside the saved map.
+		{full: true, run16: 7, seq: 0, grid: 50, ox: 0, oy: 0, w: 3, h: 1, cells: []byte{4, 4, 0}},
+		// An older run's I frame must not be used.
+		{full: true, run16: 6, seq: 9, grid: 50, ox: 0, oy: 0, w: 3, h: 1, cells: []byte{0, 0, 0}},
+		// P frames add changes: the third cell becomes a wall (252), then the second cell is cleared.
+		{run16: 7, seq: 2, grid: 50, ox: 50, oy: 0, w: 1, h: 1, cells: []byte{252}},
+		{run16: 7, seq: 1, grid: 50, ox: 100, oy: 0, w: 1, h: 1, cells: []byte{252}},
+	}
+	// seq 1 (third cell 0+252) comes before seq 2 (second cell 4+252 = 0 mod 256).
+	got := liveCells(frames, 7, view)
+	if !reflect.DeepEqual(got, [][]int{{100, 0, 2}}) {
+		t.Fatal(got)
+	}
+	if liveCells(frames, 8, view) != nil {
+		t.Fatal("no I frame of the run, no cells")
+	}
+}

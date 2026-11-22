@@ -285,6 +285,8 @@ function drawLive(){
  const dot=(p,color,r)=>{const [x,y]=px(...p);ctx.fillStyle=color;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.stroke();};
  ctx.save();
  const current=live?.live&&live.map_id===view.map_id?live:null;
+ // Floor and walls the robot found this run that the saved map lacks.
+ const g=current?.grid_size||0;(current?.new_cells||[]).forEach(([cx,cy,kind])=>{const [x0,y0]=px(cx,cy+g),[x1,y1]=px(cx+g,cy);ctx.fillStyle=kind===2?'#8fa3b3':'rgba(143,200,255,.45)';ctx.fillRect(x0,y0,x1-x0,y1-y0);});
  if(current?.path?.length>1){drawMopped(current.path,px);ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=1.5;ctx.beginPath();current.path.forEach((p,i)=>{const [x,y]=px(...p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
  // Zone being cleaned (corners from the robot) and spot points; the robot picks the spot area itself.
  ctx.strokeStyle='#ffae67';ctx.lineWidth=2;ctx.setLineDash([6,4]);
