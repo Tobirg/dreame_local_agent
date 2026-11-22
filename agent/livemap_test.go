@@ -72,12 +72,17 @@ func TestParsePathMode(t *testing.T) {
 	}
 }
 
-func TestLiveFrameSpots(t *testing.T) {
+func TestLiveFrameTargets(t *testing.T) {
 	f, ok := parseLiveFrame(testLiveFrame(t, 'P', `{"robot":[0,0],"sp":[[-4400,800,1,1,2]],"mtid":"r","timestamp_ms":1}`))
 	if !ok || !reflect.DeepEqual(f.spots, [][]int{{-4400, 800}}) {
 		t.Fatal(f.spots, ok)
 	}
-	if f, ok = parseLiveFrame(testLiveFrame(t, 'P', `{"robot":[0,0],"sp":"odd","mtid":"r","timestamp_ms":1}`)); !ok || f.spots != nil {
-		t.Fatal("an odd sp must not drop the frame", ok)
+	if f, ok = parseLiveFrame(testLiveFrame(t, 'P', `{"robot":[0,0],"sp":"odd","da2":7,"mtid":"r","timestamp_ms":1}`)); !ok || f.spots != nil || f.zones != nil {
+		t.Fatal("odd sp or da2 must not drop the frame", ok)
+	}
+	// Zone cleaning as the X50 reports it.
+	f, _ = parseLiveFrame(testLiveFrame(t, 'P', `{"robot":[0,0],"da2":{"areas":[[-5000,1000,-3800,2200,1,1,2,1]]},"mtid":"r","timestamp_ms":1}`))
+	if !reflect.DeepEqual(f.zones, [][]int{{-5000, 1000, -3800, 2200}}) {
+		t.Fatal(f.zones)
 	}
 }

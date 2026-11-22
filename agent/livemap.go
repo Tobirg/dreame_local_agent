@@ -39,7 +39,8 @@ type livePose struct {
 	Angle     *int       `json:"angle,omitempty"`
 	Charger   []int      `json:"charger,omitempty"`
 	Path      [][]int    `json:"path,omitempty"`  // [x, y, mop]: mop 1 where the robot mopped
-	Spots     [][]int    `json:"spots,omitempty"` // spot cleaning centres [x, y]
+	Spots     [][]int    `json:"spots,omitempty"` // spot cleaning points [x, y]; the robot picks the area
+	Zones     [][]int    `json:"zones,omitempty"` // zone cleaning rectangles [x0, y0, x1, y1]
 }
 
 type liveFrame struct {
@@ -48,7 +49,7 @@ type liveFrame struct {
 	robot, charger []int
 	path, run      string
 	full           bool // I frame
-	spots          [][]int
+	spots, zones   [][]int
 }
 
 func parseLiveFrame(encoded string) (liveFrame, bool) {
@@ -70,6 +71,8 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 		Map json.Number `json:"curid"`
 		// Spot cleaning: [[x, y, repeats, suction, water]].
 		Spots json.RawMessage `json:"sp"`
+		// Zone cleaning: {"areas": [[x0, y0, x1, y1, repeats, suction, water, ?]]}.
+		Zones json.RawMessage `json:"da2"`
 	}
 	if 27+w*h > len(raw) || json.Unmarshal(raw[27+w*h:], &meta) != nil || meta.TimeMS == 0 {
 		return liveFrame{}, false
@@ -82,6 +85,15 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 	for _, s := range spots {
 		if len(s) >= 2 {
 			f.spots = append(f.spots, s[:2])
+		}
+	}
+	var zones struct {
+		Areas [][]int `json:"areas"`
+	}
+	_ = json.Unmarshal(meta.Zones, &zones)
+	for _, z := range zones.Areas {
+		if len(z) >= 4 {
+			f.zones = append(f.zones, z[:4])
 		}
 	}
 	if id, err := meta.Map.Int64(); err == nil {
@@ -157,7 +169,7 @@ func (a *agent) livePose() livePose {
 	if time.Since(last.at) > liveFrameMaxAge {
 		return livePose{}
 	}
-	pose := livePose{Live: true, UpdatedAt: &last.at, MapID: last.mapID, Robot: last.robot, Angle: &last.angle, Spots: last.spots}
+	pose := livePose{Live: true, UpdatedAt: &last.at, MapID: last.mapID, Robot: last.robot, Angle: &last.angle, Spots: last.spots, Zones: last.zones}
 	mop := 0
 	for _, f := range frames {
 		if f.run != last.run {
