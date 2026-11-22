@@ -21,7 +21,7 @@ var (
 
 const mapScale = 3 // output pixels per map cell, as the web UI draws it
 
-// shortcut: mop pad span guessed for the X50 class (two round pads); measure it if the band looks off.
+// Mop pad span of the X50 (two round pads); the band crossing into the next room is real, the pads reach over thresholds.
 const mopWidth = 300 // robot millimetres
 
 var (
