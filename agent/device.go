@@ -32,6 +32,8 @@ var stateProps = []stateProp{
 	{"status", 4, 1}, {"error", 2, 2}, {"battery", 3, 1}, {"charging", 3, 2},
 	{"suction", 4, 4}, {"water", 4, 5}, {"station", 4, 25}, {"volume", 7, 1},
 	{"region", 4, 19}, {"region_code", 14, 3},
+	// Current or last run: minutes and square metres (Tasshack cleaning_time / cleaned_area).
+	{"cleaning_time", 4, 2}, {"cleaned_area", 4, 3},
 }
 
 // 4/1 codes, same table as ui/app.js statusNames.
