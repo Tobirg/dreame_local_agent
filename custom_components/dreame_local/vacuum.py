@@ -59,4 +59,5 @@ class DreameVacuum(CoordinatorEntity, StateVacuumEntity):
     async def async_set_fan_speed(self, fan_speed, **kwargs):
         if fan_speed not in FAN_SPEEDS:
             raise HomeAssistantError(f"Unknown fan speed: {fan_speed}")
-        await command(self.hass, self._entry, "set_suction", value=FAN_SPEEDS.index(fan_speed))
+        level = FAN_SPEEDS.index(fan_speed)
+        await command(self.hass, self._entry, "set_suction", patch={"suction": level}, value=level)

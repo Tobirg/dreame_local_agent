@@ -185,13 +185,21 @@ func (a *agent) snapshot() snapshot {
 	return s
 }
 
-// refreshSoon asks the poller for an early read after a command; never blocks.
+// refreshSoon asks the poller for early reads after a command; never blocks.
+// The robot still returns the old value right after a set (measured: new value within 100 ms),
+// and status changes such as start/dock take longer, so read twice instead of at once.
 func (a *agent) refreshSoon() {
-	select {
-	case a.dev.poke <- struct{}{}:
-	default:
+	for _, d := range refreshDelays {
+		time.AfterFunc(d, func() {
+			select {
+			case a.dev.poke <- struct{}{}:
+			default:
+			}
+		})
 	}
 }
+
+var refreshDelays = []time.Duration{500 * time.Millisecond, 2 * time.Second}
 
 func (a *agent) runPoller(ctx context.Context, every time.Duration) {
 	ticker := time.NewTicker(every)

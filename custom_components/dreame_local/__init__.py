@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 DOMAIN = "dreame_local"
@@ -36,10 +37,20 @@ async def api(hass: HomeAssistant, data: dict, path: str, body: dict | None = No
     return reply["result"]
 
 
-async def command(hass: HomeAssistant, entry: ConfigEntry, name: str, **args) -> None:
+async def command(hass: HomeAssistant, entry: ConfigEntry, name: str, patch: dict | None = None, **args) -> None:
     """Named command; the agent maps it to MIOT and reports robot rejection as an error."""
     await api(hass, entry.data, "command", {"name": name, **args})
-    await entry.runtime_data.async_request_refresh()
+    coordinator = entry.runtime_data
+    if patch:
+        # The agent re-polls the robot only after replying, so an immediate refresh would read the old
+        # cache and flip the UI back until the next poll; show the accepted value instead.
+        coordinator.async_set_updated_data({**coordinator.data, **patch})
+    else:
+        # The agent re-reads the robot 0.5 s and 2 s after a command; read its cache after the first.
+        async def refresh(_now) -> None:
+            await coordinator.async_request_refresh()
+
+        async_call_later(hass, 1, refresh)
 
 
 def device_info(entry: ConfigEntry) -> DeviceInfo:

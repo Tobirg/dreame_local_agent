@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mockRobot answers get_properties from a fixed table (5/5 unsupported), echoes writes
@@ -228,5 +229,23 @@ func TestHTTPStateAndCommand(t *testing.T) {
 	}
 	if code, _ := do("GET", "/api/v1/capabilities", "", true); code != 200 {
 		t.Fatal("capabilities", code)
+	}
+}
+
+func TestRefreshSoonWaitsForRobot(t *testing.T) {
+	a := &agent{}
+	a.dev.poke = make(chan struct{}, 1)
+	a.refreshSoon()
+	select {
+	case <-a.dev.poke:
+		t.Fatal("poked at once; the robot still answers the old value then")
+	case <-time.After(300 * time.Millisecond):
+	}
+	for range refreshDelays {
+		select {
+		case <-a.dev.poke:
+		case <-time.After(3 * time.Second):
+			t.Fatal("no delayed poke")
+		}
 	}
 }
