@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.19.0"
+var version = "0.20.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -593,12 +593,52 @@ func startDetached(executable string, args []string, logPath, pidPath string) (i
 	return pid, nil
 }
 
+// keepAgent runs the agent and starts it again when it dies, so a crash does not leave the
+// robot without local control until the next boot. A signal (stop.sh, updates) stops both.
+func keepAgent(agent func() *exec.Cmd, stop <-chan os.Signal, delay time.Duration) {
+	first := delay
+	for {
+		cmd := agent()
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		started := time.Now()
+		if err := cmd.Start(); err != nil {
+			log.Print("cannot start agent: ", err)
+		} else {
+			exited := make(chan error, 1)
+			go func() { exited <- cmd.Wait() }()
+			select {
+			case <-stop:
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+				select {
+				case <-exited:
+				case <-time.After(10 * time.Second): // stopAgent gives up on us after 15 s
+					_ = cmd.Process.Kill()
+					<-exited
+				}
+				return
+			case err := <-exited:
+				log.Printf("agent exited (%v); restarting", err)
+			}
+		}
+		if time.Since(started) > 10*time.Minute {
+			delay = first
+		}
+		select {
+		case <-stop:
+			return
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, time.Minute)
+	}
+}
+
 func main() {
 	cfgPath := flag.String("config", "/data/dreame-local/config.json", "configuration file")
 	daemon := flag.Bool("daemon", false, "start in a detached session")
 	showVersion := flag.Bool("version", false, "print agent version")
 	applyUpdate := flag.String("apply-update", "", "internal: replace the installed agent with this binary")
 	updateID := flag.String("update-id", "", "internal: id of the update request")
+	keep := flag.Bool("keep", false, "internal: run the agent and restart it when it dies")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("dreame-local-agent " + version)
@@ -617,6 +657,16 @@ func main() {
 	}
 	if *applyUpdate != "" {
 		runUpdateHelper(cfg, *applyUpdate, *updateID)
+		return
+	}
+	if *keep {
+		executable, err := os.Executable()
+		if err != nil {
+			log.Fatal("cannot locate agent executable")
+		}
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+		keepAgent(func() *exec.Cmd { return exec.Command(executable, "--config", *cfgPath) }, signals, 5*time.Second)
 		return
 	}
 	path, err := exec.LookPath("avacmd")
@@ -640,7 +690,7 @@ func main() {
 		if err != nil {
 			log.Fatal("cannot resolve configuration path")
 		}
-		pid, err := startDetached(executable, []string{"--config", absoluteConfig}, "/tmp/dreame-local-agent.log", "/tmp/dreame-local-agent.pid")
+		pid, err := startDetached(executable, []string{"--keep", "--config", absoluteConfig}, "/tmp/dreame-local-agent.log", "/tmp/dreame-local-agent.pid")
 		if err != nil {
 			log.Fatal("cannot start detached agent: ", err)
 		}

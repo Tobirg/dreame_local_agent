@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -242,4 +243,34 @@ func TestDetachedProcessHasOwnSessionAndLog(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("child did not establish a new session", string(data))
+}
+
+func TestKeepAgent(t *testing.T) {
+	// A dying agent is started again.
+	runs := filepath.Join(t.TempDir(), "runs")
+	stop := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	go func() {
+		keepAgent(func() *exec.Cmd { return exec.Command("sh", "-c", "echo run >> "+runs+"; exit 1") }, stop, 10*time.Millisecond)
+		close(done)
+	}()
+	time.Sleep(300 * time.Millisecond)
+	stop <- syscall.SIGTERM
+	<-done
+	if b, _ := os.ReadFile(runs); strings.Count(string(b), "run") < 3 {
+		t.Fatalf("not restarted: %q", b)
+	}
+	// A stop signal ends the running agent and the keeper.
+	done = make(chan struct{})
+	go func() {
+		keepAgent(func() *exec.Cmd { return exec.Command("sleep", "30") }, stop, time.Hour)
+		close(done)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	stop <- syscall.SIGTERM
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("keeper did not stop")
+	}
 }
