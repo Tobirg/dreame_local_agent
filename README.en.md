@@ -95,7 +95,6 @@ Go tests are Linux-only (`Setsid`, a Python mock of `avacmd`); on Windows build 
 
 - `agent/` — the Go service, built-in web interface and shell scripts.
 - `tools/install_agent.py` — ADB installer with identity checks.
-- `custom_components/dreame_local/` — a minimal Home Assistant integration over `/api/v1` (a `vacuum` entity and a battery sensor); the MQTT module covers more.
 - `tests/` — web interface and installer tests.
 
 Attribution is in `NOTICE.md` and the licence files. MIT licence.
