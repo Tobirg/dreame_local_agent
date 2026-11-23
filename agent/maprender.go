@@ -21,7 +21,13 @@ var (
 	targetColour   = color.RGBA{0xff, 0xae, 0x67, 255} // zone and spot being cleaned
 	newFloorColour = color.RGBA{0xbf, 0xdc, 0xf5, 255} // found this run, not in the saved map
 	newWallColour  = color.RGBA{0x8f, 0xa3, 0xb3, 255}
+	obstacleRing   = color.RGBA{0x17, 0x23, 0x2d, 255}
+	obstacleColour = color.RGBA{0xff, 0xd2, 0x5e, 255}
+	hazardColour   = color.RGBA{0xff, 0x6b, 0x6b, 255} // the robot can get tangled in or smear it
 )
+
+// Obstacle types (Tasshack's ObstacleType) drawn as hazards: thread, wire, sock, faeces, power strip, liquid, hair.
+var hazardTypes = map[int]bool{130: true, 131: true, 134: true, 135: true, 138: true, 139: true, 225: true}
 
 const mapScale = 3 // output pixels per map cell, as the web UI draws it
 
@@ -107,6 +113,15 @@ func (a *agent) mapPNG() ([]byte, error) {
 	for _, s := range live.Spots {
 		x, y := px(s)
 		disc(img, x, y, 4, targetColour)
+	}
+	for _, o := range view.Obstacles {
+		x, y := px(o[:2])
+		c := obstacleColour
+		if hazardTypes[o[2]] {
+			c = hazardColour
+		}
+		disc(img, x, y, 6, obstacleRing)
+		disc(img, x, y, 4, c)
 	}
 	charger := view.Charger
 	if live.Charger != nil {

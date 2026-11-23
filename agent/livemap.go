@@ -54,6 +54,7 @@ type liveFrame struct {
 	path, run      string
 	full           bool // I frame
 	spots, zones   [][]int
+	obstacles      [][]int // [x, y, type, confidence %]; nil when the frame has no "ai_obstacle"
 	// The frame's own grid: header map id and frame number (per run), cell size, origin and size
 	// in cells, and the cells: an I frame's are values, a P frame's are changes to add (mod 256).
 	run16, seq   int
@@ -85,6 +86,8 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 		Spots json.RawMessage `json:"sp"`
 		// Zone cleaning: {"areas": [[x0, y0, x1, y1, repeats, suction, water, ?]]}.
 		Zones json.RawMessage `json:"da2"`
+		// Recognised objects: [["x", "y", "type", "confidence 0..1", ?, ?]], numbers as strings.
+		Obstacles [][]json.Number `json:"ai_obstacle"`
 	}
 	if 27+w*h > len(raw) || json.Unmarshal(raw[27+w*h:], &meta) != nil || meta.TimeMS == 0 {
 		return liveFrame{}, false
@@ -107,6 +110,21 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 	for _, z := range zones.Areas {
 		if len(z) >= 4 {
 			f.zones = append(f.zones, z[:4])
+		}
+	}
+	if meta.Obstacles != nil {
+		f.obstacles = [][]int{}
+	}
+	for _, o := range meta.Obstacles {
+		if len(o) < 4 {
+			continue
+		}
+		x, errX := o[0].Float64()
+		y, errY := o[1].Float64()
+		kind, errK := o[2].Int64()
+		p, errP := o[3].Float64()
+		if errX == nil && errY == nil && errK == nil && errP == nil {
+			f.obstacles = append(f.obstacles, []int{int(x), int(y), int(kind), int(p*100 + 0.5)})
 		}
 	}
 	if id, err := meta.Map.Int64(); err == nil {

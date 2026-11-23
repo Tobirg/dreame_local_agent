@@ -289,6 +289,14 @@ function drawMopped(path,px){
  for(let k=0;k<count.length;k++){if(!count[k]||!d[k*4+3])continue;const a=alpha[count[k]]/255;d[k*4]+= (77-d[k*4])*a;d[k*4+1]+=(163-d[k*4+1])*a;d[k*4+2]+=(255-d[k*4+2])*a;}
  ctx.putImageData(img,0,0);
 }
+// AI camera finds (type codes as in Tasshack's ObstacleType; 160 is not decoded yet).
+const obstacleTypes={128:['⬛','подставка'],129:['⚖️','весы'],130:['🧵','нитки'],131:['🔌','провод'],132:['🧸','игрушка'],133:['👟','обувь'],134:['🧦','носок'],135:['💩','экскременты'],136:['🗑️','мусорное ведро'],137:['👕','ткань'],138:['🔌','удлинитель'],139:['💧','лужа'],142:['📦','препятствие'],158:['🐾','питомец'],163:['🧹','уборочный инвентарь'],169:['💧','пятно'],205:['🍪','крупный мусор'],209:['🥣','миска'],210:['🛏️','лежанка питомца'],225:['💇','волосы'],226:['📄','бумага'],229:['📦','мелочи']};
+const obstacleType=t=>obstacleTypes[t]||['❔','предмет '+t];
+function renderObstacles(){
+ const list=view?.obstacles||[],counts={};list.forEach(o=>{const n=obstacleType(o[2])[1];counts[n]=(counts[n]||0)+1;});
+ $('obstacles').hidden=!list.length;
+ $('obstacles').textContent=list.length?'Препятствия'+(view.obstacles_at?' от '+new Date(view.obstacles_at).toLocaleString():'')+': '+Object.entries(counts).map(([n,c])=>c>1?n+' ×'+c:n).join(', '):'';
+}
 function drawLive(){
  const px=(x,y)=>{const p=robotToPixel(view,x,y);return [p[0]*3,(view.height-p[1])*3];};
  const dot=(p,color,r)=>{const [x,y]=px(...p);ctx.fillStyle=color;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.stroke();};
@@ -301,6 +309,8 @@ function drawLive(){
  ctx.strokeStyle='#ffae67';ctx.lineWidth=2;ctx.setLineDash([6,4]);
  (current?.zones||[]).forEach(([ax,ay,bx,by])=>{const [x0,y0]=px(ax,ay),[x1,y1]=px(bx,by);ctx.strokeRect(x0,y0,x1-x0,y1-y0);});
  ctx.setLineDash([]);(current?.spots||[]).forEach(p=>dot(p,'#ffae67',5));
+ ctx.font='15px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+ (view.obstacles||[]).forEach(([ox,oy,type])=>{const [x,y]=px(ox,oy);ctx.fillStyle='rgba(23,35,45,.85)';ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);ctx.fill();ctx.fillText(obstacleType(type)[0],x,y+1);});
  const charger=current?.charger||view.charger;if(charger)dot(charger,'#55f2aa',5);
  if(current?.robot)dot(current.robot,'#4da3ff',7);
  ctx.restore();
@@ -407,14 +417,14 @@ async function refreshMap(){
  if(!token||busy)return;const epoch=viewEpoch;
  try{
   const next=await api('local.map_view');if(epoch!==viewEpoch||!token)return;
-  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();draw();disableControls(busy);return;}
+  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();renderObstacles();draw();disableControls(busy);return;}
   if(!Number.isInteger(next.width)||!Number.isInteger(next.height)||next.width*next.height>4194304||!Array.isArray(next.rooms))throw Error('Некорректный формат карты');
   const bytes=atob(next.pixels);if(bytes.length!==next.width*next.height)throw Error('Некорректный размер карты');
   next.grid=Uint8Array.from(bytes,c=>c.charCodeAt(0));
   if(view?.revision!==next.revision){selected=view?.map_id===next.map_id?new Set([...selected].filter(id=>next.rooms.some(r=>r.id===id))):new Set();points=[];invalidateEdit();thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;}
   view=next;canvas.width=view.width*3;canvas.height=view.height*3;
   $('map-info').textContent='Карта '+view.map_id+' · комнат: '+view.rooms.length+' · '+view.width+' × '+view.height;
-  renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();draw();disableControls(busy);
+  renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();renderObstacles();draw();disableControls(busy);
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('map-info').textContent=e.message;connectionLost(e.message);}}
 }
 function mapPoint(e){const rect=canvas.getBoundingClientRect();return {x:(e.clientX-rect.left)*view.width/rect.width,y:view.height-(e.clientY-rect.top)*view.height/rect.height};}

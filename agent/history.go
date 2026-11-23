@@ -67,6 +67,7 @@ func (a *agent) trackRun(state map[string]any, freshTotals bool) {
 		}
 		a.dev.run = nil
 		_ = a.appendHistory(*r)
+		go a.mapView() // keeps the run's obstacles before the firmware's log rotates them away
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type mapRoom struct {
@@ -49,6 +50,9 @@ type mapView struct {
 	Revision     string           `json:"revision"`
 	Source       string           `json:"source"`
 	Live         bool             `json:"live"`
+	// What the AI camera recognised on the last run that reported it: [x, y, type, confidence %]; see obstacles.go.
+	Obstacles   [][]int    `json:"obstacles"`
+	ObstaclesAt *time.Time `json:"obstacles_at,omitempty"`
 }
 
 func decodeSavedFrame(encoded string) ([]byte, error) {
@@ -232,6 +236,10 @@ func (a *agent) mapView() (mapView, error) {
 			view, err := makeMapView(raw, a.cfg.ExpectedModel)
 			if err == nil {
 				view.RoomSettings = a.roomSettings(view.MapID)
+				o := a.obstacles(view.MapID)
+				if view.Obstacles = o.List; !o.At.IsZero() {
+					view.ObstaclesAt = &o.At
+				}
 			}
 			return view, err
 		}
