@@ -79,7 +79,7 @@ details button{margin:0 6px 6px 0}
 .panel>h2,.panel>.section-heading{margin:-20px -20px 16px;padding:14px 20px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;background:var(--paper)}
 .panel>.section-heading h2{margin:0}
 .panel>h2{margin-bottom:16px}
-.side{display:flex;flex-direction:column}
+.side,.main-col{display:flex;flex-direction:column;min-width:0}
 #main-page>.columns+section.panel{margin-top:20px}
 .columns{gap:20px}
 #history{max-height:420px;overflow:auto}
