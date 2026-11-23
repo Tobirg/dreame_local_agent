@@ -73,7 +73,7 @@ The package is unpacked to `/data/dreame-local/modules/<name>/`:
 - `service` — an executable the agent keeps running as `<service> run` with the same environment: restarted on failure (2 s to 1 min back-off), stopped with SIGTERM on update, removal and agent exit; output goes to `service.log` in the data directory;
 - `boot-env.sh` — sourced from the boot hook before the firmware's `ava` starts (for example to preload a library); takes effect after a reboot.
 
-The module token is derived from the main token: it survives agent restarts and stops working when the module is removed or the main token changes. It allows `GET` state, capabilities, events, history and the map picture, and `POST /api/v1/firmware_message` with a `cmd` declared in `firmware_messages`; with `"control": true` also `POST /api/v1/command`.
+The module token is derived from the main token: it survives agent restarts and stops working when the module is removed or the main token changes. It allows `GET` state, capabilities, events, history and the map picture, and `POST /api/v1/firmware_message` with a `cmd` declared in `firmware_messages`; with `"control": true` also `POST /api/v1/command` and other modules' `read_actions` (`POST /api/v1/m/<module>/<action>`, agent 0.26+).
 
 ## Agent updates
 

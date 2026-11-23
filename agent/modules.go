@@ -441,6 +441,21 @@ func (a *agent) runHandler(ctx context.Context, dir string, m *manifest, action 
 	return json.RawMessage(body), nil
 }
 
+// crossModuleRead lets a module with control (shown to the owner at install) call another
+// module's read actions, e.g. the MQTT bridge showing the camera module's live view.
+func (a *agent) crossModuleRead(caller string, r *http.Request) bool {
+	name, action, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/api/v1/m/"), "/")
+	if r.Method != "POST" || !ok || !strings.HasPrefix(r.URL.Path, "/api/v1/m/") || name == caller {
+		return false
+	}
+	self, err := a.installedModule(caller)
+	if err != nil || !self.Control {
+		return false
+	}
+	other, err := a.installedModule(name)
+	return err == nil && contains(other.ReadActions, action)
+}
+
 func (a *agent) moduleAction(ctx context.Context, name, action string, raw []byte) (any, error) {
 	m, err := a.installedModule(name)
 	if err != nil {

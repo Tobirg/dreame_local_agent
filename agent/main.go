@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.25.0"
+var version = "0.26.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
 var webAssets embed.FS
@@ -446,6 +446,9 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		if m, err := a.installedModule(module); err == nil && m.Control {
 			scope = "control" // declared in the manifest and shown to the owner at install
 		}
+	}
+	if scope == "module" && a.crossModuleRead(module, r) {
+		scope = "admin" // only this one route: another module's declared read action
 	}
 	if scope != "admin" && !limitedRoute(scope, r) {
 		send(403, map[string]string{"error": scope + " token cannot use this endpoint"})

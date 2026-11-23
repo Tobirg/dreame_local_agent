@@ -14,11 +14,13 @@ import (
 var (
 	roomPalette = []color.RGBA{{0x7f, 0xd9, 0xc2, 255}, {0xa3, 0xbc, 0xec, 255}, {0xe5, 0xbd, 0x8a, 255}, {0xbc, 0xac, 0xeb, 255},
 		{0xa7, 0xd3, 0x9a, 255}, {0xe3, 0xa5, 0xb4, 255}, {0x93, 0xcd, 0xd9, 255}, {0xd4, 0xd0, 0x93, 255}}
-	wallColour    = color.RGBA{0xd1, 0xd9, 0xe2, 255}
-	pathColour    = color.RGBA{0xff, 0xff, 0xff, 200}
-	robotColour   = color.RGBA{0x4d, 0xa3, 0xff, 255}
-	chargerColour = color.RGBA{0x55, 0xf2, 0xaa, 255}
-	targetColour  = color.RGBA{0xff, 0xae, 0x67, 255} // zone and spot being cleaned
+	wallColour     = color.RGBA{0xd1, 0xd9, 0xe2, 255}
+	pathColour     = color.RGBA{0xff, 0xff, 0xff, 200}
+	robotColour    = color.RGBA{0x4d, 0xa3, 0xff, 255}
+	chargerColour  = color.RGBA{0x55, 0xf2, 0xaa, 255}
+	targetColour   = color.RGBA{0xff, 0xae, 0x67, 255} // zone and spot being cleaned
+	newFloorColour = color.RGBA{0xbf, 0xdc, 0xf5, 255} // found this run, not in the saved map
+	newWallColour  = color.RGBA{0x8f, 0xa3, 0xb3, 255}
 )
 
 const mapScale = 3 // output pixels per map cell, as the web UI draws it
@@ -63,6 +65,21 @@ func (a *agent) mapPNG() ([]byte, error) {
 	live := a.livePose()
 	if !live.Live || live.MapID != view.MapID {
 		live = livePose{}
+	}
+	// Floor and walls the robot found this run that the saved map lacks, inside the saved map's frame
+	// (the calibration points stay valid), as the web UI draws them.
+	for _, c := range live.NewCells {
+		x0, y0 := px([]int{c[0], c[1] + live.GridSize})
+		x1, y1 := px([]int{c[0] + live.GridSize, c[1]})
+		colour := newFloorColour
+		if c[2] == 2 {
+			colour = newWallColour
+		}
+		for y := max(y0, 0); y < min(y1, img.Rect.Dy()); y++ {
+			for x := max(x0, 0); x < min(x1, img.Rect.Dx()); x++ {
+				img.SetRGBA(x, y, colour)
+			}
+		}
 	}
 	passes := mopPasses(live.Path, img.Rect.Dx(), img.Rect.Dy(), mopWidth/2*mapScale/view.GridSize, px)
 	for i, n := range passes {

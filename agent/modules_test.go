@@ -277,3 +277,39 @@ func TestModuleHTTPFlowAndPanel(t *testing.T) {
 		t.Fatal("remove", code)
 	}
 }
+
+func TestCrossModuleReadNeedsControl(t *testing.T) {
+	a := testAgent(t)
+	installDemo(t, a, "1.0.0")
+	for _, m := range []struct{ name, control string }{{"bridge", "true"}, {"plain", "false"}} {
+		staged, err := a.stageModule(makePackage(t,
+			pkgFile{name: "./manifest.json", body: `{"name":"` + m.name + `","version":"1.0.0","title":"X","handler":"handler","control":` + m.control + `}`},
+			pkgFile{name: "./handler", body: demoHandler, mode: 0755}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.installModule(context.Background(), staged["id"].(string)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(a.handler))
+	defer server.Close()
+	post := func(path, module string) int {
+		req, _ := http.NewRequest("POST", server.URL+path, strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+a.moduleToken(module))
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := post("/api/v1/m/demo/status", "bridge"); code != 200 {
+		t.Fatal("control module must read another module", code)
+	}
+	for _, c := range [][2]string{{"/api/v1/m/demo/set", "bridge"}, {"/api/v1/m/demo/status", "plain"}, {"/api/v1/m/bridge/status", "bridge"}, {"/api/v1/modules", "bridge"}} {
+		if code := post(c[0], c[1]); code != 403 {
+			t.Error(c, code)
+		}
+	}
+}
