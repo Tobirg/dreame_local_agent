@@ -26,7 +26,7 @@ var (
 	hazardColour   = color.RGBA{0xff, 0x6b, 0x6b, 255} // the robot can get tangled in or smear it
 )
 
-// Obstacle types (Tasshack's ObstacleType) drawn as hazards: thread, wire, sock, faeces, power strip, liquid, hair.
+// Obstacle types drawn as hazards: socket, wire, sock, faeces, cable, liquid stain, hair (names as in the Dreame app).
 var hazardTypes = map[int]bool{130: true, 131: true, 134: true, 135: true, 138: true, 139: true, 225: true}
 
 const mapScale = 3 // output pixels per map cell, as the web UI draws it

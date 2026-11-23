@@ -87,7 +87,7 @@ const server=http.createServer((req,res)=>{
   await page.goto(url);assert(await page.locator('#login').isVisible());
   await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});await page.getByRole('button',{name:'Кухня · 1',exact:true}).waitFor();
   assert.equal(await page.locator('#battery').innerText(),'95%');
-  assert.match(await page.locator('#obstacles').textContent(),/Препятствия от .*: носок ×2, предмет 160/);
+  assert.match(await page.locator('#obstacles').textContent(),/Препятствия от .*: носок ×2, неизвестное препятствие/);
   await page.locator('#logs-panel').waitFor({state:'visible'});await page.locator('#logs-details').evaluate(d=>d.open=true);await page.locator('#log-source').selectOption('mqtt');assert.equal(await page.locator('#log-text').textContent(),'connected to broker');
   await page.locator('#voice-panel').waitFor({state:'visible'});assert.match(await page.locator('#voice').innerText(),/голосом ZH[^]*RU загружен/);
   await page.locator('#voice details >> nth=1').evaluate(d=>d.open=true);await page.locator('#voice [data-hear="45"]').waitFor();assert.match(await page.locator('#voice [data-r=phrases]').innerText(),/45 I am here\.[^]*700 —/);
