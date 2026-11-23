@@ -14,6 +14,7 @@ The agent is written in Go and runs **on the vacuum itself**. It calls the firmw
 - Detects the model and firmware by itself and shows only what the robot supports; on unknown firmware it only reads.
 - Event stream, tokens with read or control rights, agent updates from the browser with automatic rollback.
 - Modules installed from the web interface: [MQTT and Home Assistant](../dreame-module-mqtt), [region guard](../dreame-module-region).
+- Voices: switching the built-in ones (EN, JA, KO, ZH), uploading your own voice packs, listening to phrases by number — [preparing a pack](docs/voice-packs.md) (Russian).
 - Wi-Fi setup and a captive portal in access-point mode.
 
 Map and station commands are verified on R2505; zone and spot cleaning, history and the robot path are so far covered by tests only.
@@ -43,6 +44,7 @@ Every request carries `Authorization: Bearer <token>`; the answer is `{"result":
 - `GET /api/v1/map.png` — picture of the saved map (rooms, station; while cleaning also the robot, its path, the mopped floor and the zone being cleaned).
 - `GET /api/v1/map` — calibration of that picture (`calibration_points`: three robot-millimetre to pixel points, the xiaomi-vacuum-map-card format) and the rooms with their centres in millimetres.
 - `GET /api/v1/settings` — the panel's settings this robot has, with current values; change one with the command `{"name":"set_setting","setting":"<id>","to":<value>}`.
+- `GET /api/v1/voice` — the robot's voices (`current`, `voices`: `id`, `builtin`, `files`); `GET /api/v1/voice/phrases?id=` — a voice's phrase numbers, `GET /api/v1/voice/phrase?id=&n=` — the phrase file (`audio/ogg`); `POST /api/v1/voice/install?id=<code>` with the `.tar.gz` pack as the body, `POST /api/v1/voice/use`, `/remove` with `{"id"}`, `/play` with `{"number"}` (say a phrase on the robot). Main token only; preparing a pack and the phrase numbers: [docs/voice-packs.md](docs/voice-packs.md) (Russian; agent 0.27+).
 - `GET /api/v1/history` — cleaning history, newest first: `start`, `end`, `mode`, `result` (`docked`/`idle`/`error`), `error`, `minutes`, `area`. The firmware keeps these records for the cloud only, so the agent records runs itself; time and area are the change of the robot's lifetime totals, and runs while the agent is not running are missing.
 
 `/rpc` serves the web interface and debugging: MIOT properties (`get_properties`, `set_properties`, `action`) and local methods — `local.map_view`, `local.live_pose`, `local.thresholds`, `local.restrictions`, `local.room_settings`, `local.setting`, `local.wifi_status`, `local.wifi_setup`, `local.reboot`.

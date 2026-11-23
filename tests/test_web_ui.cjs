@@ -11,7 +11,7 @@ const capabilities={identity:{model:'dreame.vacuum.r2505',did:'123',fw_ver:'4.3.
 let passable=[[-700,-700,-400,-700]],impassable=[[100,-700,100,-400]];
 const grid=Buffer.alloc(40*30);
 for(let y=2;y<28;y++)for(let x=2;x<38;x++)grid[y*40+x]=(x===2||x===37||y===2||y===27)?255:x<20?1:2;
-let livePolls=0,tokens=[],restrict={walls:[[-900,-900,-500,-900]],no_go_zones:[],no_mop_zones:[]};const eventClients=new Set();
+let voiceCurrent='ZH',livePolls=0,tokens=[],restrict={walls:[[-900,-900,-500,-900]],no_go_zones:[],no_mop_zones:[]};const eventClients=new Set();
 const snapshot=()=>{const v=k=>values[k],state={activity:v('4/1')===2?'cleaning':'docked',status:v('4/1'),error:v('2/2'),battery:v('3/1'),charging:1,suction:v('4/4'),water:v('4/5'),station:v('4/25'),volume:v('7/1'),region:regionCode===200?'matched':'mismatched',region_code:regionCode,consumables:{main_brush:{left:52,hours:158},filter:{left:6,hours:8}},stats:{minutes:308,cleanings:22,area:264},dnd:{enabled:false,start:'22:00',end:'08:00'}};return {seq:1,updated_at:new Date().toISOString(),stale:staleState,error:staleState?'avacmd timed out':undefined,state};};
 const pushEvent=()=>{for(const c of eventClients)c.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');};
 const server=http.createServer((req,res)=>{
@@ -23,6 +23,8 @@ const server=http.createServer((req,res)=>{
   res.setHeader('Content-Type','application/json');
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   if(req.url==='/api/v1/events'){res.setHeader('Content-Type','text/event-stream');res.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');eventClients.add(res);req.on('close',()=>eventClients.delete(res));return;}
+  if(req.url==='/api/v1/voice'){res.end(JSON.stringify({result:{current:voiceCurrent,voices:[{id:'EN',builtin:true,files:540},{id:'RU',builtin:false,files:3,bytes:2048},{id:'ZH',builtin:true,files:561}]}}));return;}
+  if(req.url==='/api/v1/voice/phrases?id=EN'){res.end(JSON.stringify({result:[0,45,700]}));return;}
   if(req.url==='/api/v1/history'){res.end(JSON.stringify({result:[{start:'2026-11-22T08:00:00Z',end:'2026-11-22T08:25:00Z',mode:'room_cleaning',result:'docked',minutes:24,area:31},{start:'2026-11-21T08:00:00Z',end:'2026-11-21T08:05:00Z',mode:'cleaning',result:'error',error:'bin_full'}]}));return;}
   if(req.url==='/api/v1/system/tokens'){res.end(JSON.stringify({result:tokens.map(({name,scope,created})=>({name,scope,created}))}));return;}
   if(req.url==='/api/v1/modules'){res.end(JSON.stringify({result:installedModules}));return;}
@@ -34,7 +36,7 @@ const server=http.createServer((req,res)=>{
   res.end(JSON.stringify({result:capabilities}));return;
  }
  if(req.method==='GET'){
-  const names={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/settings.js':'settings.js'},name=names[req.url.split('?')[0]];
+  const names={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/settings.js':'settings.js','/voice.js':'voice.js','/phrases.js':'phrases.js'},name=names[req.url.split('?')[0]];
   if(!name){res.writeHead(404);res.end();return;}
   const type=name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html';
   res.setHeader('Content-Type',type+'; charset=utf-8');
@@ -44,6 +46,7 @@ const server=http.createServer((req,res)=>{
  let body='';req.on('data',b=>body+=b);req.on('end',()=>{
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   const json=v=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result:v}));};
+  if(req.url==='/api/v1/voice/use'){const p=JSON.parse(body);commands.push({method:req.url,params:p});voiceCurrent=p.id;json({current:voiceCurrent,voices:[{id:'EN',builtin:true,files:540},{id:'RU',builtin:false,files:3,bytes:2048}]});return;}
   if(req.url==='/api/v1/system/tokens'){const t=JSON.parse(body);tokens.push({...t,created:'2026-11-22T10:00:00Z'});json({...t,created:'2026-11-22T10:00:00Z',token:'f'.repeat(64)});return;}
   if(req.method==='DELETE'&&req.url.startsWith('/api/v1/system/tokens/')){tokens=tokens.filter(t=>t.name!==decodeURIComponent(req.url.split('/').pop()));json({revoked:true});return;}
   if(req.url==='/api/v1/system/update/stage'){stagedAgent=body;json({version:'0.8.0',current:'0.7.0',sha256:'b'.repeat(64),size:4096});return;}
@@ -83,6 +86,9 @@ const server=http.createServer((req,res)=>{
   await page.goto(url);assert(await page.locator('#login').isVisible());
   await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});await page.getByRole('button',{name:'Кухня · 1',exact:true}).waitFor();
   assert.equal(await page.locator('#battery').innerText(),'95%');
+  await page.locator('#voice-panel').waitFor({state:'visible'});assert.match(await page.locator('#voice').innerText(),/голосом ZH[^]*RU загружен/);
+  await page.locator('#voice details >> nth=1').evaluate(d=>d.open=true);await page.locator('#voice [data-hear="45"]').waitFor();assert.match(await page.locator('#voice [data-r=phrases]').innerText(),/45 I am here\.[^]*700 —/);
+  await page.locator('#voice [data-use=RU]').click();await page.waitForFunction(()=>document.querySelector('#voice').textContent.includes('голосом RU'));assert.deepEqual(commands.at(-1),{method:'/api/v1/voice/use',params:{id:'RU'}});
   const until=async f=>{for(let i=0;i<100&&!f();i++)await new Promise(r=>setTimeout(r,50));assert(f(),String(f));};
   await page.waitForFunction(()=>document.querySelector('#history').textContent.length>0);assert.match(await page.locator('#history').innerText(),/Уборка комнат · 24 мин · 31 м² · на базе[^]*Уборка · 5 мин · ошибка: bin full/);
   await page.locator('#care-panel').waitFor({state:'visible'});assert.match(await page.locator('#consumables').innerText(),/Основная щётка · 52% · ещё 158 ч[^]*Фильтр · 6% · ещё 8 ч/);assert.match(await page.locator('#stats').innerText(),/Всего уборок: 22 · 5 ч · 264 м²/);

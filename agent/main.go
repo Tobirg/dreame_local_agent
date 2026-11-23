@@ -26,9 +26,9 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.26.0"
+var version = "0.27.0"
 
-//go:embed ui/index.html ui/style.css ui/app.js ui/settings.js
+//go:embed ui/index.html ui/style.css ui/app.js ui/settings.js ui/voice.js ui/phrases.js
 var webAssets embed.FS
 
 const maxMap = 8 << 20
@@ -398,7 +398,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'")
 	if r.Method == "GET" {
 		asset := ""
 		contentType := ""
@@ -409,8 +409,8 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		case "/style.css":
 			asset = "ui/style.css"
 			contentType = "text/css; charset=utf-8"
-		case "/settings.js":
-			asset = "ui/settings.js"
+		case "/settings.js", "/voice.js", "/phrases.js":
+			asset = "ui" + r.URL.Path
 			contentType = "text/javascript; charset=utf-8"
 		case "/app.js":
 			asset = "ui/app.js"
@@ -469,7 +469,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		send(200, map[string]any{"result": result})
 		return
 	}
-	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.tokenRoutes(w, r, send) {
+	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.tokenRoutes(w, r, send) || a.voiceRoutes(w, r, send) {
 		return
 	}
 	switch r.URL.Path {
