@@ -86,8 +86,8 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 		Spots json.RawMessage `json:"sp"`
 		// Zone cleaning: {"areas": [[x0, y0, x1, y1, repeats, suction, water, ?]]}.
 		Zones json.RawMessage `json:"da2"`
-		// Recognised objects: [["x", "y", "type", "confidence 0..1", ?, ?]], numbers as strings.
-		Obstacles [][]json.Number `json:"ai_obstacle"`
+		// Recognised objects: [["x", "y", "type", "confidence 0..1", time, "/data/record/ai_image/1.jpg", …]], all strings.
+		Obstacles json.RawMessage `json:"ai_obstacle"`
 	}
 	if 27+w*h > len(raw) || json.Unmarshal(raw[27+w*h:], &meta) != nil || meta.TimeMS == 0 {
 		return liveFrame{}, false
@@ -112,17 +112,19 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 			f.zones = append(f.zones, z[:4])
 		}
 	}
-	if meta.Obstacles != nil {
+	var obstacles [][]any
+	if meta.Obstacles != nil && json.Unmarshal(meta.Obstacles, &obstacles) == nil {
 		f.obstacles = [][]int{}
 	}
-	for _, o := range meta.Obstacles {
+	num := func(v any) (float64, error) { s, _ := v.(string); return strconv.ParseFloat(s, 64) }
+	for _, o := range obstacles {
 		if len(o) < 4 {
 			continue
 		}
-		x, errX := o[0].Float64()
-		y, errY := o[1].Float64()
-		kind, errK := o[2].Int64()
-		p, errP := o[3].Float64()
+		x, errX := num(o[0])
+		y, errY := num(o[1])
+		kind, errK := num(o[2])
+		p, errP := num(o[3])
 		if errX == nil && errY == nil && errK == nil && errP == nil {
 			f.obstacles = append(f.obstacles, []int{int(x), int(y), int(kind), int(p*100 + 0.5)})
 		}

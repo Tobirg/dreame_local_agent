@@ -26,18 +26,18 @@ func TestObstacles(t *testing.T) {
 
 	// The run's final frame as the firmware keeps it for the cloud: numbers as strings.
 	run := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
-	writeFile(t, a, fdsLogDir+"/1793114190", testLiveFrame(t, 'I', fmt.Sprintf(`{"curid":"2","timestamp_ms":%d,"ai_obstacle":[["-3520.000000","-530.000000","137","0.955322","0","0"],["1","2"]]}`, run.UnixMilli())))
+	writeFile(t, a, fdsLogDir+"/1793114190", testLiveFrame(t, 'I', fmt.Sprintf(`{"curid":"2","timestamp_ms":%d,"ai_obstacle":[["-3520.000000","-530.000000","137","0.955322","0","0"],["1","2"],["-4110.000000","-610.000000","133","0.959198","1795437306","/data/record/ai_image/1.jpg","151085971","0.721741","0.387866","0.143204","0.184549","2","0","0"]]}`, run.UnixMilli())))
 	// Later runs whose final frame has no "ai_obstacle" (seen on r2505 since 2026-11-23) are skipped.
 	writeFile(t, a, fdsLogDir+"/1793114999", testLiveFrame(t, 'I', fmt.Sprintf(`{"curid":"2","timestamp_ms":%d}`, run.Add(time.Minute).UnixMilli())))
 	v, _ := a.mapView()
-	if !reflect.DeepEqual(v.Obstacles, [][]int{{-3520, -530, 137, 96}}) || v.ObstaclesAt == nil || !v.ObstaclesAt.Equal(run) {
+	if !reflect.DeepEqual(v.Obstacles, [][]int{{-3520, -530, 137, 96}, {-4110, -610, 133, 96}}) || v.ObstaclesAt == nil || !v.ObstaclesAt.Equal(run) {
 		t.Fatal(v.Obstacles, v.ObstaclesAt)
 	}
 	// Kept after the firmware's copy is gone.
 	if err := os.RemoveAll(a.path(fdsLogDir)); err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := a.mapView(); len(v.Obstacles) != 1 {
+	if v, _ := a.mapView(); len(v.Obstacles) != 2 {
 		t.Fatal("kept list lost", v.Obstacles)
 	}
 	// Another map's list is not drawn on this one.

@@ -39,10 +39,14 @@ func (a *agent) fdsLogFrame() (liveFrame, bool) {
 		file := filepath.Join(a.path(fdsLogDir), e.Name())
 		f, ok := fdsFrames[file]
 		if !ok {
-			if b, err := readLimited(file, maxMap); err == nil {
-				f, _ = parseLiveFrame(string(b))
-				f.cells, f.path = nil, ""
+			b, err := readLimited(file, maxMap)
+			if err != nil {
+				continue
 			}
+			if f, ok = parseLiveFrame(string(b)); !ok {
+				continue // may still be being written; read again next time
+			}
+			f.cells, f.path = nil, ""
 			fdsFrames[file] = f
 		}
 		if f.obstacles != nil {
