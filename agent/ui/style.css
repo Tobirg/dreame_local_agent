@@ -74,11 +74,16 @@ details button{margin:0 6px 6px 0}
 
 /* Layout: map is the one framed surface; the side column is a plain rail of ruled sections. */
 .columns{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(280px,1fr);gap:36px;align-items:start}
-.panel{margin-bottom:0}
-.map-panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px}
-.side>.panel,#main-page>section.panel,#modules-page>section.panel,#module-panels>.panel{padding:20px 0;border-top:1px solid var(--line)}
-.side>.panel:first-child{border-top:0;padding-top:4px}
-#main-page>.columns+section.panel{margin-top:32px}
+/* Every section is a block: a framed surface with a heading bar; blocks stack with an even gap. */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;margin:0 0 16px}
+.panel>h2,.panel>.section-heading{margin:-20px -20px 16px;padding:14px 20px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;background:var(--paper)}
+.panel>.section-heading h2{margin:0}
+.panel>h2{margin-bottom:16px}
+.side{display:flex;flex-direction:column}
+#main-page>.columns+section.panel{margin-top:20px}
+.columns{gap:20px}
+#history{max-height:420px;overflow:auto}
+#history-panel .module-row{font-size:14px}
 .login{max-width:460px;margin:48px auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px}
 .login button.primary{margin-top:8px;width:100%;padding:12px}
 .section-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}
@@ -96,8 +101,10 @@ canvas{display:block;width:100%;height:auto;touch-action:manipulation}
 .room-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 #room-selection{min-height:20px}
 
-details{border-top:1px solid var(--line);padding-top:14px;margin-top:18px}
-section.panel:not(.map-panel)>details{border:0;padding:0;margin:0}
+/* Sub-blocks inside the map block: inset boxes on the page colour. */
+details{border:1px solid var(--line);border-radius:10px;background:var(--paper);padding:12px 14px;margin-top:12px}
+details[open]{padding-bottom:14px}
+section.panel>details{border:0;background:none;padding:0;margin:0}
 summary{cursor:pointer;font-size:17px;font-weight:600;overflow-wrap:anywhere;padding:2px 0}
 summary:hover{color:var(--go)}
 #wifi-summary{color:var(--muted);font-weight:400}
@@ -132,7 +139,8 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
  .hero{grid-template-columns:1fr;gap:18px}
  #battery{font-size:34px}
  .columns{grid-template-columns:1fr;gap:28px}
- .map-panel{padding:14px;margin:0 -6px}
+ .panel{padding:14px}.panel>h2,.panel>.section-heading{margin:-14px -14px 14px;padding:12px 14px}
+ .map-panel{margin:0 -6px 16px}
  .actions button{flex:1 1 40%}
  .actions .primary{flex-basis:100%}
  .actions .danger{margin-left:0;flex-basis:100%}

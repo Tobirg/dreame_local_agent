@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.30.1"
+var version = "0.30.2"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js ui/voice.js ui/phrases.js
 var webAssets embed.FS
