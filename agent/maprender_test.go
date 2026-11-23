@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"image/color"
 	"image/png"
+	"strings"
 	"testing"
 	"time"
 )
@@ -64,5 +66,21 @@ func TestMapPNG(t *testing.T) {
 	img, _ = png.Decode(bytes.NewReader(b))
 	if got := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA); got.B <= once.B {
 		t.Fatal("second pass not deeper", once, got)
+	}
+	// Floor found this run that the saved map lacks: a run frame from (-100,-100) puts its first cell on
+	// the saved map's empty top-left cell; its other new cells lie above the picture and are clipped.
+	run, _ := decodeSavedFrame(syntheticFrame(t, 2))
+	ox := int16(-100)
+	binary.LittleEndian.PutUint16(run[23:25], uint16(ox))
+	binary.LittleEndian.PutUint16(run[25:27], uint16(ox))
+	meta := fmt.Sprintf(`{"robot":[5000,5000],"curid":"2","tr":"","mtid":"r","timestamp_ms":%d}`, time.Now().UnixMilli())
+	writeFile(t, a, liveFrameFiles[0], strings.TrimRight(encodeTestFrame(t, append(run[:36], []byte(meta)...)), "="))
+	writeFile(t, a, iotLogFile, "")
+	if b, err = a.mapPNG(); err != nil {
+		t.Fatal(err)
+	}
+	img, _ = png.Decode(bytes.NewReader(b))
+	if got := color.RGBAModel.Convert(img.At(1, 1)).(color.RGBA); got != newFloorColour || img.Bounds().Dy() != 9 {
+		t.Fatal("new floor cell", got, img.Bounds())
 	}
 }
