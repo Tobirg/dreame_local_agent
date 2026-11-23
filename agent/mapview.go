@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -25,6 +24,10 @@ type mapRoom struct {
 	Name string  `json:"name"`
 	X    float64 `json:"x"`
 	Y    float64 `json:"y"`
+	Type int     `json:"type"` // see roomtypes.go
+	// Saved seg_inf fields, for room type edits.
+	kind, index int
+	rawName     string
 }
 type mapView struct {
 	ThresholdsEditable bool                       `json:"thresholds_editable"`
@@ -107,8 +110,9 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		} `json:"walls_info"`
 		Charger  []int `json:"charger"`
 		Segments map[string]struct {
-			Name string `json:"name"`
-			Type int    `json:"type"`
+			Name  string `json:"name"`
+			Type  int    `json:"type"`
+			Index int    `json:"index"`
 		} `json:"seg_inf"`
 	}
 	if err := json.Unmarshal(raw[27+total:], &meta); err != nil {
@@ -195,11 +199,7 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 	}
 	for id, c := range centers {
 		info := meta.Segments[strconv.Itoa(id)]
-		name := info.Name
-		if name == "" {
-			name = fmt.Sprintf("Комната %d", id)
-		}
-		view.Rooms = append(view.Rooms, mapRoom{ID: id, Name: name, X: float64(c.X) / float64(c.N), Y: float64(c.Y) / float64(c.N)})
+		view.Rooms = append(view.Rooms, mapRoom{ID: id, Name: roomName(id, info.Type, info.Index, info.Name), Type: info.Type, kind: info.Type, index: info.Index, rawName: info.Name, X: float64(c.X) / float64(c.N), Y: float64(c.Y) / float64(c.N)})
 	}
 	sort.Slice(view.Rooms, func(i, j int) bool { return view.Rooms[i].ID < view.Rooms[j].ID })
 	sum := sha256.Sum256(raw)

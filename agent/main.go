@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.29.2"
+var version = "0.30.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js ui/voice.js ui/phrases.js
 var webAssets embed.FS
@@ -283,12 +283,12 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 			return nil, errors.New("local.reboot takes no parameters")
 		}
 		return a.queueReboot()
-	case "local.thresholds", "local.restrictions", "local.room_settings":
+	case "local.thresholds", "local.restrictions", "local.room_settings", "local.room_types":
 		if err := a.robotWriteAllowed(info); err != nil {
 			return nil, err
 		}
 		build := map[string]func(json.RawMessage) (map[string]any, error){
-			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch,
+			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch, "local.room_types": a.roomTypesPatch,
 		}[req.Method]
 		patch, err := build(req.Params)
 		if err != nil {

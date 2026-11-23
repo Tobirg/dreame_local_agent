@@ -248,7 +248,7 @@ function renderState(snap){
   if(snap.stale&&!snap.updated_at)throw Error(snap.error||'Агент ещё не прочитал состояние робота');
   const s=snap.state;
   $('status').textContent=statusNames[s.status]||('Статус '+(s.status??'недоступен'));
-  $('battery').textContent=s.battery===undefined?'—':s.battery+'%';
+  $('battery').textContent=s.battery===undefined?'—':s.battery+'%';$('battery').style.setProperty('--charge',(s.battery??0)+'%');
   $('updated').textContent='Обновлено '+new Date(snap.updated_at).toLocaleTimeString();
   if(!fanDirty&&document.activeElement!==$('fan')&&s.suction!==undefined)$('fan').value=String(s.suction);
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
@@ -403,7 +403,7 @@ function selectRoom(id){
 }
 function renderRoomButtons(){
  $('rooms').replaceChildren();$('room-selection').textContent=selected.size?'Выбрано: '+(view?.rooms||[]).filter(r=>selected.has(r.id)).map(r=>r.name).join(', '):'Выбери комнаты на карте или кнопками ниже.';
- for(const room of view?.rooms||[]){const b=document.createElement('button');b.textContent=room.name+' · '+room.id;b.classList.toggle('selected',selected.has(room.id));b.setAttribute('aria-pressed',String(selected.has(room.id)));b.onclick=()=>selectRoom(room.id);$('rooms').append(b);}
+ for(const room of view?.rooms||[]){const b=document.createElement('button');b.textContent=room.name+' · '+room.id;b.style.setProperty('--room',palette[(room.id-1)%palette.length]);b.classList.toggle('selected',selected.has(room.id));b.setAttribute('aria-pressed',String(selected.has(room.id)));b.onclick=()=>selectRoom(room.id);$('rooms').append(b);}
 }
 function draw(){
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
@@ -427,14 +427,14 @@ async function refreshMap(){
  if(!token||busy)return;const epoch=viewEpoch;
  try{
   const next=await api('local.map_view');if(epoch!==viewEpoch||!token)return;
-  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();renderObstacles();draw();disableControls(busy);return;}
+  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();renderRoomTypes();renderObstacles();draw();disableControls(busy);return;}
   if(!Number.isInteger(next.width)||!Number.isInteger(next.height)||next.width*next.height>4194304||!Array.isArray(next.rooms))throw Error('Некорректный формат карты');
   const bytes=atob(next.pixels);if(bytes.length!==next.width*next.height)throw Error('Некорректный размер карты');
   next.grid=Uint8Array.from(bytes,c=>c.charCodeAt(0));
   if(view?.revision!==next.revision){selected=view?.map_id===next.map_id?new Set([...selected].filter(id=>next.rooms.some(r=>r.id===id))):new Set();points=[];invalidateEdit();thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;}
   view=next;canvas.width=view.width*3;canvas.height=view.height*3;
   $('map-info').textContent='Карта '+view.map_id+' · комнат: '+view.rooms.length+' · '+view.width+' × '+view.height;
-  renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();renderObstacles();draw();disableControls(busy);
+  renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();renderRoomTypes();renderObstacles();draw();disableControls(busy);
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('map-info').textContent=e.message;connectionLost(e.message);}}
 }
 function mapPoint(e){const rect=canvas.getBoundingClientRect();return {x:(e.clientX-rect.left)*view.width/rect.width,y:view.height-(e.clientY-rect.top)*view.height/rect.height};}
@@ -606,6 +606,30 @@ $('save-room-settings').onclick=async()=>{
  const rooms=changedRooms();if(!rooms.length)return;
  try{await control('local.room_settings',{map_id:view.map_id,revision:view.revision,rooms});$('room-settings-status').textContent='Настройки сохранены.';await refreshMap();}
  catch(e){$('room-settings-status').textContent=e.message;}
+};
+// ---- Room types (seg_inf type, roomtypes.go): 0 is an own name; only changed rooms are sent.
+const roomTypes={1:'Гостиная',2:'Спальня',15:'Вторая спальня',3:'Кабинет',4:'Кухня',5:'Столовая',6:'Ванная',7:'Балкон',8:'Коридор',9:'Кладовая',10:'Гардеробная',11:'Приёмная',12:'Офис',13:'Спортзал',14:'Зона отдыха',0:'Своё название'};
+function renderRoomTypes(){
+ const rooms=view?.rooms||[];$('room-types-details').hidden=!rooms.length;
+ $('room-types').replaceChildren(...rooms.map(room=>{
+  const line=document.createElement('div'),select=document.createElement('select'),name=document.createElement('input');
+  line.className='row';line.dataset.room=room.id;line.append(Object.assign(document.createElement('span'),{textContent:room.name}),select,name);
+  for(const [value,label] of Object.entries(roomTypes))select.add(new Option(label,value));
+  select.setAttribute('aria-label',room.name+': тип');select.value=String(room.type??0);select.dataset.saved=select.value;
+  name.maxLength=24;name.placeholder='Название';name.setAttribute('aria-label',room.name+': название');name.value=room.type?'':room.name;name.dataset.saved=name.value;
+  const sync=()=>{name.hidden=select.value!=='0';$('save-room-types').disabled=busy||!changedRoomTypes().length;};
+  select.onchange=sync;name.oninput=sync;name.hidden=select.value!=='0';return line;
+ }));
+ $('save-room-types').disabled=true;
+}
+function changedRoomTypes(){
+ return [...$('room-types').querySelectorAll('[data-room]')].filter(line=>{const [s,n]=line.querySelectorAll('select,input');return s.value!==s.dataset.saved||(s.value==='0'&&n.value!==n.dataset.saved);})
+  .map(line=>{const [s,n]=line.querySelectorAll('select,input'),room={id:Number(line.dataset.room),type:Number(s.value)};if(room.type===0)room.name=n.value.trim();return room;});
+}
+$('save-room-types').onclick=async()=>{
+ const rooms=changedRoomTypes();if(!rooms.length)return;
+ try{await control('local.room_types',{map_id:view.map_id,revision:view.revision,rooms});$('room-types-status').textContent='Типы сохранены.';for(const delay of [1500,5000])setTimeout(()=>refreshMap(),delay);}
+ catch(e){$('room-types-status').textContent=e.message;}
 };
 // ---- Virtual walls and zones: edited locally as a draft, then all three lists are saved at once.
 const restrictKinds={walls:'Стена',no_go_zones:'Запретная зона',no_mop_zones:'Без влажной уборки'};
