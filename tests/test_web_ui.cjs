@@ -23,6 +23,7 @@ const server=http.createServer((req,res)=>{
   res.setHeader('Content-Type','application/json');
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   if(req.url==='/api/v1/events'){res.setHeader('Content-Type','text/event-stream');res.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');eventClients.add(res);req.on('close',()=>eventClients.delete(res));return;}
+  if(req.url==='/api/v1/logs'){res.end(JSON.stringify({result:[{source:'agent',text:'agent ready',size:11},{source:'mqtt',text:'connected to broker',size:19}]}));return;}
   if(req.url==='/api/v1/voice'){res.end(JSON.stringify({result:{current:voiceCurrent,voices:[{id:'EN',builtin:true,files:540},{id:'RU',builtin:false,files:3,bytes:2048},{id:'ZH',builtin:true,files:561}]}}));return;}
   if(req.url==='/api/v1/voice/phrases?id=EN'){res.end(JSON.stringify({result:[0,45,700]}));return;}
   if(req.url==='/api/v1/history'){res.end(JSON.stringify({result:[{start:'2026-11-22T08:00:00Z',end:'2026-11-22T08:25:00Z',mode:'room_cleaning',result:'docked',minutes:24,area:31},{start:'2026-11-21T08:00:00Z',end:'2026-11-21T08:05:00Z',mode:'cleaning',result:'error',error:'bin_full'}]}));return;}
@@ -86,6 +87,7 @@ const server=http.createServer((req,res)=>{
   await page.goto(url);assert(await page.locator('#login').isVisible());
   await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});await page.getByRole('button',{name:'Кухня · 1',exact:true}).waitFor();
   assert.equal(await page.locator('#battery').innerText(),'95%');
+  await page.locator('#logs-panel').waitFor({state:'visible'});await page.locator('#logs-details').evaluate(d=>d.open=true);await page.locator('#log-source').selectOption('mqtt');assert.equal(await page.locator('#log-text').textContent(),'connected to broker');
   await page.locator('#voice-panel').waitFor({state:'visible'});assert.match(await page.locator('#voice').innerText(),/голосом ZH[^]*RU загружен/);
   await page.locator('#voice details >> nth=1').evaluate(d=>d.open=true);await page.locator('#voice [data-hear="45"]').waitFor();assert.match(await page.locator('#voice [data-r=phrases]').innerText(),/45 I am here\.[^]*700 —/);
   await page.locator('#voice [data-use=RU]').click();await page.waitForFunction(()=>document.querySelector('#voice').textContent.includes('голосом RU'));assert.deepEqual(commands.at(-1),{method:'/api/v1/voice/use',params:{id:'RU'}});

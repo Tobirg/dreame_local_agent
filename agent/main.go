@@ -26,7 +26,7 @@ import (
 )
 
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
-var version = "0.27.0"
+var version = "0.28.0"
 
 //go:embed ui/index.html ui/style.css ui/app.js ui/settings.js ui/voice.js ui/phrases.js
 var webAssets embed.FS
@@ -433,7 +433,14 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	send := func(code int, v any) { w.WriteHeader(code); _ = json.NewEncoder(w).Encode(v) }
+	send := func(code int, v any) {
+		if code >= 500 {
+			b, _ := json.Marshal(v)
+			log.Printf("%s %s: %d %s", r.Method, r.URL.Path, code, b) // shown in the panel's log
+		}
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(v)
+	}
 	scope, module := a.scopeOf(r.Header.Get("Authorization")), ""
 	if scope == "" {
 		if module = a.moduleForToken(r.Header.Get("Authorization")); module == "" {
@@ -469,7 +476,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		send(200, map[string]any{"result": result})
 		return
 	}
-	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.tokenRoutes(w, r, send) || a.voiceRoutes(w, r, send) {
+	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.tokenRoutes(w, r, send) || a.voiceRoutes(w, r, send) || a.logRoutes(r, send) {
 		return
 	}
 	switch r.URL.Path {
@@ -594,7 +601,11 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 // startDetached creates a new session before the child executes. Shell nohup alone
 // leaves a race with the firmware ADB launcher closing its process group.
 func startDetached(executable string, args []string, logPath, pidPath string) (int, error) {
-	output, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0600)
+	flags := os.O_WRONLY | os.O_APPEND | os.O_CREATE
+	if st, err := os.Stat(logPath); err == nil && st.Size() > 256<<10 {
+		flags |= os.O_TRUNC // /tmp is in memory
+	}
+	output, err := os.OpenFile(logPath, flags, 0600)
 	if err != nil {
 		return 0, err
 	}
@@ -719,7 +730,7 @@ func main() {
 		if err != nil {
 			log.Fatal("cannot resolve configuration path")
 		}
-		pid, err := startDetached(executable, []string{"--keep", "--config", absoluteConfig}, "/tmp/dreame-local-agent.log", "/tmp/dreame-local-agent.pid")
+		pid, err := startDetached(executable, []string{"--keep", "--config", absoluteConfig}, agentLogFile, "/tmp/dreame-local-agent.pid")
 		if err != nil {
 			log.Fatal("cannot start detached agent: ", err)
 		}

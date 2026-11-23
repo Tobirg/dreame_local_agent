@@ -730,6 +730,8 @@ func (a *agent) runService(ctx context.Context, s *moduleService, dir string, m 
 		return
 	}
 	s.running.Store(true)
-	_ = cmd.Wait()
+	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+		fmt.Fprintf(logFile, "%s agent: service exited: %v\n", time.Now().Format("2006/01/02 15:04:05"), err)
+	}
 	s.running.Store(false)
 }
