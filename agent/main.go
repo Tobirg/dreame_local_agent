@@ -524,6 +524,20 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		send(200, map[string]any{"result": a.readHistory()})
 		return
+	case "/api/v1/history/photo":
+		name := r.URL.Query().Get("name")
+		if r.Method != "GET" || !runPhotoName.MatchString(name) {
+			send(400, map[string]string{"error": "GET with a photo name required"})
+			return
+		}
+		img, err := readLimited(filepath.Join(a.path(runPhotoDir), name), 4<<20)
+		if err != nil {
+			send(404, map[string]string{"error": "photo not found"})
+			return
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(img)
+		return
 	case "/api/v1/events":
 		if r.Method != "GET" {
 			send(405, map[string]string{"error": "GET required"})

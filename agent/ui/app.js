@@ -329,8 +329,17 @@ const runModes={cleaning:'Уборка',room_cleaning:'Уборка комнат
 async function loadHistory(){
  const runs=await api('/api/v1/history'),rows=runs.slice(0,30).map(r=>{
   const row=document.createElement('div'),start=new Date(r.start),minutes=r.minutes??(r.end?Math.round((new Date(r.end)-start)/60000):null);
-  row.className='module-row';
+  row.className='module-row history-run';
   row.textContent=start.toLocaleString([], {dateStyle:'short',timeStyle:'short'})+' · '+(runModes[r.mode]||r.mode||'Уборка')+(minutes!==null?' · '+Math.round(minutes)+' мин':'')+(r.area!==undefined?' · '+r.area+' м²':'')+' · '+(r.result==='error'?'ошибка: '+errorText({error_name:r.error}):r.result==='docked'?'на базе':'остановлена');
+  if(r.obstacles?.length){
+   const details=document.createElement('details'),photos=document.createElement('div');
+   details.append(Object.assign(document.createElement('summary'),{textContent:'Препятствия: '+r.obstacles.length}),photos);
+   photos.className='obstacle-photos';
+   r.obstacles.forEach((o,i)=>{const [icon,name]=obstacleType(o[2]),figure=document.createElement('figure');figure.append(Object.assign(document.createElement('figcaption'),{textContent:icon+' '+name+' · '+o[3]+'%'}));if(r.photos?.[i])figure.dataset.photo=r.photos[i];photos.append(figure);});
+   // Photos load on first open: they need the token, so they come through fetch, not <img src>.
+   details.ontoggle=()=>{if(!details.open||details.dataset.loaded)return;details.dataset.loaded=1;photos.querySelectorAll('figure[data-photo]').forEach(async figure=>{try{const response=await fetch('/api/v1/history/photo?name='+encodeURIComponent(figure.dataset.photo),{headers:{'Authorization':'Bearer '+token},credentials:'omit'});if(!response.ok)throw Error();const img=document.createElement('img');img.src=URL.createObjectURL(await response.blob());img.alt=figure.textContent;figure.prepend(img);}catch{figure.append(' (фото не загрузилось)');}});};
+   row.append(details);
+  }
   return row;
  });
  if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Уборок пока не было.'}));

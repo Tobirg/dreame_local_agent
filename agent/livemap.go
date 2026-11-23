@@ -54,7 +54,8 @@ type liveFrame struct {
 	path, run      string
 	full           bool // I frame
 	spots, zones   [][]int
-	obstacles      [][]int // [x, y, type, confidence %]; nil when the frame has no "ai_obstacle"
+	obstacles      [][]int  // [x, y, type, confidence %]; nil when the frame has no "ai_obstacle"
+	photos         []string // firmware photo path per obstacle, "" when it has none
 	// The frame's own grid: header map id and frame number (per run), cell size, origin and size
 	// in cells, and the cells: an I frame's are values, a P frame's are changes to add (mod 256).
 	run16, seq   int
@@ -127,6 +128,11 @@ func parseLiveFrame(encoded string) (liveFrame, bool) {
 		p, errP := num(o[3])
 		if errX == nil && errY == nil && errK == nil && errP == nil {
 			f.obstacles = append(f.obstacles, []int{int(x), int(y), int(kind), int(p*100 + 0.5)})
+			photo := ""
+			if len(o) > 5 {
+				photo, _ = o[5].(string)
+			}
+			f.photos = append(f.photos, photo)
 		}
 	}
 	if id, err := meta.Map.Int64(); err == nil {

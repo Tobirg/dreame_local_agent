@@ -24,6 +24,10 @@ type cleanRun struct {
 	Error   string     `json:"error,omitempty"`   // error name when the run ended in an error
 	Minutes *float64   `json:"minutes,omitempty"` // missing when the robot did not report its totals
 	Area    *float64   `json:"area,omitempty"`
+	// What the AI camera found on this run ([x, y, type, confidence %]) and the kept photo name
+	// per obstacle ("" when none; GET /api/v1/history/photo?name=…); see keepRunObstacles.
+	Obstacles [][]int  `json:"obstacles,omitempty"`
+	Photos    []string `json:"photos,omitempty"`
 
 	startStats map[string]any
 	finishing  bool
@@ -67,7 +71,7 @@ func (a *agent) trackRun(state map[string]any, freshTotals bool) {
 		}
 		a.dev.run = nil
 		_ = a.appendHistory(*r)
-		go a.mapView() // keeps the run's obstacles before the firmware's log rotates them away
+		go a.keepRunObstacles(r.Start, *r.End) // before the firmware rotates the log and deletes the photos
 	}
 }
 
