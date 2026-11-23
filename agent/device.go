@@ -39,7 +39,7 @@ var stateProps = []stateProp{
 // 4/1 codes, same table as ui/app.js statusNames.
 var statusNames = map[int64]string{
 	0: "idle", 1: "paused", 2: "cleaning", 3: "returning", 4: "part_cleaning", 5: "edge_cleaning",
-	6: "charging", 12: "error", 14: "sleeping", 17: "idle", 18: "room_cleaning", 19: "zone_cleaning",
+	6: "charging", 12: "error", 13: "remote_control", 14: "sleeping", 17: "idle", 18: "room_cleaning", 19: "zone_cleaning",
 	20: "spot_cleaning", 21: "mapping",
 }
 
@@ -394,6 +394,7 @@ var commandTable = map[string]command{
 	"clean_spot":       {detail: true},
 	"reset_consumable": {detail: true},
 	"set_dnd":          {detail: true},
+	"remote_move":      {detail: true},
 }
 
 type commandParams struct {
@@ -409,8 +410,10 @@ type commandParams struct {
 	Enabled    *bool   `json:"enabled"`
 	Start      string  `json:"start"`
 	End        string  `json:"end"`
-	Setting    string  `json:"setting"` // set_setting: a ui/settings.js id
-	To         any     `json:"to"`      // set_setting: the new value
+	Setting    string  `json:"setting"`  // set_setting: a ui/settings.js id
+	To         any     `json:"to"`       // set_setting: the new value
+	Velocity   *int    `json:"velocity"` // remote_move: forward speed, negative backwards
+	Rotation   *int    `json:"rotation"` // remote_move: turn rate
 }
 
 // runCommand is reached through call(), so it already holds the IPC gate and passed identity checks.
@@ -474,6 +477,10 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 	result, err := a.miot(ctx, method, params)
 	if err != nil {
 		return nil, err
+	}
+	if p.Name == "remote_move" {
+		// Sent several times a second while a drive button is held: no extra polls or state events.
+		return result, rejected(result)
 	}
 	a.refreshSoon()
 	if err := rejected(result); err != nil {

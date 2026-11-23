@@ -77,3 +77,24 @@ func TestDetailCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteMove(t *testing.T) {
+	a := testAgent(t)
+	v, r := 150, -90
+	method, params, err := a.detailCommand(commandParams{Name: "remote_move", Velocity: &v, Rotation: &r}, "7")
+	rows, _ := params.([]any)
+	if err != nil || method != "set_properties" || len(rows) != 1 {
+		t.Fatal(method, params, err)
+	}
+	row := rows[0].(map[string]any)
+	value, _ := row["value"].(string)
+	if row["siid"] != 4 || row["piid"] != 15 || !strings.HasPrefix(value, `{"spdv":150,"spdw":-90,"audio":"false","random":`) {
+		t.Fatal(row)
+	}
+	big := 700
+	for _, p := range []commandParams{{Name: "remote_move", Velocity: &v}, {Name: "remote_move", Velocity: &big, Rotation: &r}} {
+		if _, _, err := a.detailCommand(p, "7"); err == nil {
+			t.Error("accepted", p)
+		}
+	}
+}

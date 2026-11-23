@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"time"
 )
@@ -115,6 +116,14 @@ func (a *agent) detailCommand(p commandParams, did string) (string, any, error) 
 			return "", nil, errors.New("this robot does not report " + c.name)
 		}
 		return "action", map[string]any{"did": did, "siid": c.siid, "aiid": 1, "in": []any{}}, nil
+	case "remote_move":
+		// Manual drive (Tasshack REMOTE_CONTROL, 4/15). Each call moves a short step; the first one
+		// takes the robot off the dock, and it leaves the mode by itself ~15 s after the last step.
+		if p.Velocity == nil || p.Rotation == nil || *p.Velocity < -600 || *p.Velocity > 600 || *p.Rotation < -360 || *p.Rotation > 360 {
+			return "", nil, errors.New("remote_move requires velocity -600..600 and rotation -360..360")
+		}
+		value := fmt.Sprintf(`{"spdv":%d,"spdw":%d,"audio":"false","random":%d}`, *p.Velocity, *p.Rotation, rand.Intn(65535))
+		return "set_properties", []any{map[string]any{"did": did, "siid": 4, "piid": 15, "value": value}}, nil
 	case "set_dnd":
 		if p.Enabled == nil || !clockRe.MatchString(p.Start) || !clockRe.MatchString(p.End) {
 			return "", nil, errors.New("set_dnd requires enabled and start/end as HH:MM")

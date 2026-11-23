@@ -1,7 +1,7 @@
 import {settings} from '/settings.js';
 const $=id=>document.getElementById(id);
 const captiveSetup=new URLSearchParams(location.search).get('setup')==='wifi';
-const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту'};
+const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',13:'Ручное управление',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту'};
 // Station codes observed on r2505; other codes are shown as numbers.
 const stationNames={0:'ожидание',1:'мойка салфеток',2:'сушка'};
 const palette=['#7fd9c2','#a3bcec','#e5bd8a','#bcaceb','#a7d39a','#e3a5b4','#93cdd9','#d4d093'];
