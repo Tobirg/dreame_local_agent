@@ -283,12 +283,12 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 			return nil, errors.New("local.reboot takes no parameters")
 		}
 		return a.queueReboot()
-	case "local.thresholds", "local.restrictions", "local.room_settings", "local.room_order", "local.room_types", "local.map_use":
+	case "local.thresholds", "local.restrictions", "local.room_settings", "local.room_order", "local.room_types", "local.map_use", "local.carpets":
 		if err := a.robotWriteAllowed(info); err != nil {
 			return nil, err
 		}
 		build := map[string]func(json.RawMessage) (map[string]any, error){
-			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch, "local.room_order": a.roomOrderPatch, "local.room_types": a.roomTypesPatch, "local.map_use": a.useMapEdit,
+			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch, "local.room_order": a.roomOrderPatch, "local.room_types": a.roomTypesPatch, "local.map_use": a.useMapEdit, "local.carpets": a.carpetsPatch,
 		}[req.Method]
 		patch, err := build(req.Params)
 		if err != nil {

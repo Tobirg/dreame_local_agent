@@ -49,7 +49,7 @@ async function api(method,params=null){
 export function assertCommand(result,method,params){
  const rows=Array.isArray(result)?result:[result];
  if(!rows.length||rows.some(r=>!r||r.code!==0))throw Error('Робот отклонил команду: '+JSON.stringify(result));
- if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||method==='local.room_order'||method==='local.map_use'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
+ if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||method==='local.room_order'||method==='local.map_use'||method==='local.carpets'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
   if(Array.isArray(result)||!Array.isArray(result.out))throw Error('Map operation result is missing; outcome unknown.');
   const operation=result.out.filter(row=>row&&row.piid===6);
   if(operation.length!==1||!Number.isSafeInteger(operation[0].value))throw Error('Map operation result is invalid; outcome unknown.');
@@ -706,26 +706,29 @@ $('save-room-types').onclick=async()=>{
  catch(e){$('room-types-status').textContent=e.message;}
 };
 // ---- Virtual walls and zones: edited locally as a draft, then all three lists are saved at once.
-const restrictKinds={walls:'Стена',no_go_zones:'Запретная зона',no_mop_zones:'Без влажной уборки'};
+const restrictKinds={walls:'Стена',no_go_zones:'Запретная зона',no_mop_zones:'Без влажной уборки',carpets_added:'Ковёр',carpets_ignored:'Не считать ковром'},carpetKinds=['carpets_added','carpets_ignored'];
 const restrictions=()=>restrictDraft||Object.fromEntries(Object.keys(restrictKinds).map(k=>[k,view?.[k]||[]]));
 function renderRestrictions(){
  const lists=restrictions(),rows=[];
  for(const [kind,label] of Object.entries(restrictKinds))lists[kind].forEach((item,index)=>{
   const row=document.createElement('div'),text=document.createElement('span'),remove=document.createElement('button');
   row.className='module-row';text.textContent=label+' '+(index+1);remove.textContent='Удалить';remove.className='ghost';
-  remove.onclick=()=>{const next=structuredClone(restrictions());next[kind].splice(index,1);restrictDraft=next;$('restrict-status').textContent='Удалено из черновика. Нажми «Сохранить запреты».';renderRestrictions();draw();disableControls(busy);};
+  remove.onclick=()=>{const next=structuredClone(restrictions());next[kind].splice(index,1);restrictDraft=next;$('restrict-status').textContent='Удалено из черновика. Нажми «Сохранить изменения».';renderRestrictions();draw();disableControls(busy);};
   row.append(text,remove);rows.push(row);
  });
- if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:view?.restrictions_editable?'Запретов нет.':'Эта карта не содержит доступного формата запретов.'}));
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:view?.restrictions_editable?'Запретов и добавленных ковров нет.':'Эта карта не содержит доступного формата запретов.'}));
  $('restrict-list').replaceChildren(...rows);
 }
 function drawRestrictions(){
  const lists=restrictions(),px=(x,y)=>{const p=robotToPixel(view,x,y);return [p[0]*3,(view.height-p[1])*3];};
  ctx.save();ctx.lineWidth=2;
+ // Carpets the robot found: outline only.
+ ctx.strokeStyle='#a0703c';for(const c of view?.carpets||[]){ctx.beginPath();for(let i=0;i+1<c.points.length;i+=2){const [x,y]=px(c.points[i],c.points[i+1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.stroke();}
  for(const [kind,items] of Object.entries(lists))for(const r of items){
   if(!Array.isArray(r)||r.length!==4)continue;const [x0,y0]=px(r[0],r[1]),[x1,y1]=px(r[2],r[3]);
-  if(kind==='walls'){ctx.strokeStyle='#ff4d4d';ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();continue;}
-  const mop=kind==='no_mop_zones';ctx.strokeStyle=mop?'#5aa9ff':'#ff4d4d';ctx.fillStyle=mop?'rgba(90,169,255,.25)':'rgba(255,77,77,.25)';
+  if(kind==='walls'){ctx.setLineDash([]);ctx.strokeStyle='#ff4d4d';ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();continue;}
+  const style={no_mop_zones:['#5aa9ff','rgba(90,169,255,.25)'],carpets_added:['#a0703c','rgba(160,112,60,.35)'],carpets_ignored:['#8a8a8a','rgba(138,138,138,.15)']}[kind]||['#ff4d4d','rgba(255,77,77,.25)'];
+  ctx.strokeStyle=style[0];ctx.fillStyle=style[1];ctx.setLineDash(kind==='carpets_ignored'?[6,4]:[]);
   ctx.fillRect(Math.min(x0,x1),Math.min(y0,y1),Math.abs(x1-x0),Math.abs(y1-y0));ctx.strokeRect(Math.min(x0,x1),Math.min(y0,y1),Math.abs(x1-x0),Math.abs(y1-y0));
  }
  if(restrictPoint){const [x,y]=px(...restrictPoint);ctx.fillStyle='#ff4d4d';ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();}
@@ -738,13 +741,17 @@ function addRestrictionPoint(x,y){
  if(row[0]===row[2]&&row[1]===row[3]||(kind!=='walls'&&(row[0]===row[2]||row[1]===row[3]))){$('restrict-status').textContent='Точки слишком близко. Укажи их заново.';draw();return;}
  if(kind!=='walls')row.splice(0,4,Math.min(row[0],row[2]),Math.min(row[1],row[3]),Math.max(row[0],row[2]),Math.max(row[1],row[3]));
  const next=structuredClone(restrictions());next[kind].push(row);restrictDraft=next;
- $('restrict-status').textContent=restrictKinds[kind]+' добавлена в черновик. Нажми «Сохранить запреты».';renderRestrictions();draw();disableControls(busy);
+ $('restrict-status').textContent=restrictKinds[kind]+' добавлена в черновик. Нажми «Сохранить изменения».';renderRestrictions();draw();disableControls(busy);
 }
 $('draw-restrict').onclick=()=>{if(busy||!view?.restrictions_editable)return;restrictDrawing=true;restrictPoint=null;zoneDrawing=false;thresholdDrawing=false;$('restrict-status').textContent=$('restrict-kind').value==='walls'?'Нажми на два конца стены.':'Нажми на два противоположных угла зоны.';};
 $('cancel-restrict').onclick=()=>{restrictDraft=null;restrictDrawing=false;restrictPoint=null;$('restrict-status').textContent='Изменения отменены.';renderRestrictions();draw();disableControls(busy);};
 $('save-restrict').onclick=async()=>{
  if(!restrictDraft)return;
- try{await control('local.restrictions',{map_id:view.map_id,revision:view.revision,...restrictDraft});$('restrict-status').textContent='Запреты сохранены. Ожидаю обновление сохранённой карты.';for(const delay of [1500,5000,12000])setTimeout(()=>refreshMap(),delay);}
+ const d=restrictDraft,changed=k=>JSON.stringify(d[k])!==JSON.stringify(view[k]||[]);
+ try{
+  if(['walls','no_go_zones','no_mop_zones'].some(changed))await control('local.restrictions',{map_id:view.map_id,revision:view.revision,walls:d.walls,no_go_zones:d.no_go_zones,no_mop_zones:d.no_mop_zones});
+  if(carpetKinds.some(changed)){const now=await api('local.map_view');await control('local.carpets',{map_id:now.map_id,revision:now.revision,carpets_added:d.carpets_added,carpets_ignored:d.carpets_ignored});}
+  $('restrict-status').textContent='Изменения сохранены. Ожидаю обновление сохранённой карты.';for(const delay of [1500,5000,12000])setTimeout(()=>refreshMap(),delay);}
  catch(e){$('restrict-status').textContent=e.message;}
 };
 

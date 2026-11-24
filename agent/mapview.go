@@ -39,6 +39,12 @@ type mapView struct {
 	Walls                [][]int `json:"walls"`
 	NoGo                 [][]int `json:"no_go_zones"`
 	NoMop                [][]int `json:"no_mop_zones"`
+	// Carpets: found by the robot (carpet_polygon: id -> [x, y, ...] mm), drawn by the user (vw.addcpt)
+	// and areas where a found carpet is ignored (vw.nocpt); rectangles [x0, y0, x1, y1]. See carpets.go.
+	CarpetsEditable bool          `json:"carpets_editable"`
+	Carpets         []carpetShape `json:"carpets"`
+	CarpetsAdded    [][]int       `json:"carpets_added"`
+	CarpetsIgnored  [][]int       `json:"carpets_ignored"`
 	// Per-room cleaning settings by room id, from /data/ri/setting.json2; see roomsettings.go.
 	RoomSettings map[string][]int `json:"room_settings"`
 	Charger      []int            `json:"charger,omitempty"` // station position, robot millimetres
@@ -101,15 +107,18 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		Origin []int                      `json:"origin"`
 		VWS    map[string]json.RawMessage `json:"vws"`
 		VW     *struct {
-			Line [][]int `json:"line"`
-			Rect [][]int `json:"rect"`
-			Mop  [][]int `json:"mop"`
+			Line   [][]int `json:"line"`
+			Rect   [][]int `json:"rect"`
+			Mop    [][]int `json:"mop"`
+			Addcpt [][]int `json:"addcpt"`
+			Nocpt  [][]int `json:"nocpt"`
 		} `json:"vw"`
 		Walls struct {
 			Version int `json:"version_flag"`
 		} `json:"walls_info"`
-		Charger  []int `json:"charger"`
-		Segments map[string]struct {
+		CarpetPolygon map[string][]json.RawMessage `json:"carpet_polygon"`
+		Charger       []int                        `json:"charger"`
+		Segments      map[string]struct {
 			Name  string `json:"name"`
 			Type  int    `json:"type"`
 			Index int    `json:"index"`
@@ -139,6 +148,11 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 			view.NoMop = vw.Mop
 		}
 	}
+	var added, ignored [][]int
+	if meta.VW != nil {
+		added, ignored = meta.VW.Addcpt, meta.VW.Nocpt
+	}
+	view.carpets(meta.VW != nil, meta.CarpetPolygon, added, ignored)
 	view.Passable = [][]int{}
 	view.Impassable = [][]int{}
 	if meta.VWS != nil {
