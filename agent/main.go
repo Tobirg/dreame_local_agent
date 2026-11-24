@@ -300,6 +300,14 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 		}
 		input := map[string]any{"did": info["did"], "siid": 6, "aiid": 2, "in": []any{map[string]any{"piid": 4, "value": string(value)}}}
 		return a.miot(ctx, "action", input)
+	case "local.messages_status":
+		a.dev.mu.Lock()
+		defer a.dev.mu.Unlock()
+		return a.readMessages(), nil
+	case "local.messages_clear":
+		a.dev.mu.Lock()
+		defer a.dev.mu.Unlock()
+		return map[string]any{"cleared": true}, a.writeMessages([]message{})
 	case "local.map_backup_status":
 		if params != nil {
 			return nil, errors.New("local.map_backup_status takes no parameters")

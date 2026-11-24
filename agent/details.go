@@ -136,6 +136,14 @@ func (a *agent) detailCommand(p commandParams, did string) (string, any, error) 
 			map[string]any{"did": did, "siid": 5, "piid": 2, "value": p.Start},
 			map[string]any{"did": did, "siid": 5, "piid": 3, "value": p.End},
 		}, nil
+	case "dock_self_repair":
+		a.dev.mu.Lock()
+		activity, _ := a.dev.snap.State["activity"].(string)
+		a.dev.mu.Unlock()
+		if activity != "docked" {
+			return "", nil, errors.New("the robot must be on the station")
+		}
+		return "set_properties", []any{map[string]any{"did": did, "siid": 99, "piid": 8, "value": `{"bittest":[17,0]}`}}, nil
 	case "set_schedule", "delete_schedule":
 		return a.scheduleCommand(p, did)
 	case "clean_spot":

@@ -2,7 +2,7 @@ import {settings} from '/settings.js';
 import {mountVoice} from '/voice.js';
 const $=id=>document.getElementById(id);
 const captiveSetup=new URLSearchParams(location.search).get('setup')==='wifi';
-const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',13:'Ручное управление',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту'};
+const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',13:'Ручное управление',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту',15:'Самопроверка станции',22:'Патрулирование',23:'Едет к точке камеры',1501:'Проверка воды'};
 // Station codes observed on r2505; other codes are shown as numbers.
 const stationNames={0:'ожидание',1:'мойка салфеток',2:'сушка'};
 const palette=['#7fd9c2','#a3bcec','#e5bd8a','#bcaceb','#a7d39a','#e3a5b4','#93cdd9','#d4d093'];
@@ -258,7 +258,7 @@ function renderState(snap){
   $('robot-error').hidden=!s.error;$('robot-error').textContent=s.error?'Ошибка '+s.error+': '+errorText(s):'';
   renderCare(s);
   // The agent records a finished run after its next totals read; reload the history then.
-  const active=['cleaning','paused','returning'].includes(s.activity);if(wasActive&&!active)setTimeout(()=>loadHistory().catch(()=>{}),12000);wasActive=active;followLive(active);
+  const active=['cleaning','paused','returning'].includes(s.activity);if(wasActive&&!active)setTimeout(()=>{loadHistory().catch(()=>{});loadMessages().catch(()=>{});},12000);wasActive=active;followLive(active);
   for(const listener of stateListeners)try{listener.fn(s);}catch{}
   renderCommand(snap.command);
   if(snap.stale){connectionLost(snap.error||'Нет свежих данных от робота');return;}
@@ -506,7 +506,7 @@ async function login(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('main-page').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
+ await refresh();await refreshMap();loadMessages().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
@@ -890,3 +890,21 @@ window.addEventListener('online',scheduleResume);window.addEventListener('pagesh
 // Modules live on their own page: #modules shows it, anything else the robot dashboard.
 function showPage(){const modules=location.hash==='#modules';$('main-page').hidden=modules;$('modules-page').hidden=!modules;$('nav-main').classList.toggle('active',!modules);$('nav-modules').classList.toggle('active',modules);}
 window.addEventListener('hashchange',showPage);showPage();
+$('dock-self-repair').onclick=()=>{if(window.confirm('Запустить саморемонт станции? Это займёт около 5–10 минут.'))command('dock_self_repair').catch(()=>{});};
+// ---- Messages (messages.go): the agent's own feed, newest first.
+export function messageText(m){
+ if(m.type==='error')return 'Ошибка: '+(errorTexts[m.code]||String(m.name||m.code).replaceAll('_',' '));
+ if(m.type==='consumable')return (consumableNames[m.name]||m.name)+(m.code===0?': ресурс исчерпан':': осталось '+m.code+' %');
+ if(m.type==='run')return m.name==='docked'?'Уборка закончена, робот на базе':m.name==='error'?'Уборка прервана ошибкой':'Уборка остановлена';
+ if(m.type==='self_test')return m.code===15?'Станция начала саморемонт':'Саморемонт станции закончился';
+ return m.type;
+}
+async function loadMessages(){
+ const list=await api('local.messages_status');
+ $('messages-count').textContent=list.length?String(list.length):'';
+ const rows=list.map(m=>{const row=document.createElement('div');row.className='module-row';row.append(Object.assign(document.createElement('span'),{textContent:new Date(m.time).toLocaleString('ru-RU')+' · '+messageText(m)}));if(m.type==='error')row.classList.add('error');return row;});
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Сообщений нет.'}));
+ $('messages').replaceChildren(...rows);
+}
+$('messages-details').ontoggle=()=>{if($('messages-details').open)loadMessages().catch(e=>toast(e.message,true));};
+$('clear-messages').onclick=async()=>{if(!window.confirm('Очистить сообщения?'))return;try{await api('local.messages_clear');await loadMessages();}catch(e){toast(e.message,true);}};

@@ -25,3 +25,15 @@ func TestEncodeTimingRoom(t *testing.T) {
 		t.Fatalf("got %d", v)
 	}
 }
+
+func TestDockSelfRepair(t *testing.T) {
+	a := testAgent(t)
+	if _, _, err := a.detailCommand(commandParams{Name: "dock_self_repair"}, "1"); err == nil {
+		t.Fatal("started off the station")
+	}
+	a.dev.snap.State = map[string]any{"activity": "docked"}
+	method, params, err := a.detailCommand(commandParams{Name: "dock_self_repair"}, "1")
+	if err != nil || method != "set_properties" || params.([]any)[0].(map[string]any)["value"] != `{"bittest":[17,0]}` {
+		t.Fatal(method, params, err)
+	}
+}

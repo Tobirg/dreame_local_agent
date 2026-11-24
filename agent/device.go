@@ -40,7 +40,7 @@ var stateProps = []stateProp{
 var statusNames = map[int64]string{
 	0: "idle", 1: "paused", 2: "cleaning", 3: "returning", 4: "part_cleaning", 5: "edge_cleaning",
 	6: "charging", 12: "error", 13: "remote_control", 14: "sleeping", 17: "idle", 18: "room_cleaning", 19: "zone_cleaning",
-	20: "spot_cleaning", 21: "mapping",
+	20: "spot_cleaning", 21: "mapping", 15: "self_test", 22: "patrol", 23: "monitor_spot", 1501: "water_self_check",
 }
 
 // activity collapses firmware status into the small set every smart home understands.
@@ -136,9 +136,11 @@ func (a *agent) poll(ctx context.Context) {
 	if a.settleCommandLocked(state, now) || a.dev.snap.Stale || !reflect.DeepEqual(a.dev.snap.State, state) {
 		a.bumpLocked()
 	}
+	prev := a.dev.snap.State
 	a.dev.snap = snapshot{Seq: a.dev.snap.Seq, UpdatedAt: &now, State: state, Command: a.dev.snap.Command}
 	a.dev.polled = true
 	a.trackRun(state, withDetails)
+	a.noteMessages(prev, state)
 }
 
 func normalize(result any) (map[string]any, error) {
@@ -397,6 +399,8 @@ var commandTable = map[string]command{
 	"remote_move":      {detail: true},
 	"set_schedule":     {detail: true},
 	"delete_schedule":  {detail: true},
+	// Station self-repair (app DockRepairPage): 99/8 bittest 17, about 5-10 minutes, status 15.
+	"dock_self_repair": {detail: true},
 }
 
 type commandParams struct {
