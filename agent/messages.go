@@ -57,7 +57,7 @@ func stateMessages(prev, next map[string]any, now time.Time) []message {
 	}
 	oldStatus, _ := int64Of(prev["status"])
 	status, _ := int64Of(next["status"])
-	if (status == 15) != (oldStatus == 15) {
+	if (status == 1527) != (oldStatus == 1527) { // 1510 + 17: the station self-repair check
 		out = append(out, message{now, "self_test", status, "", ""})
 	}
 	return out

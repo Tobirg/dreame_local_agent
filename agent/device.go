@@ -45,7 +45,9 @@ var deviceCapabilityBits = []string{"video_monitor", "quick_command", "streamer_
 var statusNames = map[int64]string{
 	0: "idle", 1: "paused", 2: "cleaning", 3: "returning", 4: "part_cleaning", 5: "edge_cleaning",
 	6: "charging", 12: "error", 13: "remote_control", 14: "sleeping", 17: "idle", 18: "room_cleaning", 19: "zone_cleaning",
-	20: "spot_cleaning", 21: "mapping", 15: "self_test", 22: "patrol", 23: "monitor_spot", 1501: "water_self_check",
+	20: "spot_cleaning", 21: "mapping", 15: "test_mode", 22: "patrol", 23: "monitor_spot", 1501: "water_self_check",
+	// 1510 + n: check n of the app's BIT list is running (BITSingleDeviceCheck2, CHECK_MODEL_VALUE).
+	1527: "station_self_repair",
 }
 
 // activity collapses firmware status into the small set every smart home understands.
@@ -179,6 +181,8 @@ func normalize(result any) (map[string]any, error) {
 		state["activity"] = activity(status, charging, hasCharging)
 		if name, ok := statusNames[status]; ok {
 			state["status_name"] = name
+		} else if status > 1510 && status < 1600 {
+			state["status_name"] = "self_check"
 		}
 	}
 	if code, ok := int64Of(state["error"]); ok {

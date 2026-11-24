@@ -2,7 +2,7 @@ import {settings} from '/settings.js';
 import {mountVoice} from '/voice.js';
 const $=id=>document.getElementById(id);
 const captiveSetup=new URLSearchParams(location.search).get('setup')==='wifi';
-const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',13:'Ручное управление',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту',15:'Самопроверка станции',22:'Патрулирование',23:'Едет к точке камеры',1501:'Проверка воды'};
+const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',13:'Ручное управление',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту',15:'Тестовый режим',1527:'Саморемонт станции',22:'Патрулирование',23:'Едет к точке камеры',1501:'Проверка воды'};
 // Station codes observed on r2505; other codes are shown as numbers.
 const stationNames={0:'ожидание',1:'мойка салфеток',2:'сушка'};
 const palette=['#7fd9c2','#a3bcec','#e5bd8a','#bcaceb','#a7d39a','#e3a5b4','#93cdd9','#d4d093'];
@@ -248,7 +248,7 @@ function renderState(snap){
   if(!snap?.state||typeof snap.state!=='object')throw Error('Некорректный ответ статуса');
   if(snap.stale&&!snap.updated_at)throw Error(snap.error||'Агент ещё не прочитал состояние робота');
   const s=snap.state;
-  $('status').textContent=statusNames[s.status]||('Статус '+(s.status??'недоступен'));
+  $('status').textContent=statusNames[s.status]||(s.status>1510&&s.status<1600?'Самопроверка: проверка '+(s.status-1510):'Статус '+(s.status??'недоступен'));
   $('battery').textContent=s.battery===undefined?'—':s.battery+'%';$('battery').style.setProperty('--charge',(s.battery??0)+'%');
   $('updated').textContent='Обновлено '+new Date(snap.updated_at).toLocaleTimeString();
   if(!fanDirty&&document.activeElement!==$('fan')&&s.suction!==undefined)$('fan').value=String(s.suction);
@@ -901,7 +901,7 @@ export function messageText(m){
  if(m.type==='error')return 'Ошибка: '+(m.text||errorTexts[m.code]||String(m.name||m.code).replaceAll('_',' '));
  if(m.type==='consumable')return (consumableNames[m.name]||m.name)+(m.code===0?': ресурс исчерпан':': осталось '+m.code+' %');
  if(m.type==='run')return m.name==='docked'?'Уборка закончена, робот на базе':m.name==='error'?'Уборка прервана ошибкой':'Уборка остановлена';
- if(m.type==='self_test')return m.code===15?'Станция начала саморемонт':'Саморемонт станции закончился';
+ if(m.type==='self_test')return m.code===1527?'Станция начала саморемонт':'Саморемонт станции закончился';
  return m.type;
 }
 async function loadMessages(){

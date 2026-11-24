@@ -23,8 +23,8 @@ func TestStateMessages(t *testing.T) {
 	if got := stateMessages(next, next, now); len(got) != 0 {
 		t.Fatalf("%+v", got)
 	}
-	selfTest := stateMessages(map[string]any{"status": n(6), "activity": "docked"}, map[string]any{"status": n(15), "activity": "docked"}, now)
-	if len(selfTest) != 1 || selfTest[0].Type != "self_test" || selfTest[0].Code != 15 {
+	selfTest := stateMessages(map[string]any{"status": n(6), "activity": "docked"}, map[string]any{"status": n(1527), "activity": "docked"}, now)
+	if len(selfTest) != 1 || selfTest[0].Type != "self_test" || selfTest[0].Code != 1527 {
 		t.Fatalf("%+v", selfTest)
 	}
 
@@ -34,5 +34,14 @@ func TestStateMessages(t *testing.T) {
 	list := a.readMessages()
 	if len(list) != 4 || list[0].Type != "run" || list[0].Name != "docked" || list[1].Type != "error" {
 		t.Fatalf("%+v", list)
+	}
+}
+
+func TestSelfCheckStatusNames(t *testing.T) {
+	for raw, want := range map[string]string{"1527": "station_self_repair", "1512": "self_check", "15": "test_mode"} {
+		state, err := normalize(json.RawMessage(`[{"siid":4,"piid":1,"value":` + raw + `,"code":0}]`))
+		if err != nil || state["status_name"] != want {
+			t.Fatal(raw, state, err)
+		}
 	}
 }
