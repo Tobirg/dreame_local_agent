@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -359,7 +360,7 @@ func (a *agent) capabilities() (map[string]any, error) {
 	}
 	commands := map[string]any{}
 	for name, c := range commandTable {
-		available, reason := c.available(hw)
+		available, reason := c.available(info["model"], hw)
 		commands[name] = map[string]any{"available": available, "reason": reason}
 	}
 	// Hashes of the checked firmware files go into compatibility reports, so new profiles can be added.
@@ -399,11 +400,15 @@ type command struct {
 	min, max   int    // value range for set_properties
 	hwKey      string // hardware flag that must allow this command
 	hwAccepts  func(v any) bool
+	models     []string // short model ids (r2401) whose app shows this; empty means every model
 	clearRooms bool
 	detail     bool
 }
 
-func (c command) available(hw map[string]any) (any, string) {
+func (c command) available(model string, hw map[string]any) (any, string) {
+	if c.models != nil && !slices.Contains(c.models, strings.TrimPrefix(model, "dreame.vacuum.")) {
+		return false, "not offered by the app for this model"
+	}
 	if c.hwKey == "" {
 		return true, ""
 	}
@@ -432,22 +437,29 @@ var commandTable = map[string]command{
 	"dry_start": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,1"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True")},
 	"dry_stop":  {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,0"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True")},
 	// More 4/4 jobs from the app: 7 robot water tank draining (4/60: 1 running, 2 done, about
-	// 3.5 min on the r2505), 9 station water draining (27/5 = 1 for about 25 s). 5, the
-	// washboard self-clean, is accepted by the r2505 but does nothing, so it is left out;
-	// 1, 4, 8, 10, 13 and 14 are pause/resume steps, a demo and parts the X50 lacks.
+	// 3.5 min on the r2505), 9 station water draining (27/5 = 1 for about 25 s), 5 the washboard
+	// self-clean (StationCleanPage). The app offers 5 only with showStationCleaning; the r2505
+	// accepts it but does nothing. 1, 4, 8, 10, 13 and 14 are pause/resume steps, a demo and
+	// parts the X50 lacks.
+	"station_clean": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "5,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present,
+		models: []string{"r2350", "r2401", "r2412", "r2416", "r2424", "r2426", "r2437", "r2440", "r2467", "r2483", "r2485", "r2487", "r2488", "r2491", "r2493", "r2513", "r9304", "r9401", "r9406"}},
 	"tank_drain":    {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "7,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present},
 	"station_drain": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "9,1"}}, hwKey: "AUTO_WATER_SUPPLY_DRAINAGE", hwAccepts: is("True")},
 	"set_suction":   {method: "set_properties", siid: 4, id: 4, min: 0, max: 3},
 	"set_volume":    {method: "set_properties", siid: 7, id: 1, min: 0, max: 100},
 	"clean_rooms":   {method: "action", siid: 4, id: 1, clearRooms: true},
 	// Built by detailCommand in details.go.
-	"clean_zone":           {detail: true},
-	"clean_spot":           {detail: true},
-	"reset_consumable":     {detail: true},
-	"set_dnd":              {detail: true},
-	"remote_move":          {detail: true},
-	"set_schedule":         {detail: true},
-	"delete_schedule":      {detail: true},
+	"clean_zone":       {detail: true},
+	"clean_spot":       {detail: true},
+	"reset_consumable": {detail: true},
+	"set_dnd":          {detail: true},
+	"remote_move":      {detail: true},
+	"set_schedule":     {detail: true},
+	"delete_schedule":  {detail: true},
+	// Station self-repair (app DockRepairPage, 99/8 bittest 17, about 5-10 minutes, status 15).
+	// Only models whose app plugin opens that page; on the r2505 (shared firmware family)
+	// bittest 17 starts the factory LDS test instead, so it is hidden there.
+	"dock_self_repair":     {detail: true, models: []string{"p2029", "r2104", "r2205", "r2233", "r2235", "r2246", "r2247", "r2253", "r2257", "r2310", "r2317", "r2386", "r2421", "r9304"}},
 	"go_to":                {detail: true},
 	"set_dnd_period":       {detail: true},
 	"delete_dnd_period":    {detail: true},
@@ -506,10 +518,10 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 	if !ok {
 		return nil, errors.New("unknown command")
 	}
-	if c.hwKey != "" {
+	if c.hwKey != "" || c.models != nil {
 		hw, _ := a.hardware(info["model"])
 		// Unknown hardware does not block; only an explicit "not present" does.
-		if available, reason := c.available(hw); available == false {
+		if available, reason := c.available(info["model"], hw); available == false {
 			return nil, errors.New("command not supported by this model: " + reason)
 		}
 	}

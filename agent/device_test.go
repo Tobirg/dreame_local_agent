@@ -267,3 +267,28 @@ func TestUnverifiedFirmwareIsReadOnly(t *testing.T) {
 		t.Fatal("capabilities must report no control")
 	}
 }
+
+func TestModelGatesAppOnlyCommands(t *testing.T) {
+	a := testAgent(t) // model r2505
+	log := mockRobot(t, a)
+	a.dev.snap.State = map[string]any{"activity": "docked"}
+	for _, name := range []string{"station_clean", "dock_self_repair"} {
+		_, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(`{"name":"` + name + `"}`)})
+		if err == nil || !strings.Contains(err.Error(), "not offered") {
+			t.Fatal(name, err)
+		}
+		if ok, _ := commandTable[name].available("dreame.vacuum.r2513", map[string]any{"RUNTIME_DOCK_TYPE": "1"}); name == "station_clean" && ok != true {
+			t.Fatal("station_clean hidden on r2513")
+		}
+	}
+	if ok, _ := commandTable["dock_self_repair"].available("dreame.vacuum.r2310", nil); ok != true {
+		t.Fatal("dock_self_repair hidden on r2310")
+	}
+	if b, _ := os.ReadFile(log); len(b) != 0 {
+		t.Fatal("blocked command reached the robot", string(b))
+	}
+	_, params, err := a.detailCommand(commandParams{Name: "dock_self_repair"}, "1")
+	if err != nil || params.([]any)[0].(map[string]any)["value"] != `{"bittest":[17,0]}` {
+		t.Fatal(params, err)
+	}
+}

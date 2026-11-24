@@ -165,6 +165,14 @@ func (a *agent) detailCommand(p commandParams, did string) (string, any, error) 
 		}
 		value, _ := json.Marshal(map[string]any{"spoint": [][]int{}, "tpoint": [][]int{{pt[0], pt[1], 0, 0}}})
 		return "action", map[string]any{"did": did, "siid": 4, "aiid": 1, "in": []any{map[string]any{"piid": 1, "value": 23}, map[string]any{"piid": 10, "value": string(value)}}}, nil
+	case "dock_self_repair":
+		a.dev.mu.Lock()
+		activity, _ := a.dev.snap.State["activity"].(string)
+		a.dev.mu.Unlock()
+		if activity != "docked" {
+			return "", nil, errors.New("the robot must be on the station")
+		}
+		return "set_properties", []any{map[string]any{"did": did, "siid": 99, "piid": 8, "value": `{"bittest":[17,0]}`}}, nil
 	case "set_schedule", "delete_schedule":
 		return a.scheduleCommand(p, did)
 	case "save_quick_command", "delete_quick_command":
