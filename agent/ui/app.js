@@ -264,6 +264,7 @@ function renderState(snap){
   $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—')+(s.error_name?' ('+s.error_name+')':'');
   $('robot-error').hidden=!s.error;$('robot-error').textContent=s.error?'Ошибка '+s.error+': '+errorText(s):'';
   renderCare(s);
+  const look=[s.activity,s.station,s.charging,s.battery===100].join();if(look!==robotLook){robotLook=look;robotState=s;if(view&&!view.empty)draw();}robotState=s;
   // The agent records a finished run after its next totals read; reload the history then.
   const active=['cleaning','paused','returning'].includes(s.activity);if(wasActive&&!active)setTimeout(()=>{loadHistory().catch(()=>{});loadMessages().catch(()=>{});},12000);wasActive=active;followLive(active);
   for(const listener of stateListeners)try{listener.fn(s);}catch{}
@@ -272,7 +273,7 @@ function renderState(snap){
   $('connection').textContent='Подключён';$('connection').classList.remove('connection-offline');$('reconnect').hidden=true;
 }
 // ---- Live position: while the robot is out, read the newest frame the firmware wrote for the cloud.
-let live=null,liveTimer=null;
+let live=null,liveTimer=null,robotState=null,robotLook='';
 async function refreshLive(){
  try{live=await api('local.live_pose');}catch{live=null;}
  $('live-info').textContent=live?.live?'Положение робота обновлено '+new Date(live.updated_at).toLocaleTimeString():'Сохранённая карта · положение робота и путь видны во время уборки';
@@ -319,9 +320,29 @@ function drawLive(){
  ctx.setLineDash([]);(current?.spots||[]).forEach(p=>dot(p,'#ffae67',5));
  ctx.font='15px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
  (view.obstacles||[]).forEach(([ox,oy,type])=>{const [x,y]=px(ox,oy);ctx.fillStyle='rgba(23,35,45,.85)';ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);ctx.fill();ctx.fillText(obstacleType(type)[0],x,y+1);});
- const charger=current?.charger||view.charger;if(charger)dot(charger,'#55f2aa',5);
- if(current?.robot)dot(current.robot,'#4da3ff',7);
+ const charger=current?.charger||view.charger;if(charger)drawCharger(...px(...charger));
+ // Off a run the robot sits on the charger, as the app shows it.
+ const docked=!current?.robot&&charger&&robotState?.activity==='docked',pos=current?.robot?px(...current.robot):docked?px(...charger):null;
+ if(pos)drawRobot(pos[0],pos[1],current?.robot?current.angle:null,docked);
  ctx.restore();
+ placeMarker(pos);
+}
+function drawCharger(x,y){
+ ctx.fillStyle='#2fbf71';ctx.strokeStyle='#e9fff2';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(x+1,y-5);ctx.lineTo(x-3,y+1);ctx.lineTo(x,y+1);ctx.lineTo(x-1,y+5);ctx.lineTo(x+3,y-1);ctx.lineTo(x,y-1);ctx.closePath();ctx.fill();
+}
+// Round robot with the lidar turret; the notch points where it drives (robot angle in degrees, y up).
+function drawRobot(x,y,angle,docked){
+ if(docked)x+=10,y-=10;
+ ctx.fillStyle='#f4f7f9';ctx.strokeStyle=docked?'#2fbf71':'#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#4da3ff';ctx.beginPath();ctx.arc(x,y,3.2,0,Math.PI*2);ctx.fill();
+ if(Number.isFinite(angle)){const a=-angle*Math.PI/180;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+Math.cos(a)*4.5,y+Math.sin(a)*4.5);ctx.lineTo(x+Math.cos(a)*7.5,y+Math.sin(a)*7.5);ctx.stroke();}
+}
+// One small DOM element over the robot animated by CSS: no canvas repaint per frame.
+function placeMarker(pos){
+ const marker=$('map-marker'),s=robotState||{},mode=!pos?'':s.activity==='cleaning'?'pulse':s.activity==='returning'?'pulse':s.station===2?'heat':s.station===1?'wash':s.charging===1&&s.battery<100?'charge':s.activity==='docked'?'sleep':'';
+ marker.hidden=!mode;if(!mode)return;
+ const docked=mode!=='pulse';marker.className='map-marker '+mode;marker.style.left=((pos[0]+(docked?10:0))/canvas.width*100)+'%';marker.style.top=((pos[1]-(docked?10:0))/canvas.height*100)+'%';
 }
 // ---- Compatibility report: capabilities without the robot's id, saved as a file to share.
 $('compat-report').onclick=async()=>{
@@ -484,19 +505,40 @@ function renderRoomButtons(){
  $('rooms').replaceChildren();$('room-selection').textContent=selected.size?'Выбрано: '+(view?.rooms||[]).filter(r=>selected.has(r.id)).map(r=>r.name).join(', '):'Выбери комнаты на карте или кнопками ниже.';
  for(const room of view?.rooms||[]){const b=document.createElement('button');b.textContent=room.name+' · '+room.id;b.style.setProperty('--room',palette[(room.id-1)%palette.length]);b.classList.toggle('selected',selected.has(room.id));b.setAttribute('aria-pressed',String(selected.has(room.id)));b.onclick=()=>selectRoom(room.id);$('rooms').append(b);}
 }
+// Rooms with their floor pattern at canvas size, rebuilt only when the map, the selection or a floor draft changes.
+// Pattern sizes in map cells as the app's buildFloorMap: tiles 12, planks 4 × 16 laid in a half-board offset.
+const roomIcons={1:'🛋',2:'🛏',15:'🛏',3:'📚',4:'🍳',5:'🍽',6:'🛁',7:'🌿',8:'👣',9:'📦',10:'👔',11:'🚪',12:'💼',13:'🏋',14:'☕'};
+let baseCache={key:'',canvas:null};
+function floorOf(room){const draft=$('room-floors').querySelector(`[data-room="${room.id}"]`)?.value;return draft===undefined?room.floor||0:Number(draft);}
+function baseLayer(){
+ const floors=view.rooms.map(r=>r.id+':'+floorOf(r)).join(','),key=view.revision+'|'+[...selected].join(',')+'|'+floors;
+ if(baseCache.key===key)return baseCache.canvas;
+ const s=3,w=view.width,h=view.height,W=w*s,H=h*s,grid=view.grid,out=document.createElement('canvas');out.width=W;out.height=H;
+ const bc=out.getContext('2d'),img=bc.createImageData(W,H),d=img.data,fill=[],line=[],kind=[],box={};
+ for(let i=0;i<grid.length;i++){const id=grid[i];if(!id||id===255)continue;const x=i%w,y=i/w|0,b=box[id]||(box[id]=[x,x,y,y]);if(x<b[0])b[0]=x;if(x>b[1])b[1]=x;if(y<b[2])b[2]=y;if(y>b[3])b[3]=y;}
+ for(let id=1;id<255;id++){let rgb=palette[(id-1)%palette.length].slice(1).match(/../g).map(c=>parseInt(c,16));if(selected.size&&!selected.has(id))rgb=rgb.map(c=>Math.round(c*.42));fill[id]=rgb;line[id]=rgb.map(c=>Math.round(c*.84));}
+ fill[255]=line[255]=[0xd1,0xd9,0xe2];
+ for(const room of view.rooms){let f=floorOf(room);if(f===1){const b=box[room.id];f=b&&b[1]-b[0]>b[3]-b[2]?4:3;}kind[room.id]=f;}
+ for(let Y=0;Y<H;Y++){const row=(h-1-(Y/s|0))*w;for(let X=0;X<W;X++){
+  const id=grid[row+(X/s|0)];if(!id)continue;const f=kind[id];
+  const edge=f===2?X%36===0||Y%36===0:f===4?Y%12===0||(X+(Y/12&1)*24)%48===0:f===3?X%12===0||(Y+(X/12&1)*24)%48===0:false;
+  const c=edge?line[id]:fill[id],j=(Y*W+X)*4;d[j]=c[0];d[j+1]=c[1];d[j+2]=c[2];d[j+3]=255;
+ }}
+ bc.putImageData(img,0,0);baseCache={key,canvas:out};return out;
+}
 function draw(){
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
  ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;
- const grid=view.grid,scale=3,buffer=document.createElement('canvas');buffer.width=view.width;buffer.height=view.height;const bc=buffer.getContext('2d'),image=bc.createImageData(view.width,view.height);
- for(let i=0;i<grid.length;i++){
-  const id=grid[i];if(!id)continue;const j=((view.height-1-Math.floor(i/view.width))*view.width+i%view.width)*4;
-  const color=id===255?'#d1d9e2':palette[(id-1)%palette.length];let rgb=color.slice(1).match(/../g).map(c=>parseInt(c,16));
-  if(id!==255&&selected.size&&!selected.has(id))rgb=rgb.map(c=>Math.round(c*.42));
-  image.data.set([...rgb,255],j);
+ const scale=3;ctx.drawImage(baseLayer(),0,0);
+ // Room labels like the app: number badge, type icon and name.
+ ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
+ for(const room of view.rooms){
+  const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale,color=palette[(room.id-1)%palette.length],dim=selected.size&&!selected.has(room.id);
+  ctx.globalAlpha=dim?.55:1;ctx.fillStyle='#17232d';ctx.beginPath();ctx.arc(x,y-9,8,0,Math.PI*2);ctx.fill();ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
+  ctx.font='bold 10px system-ui';ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y-8.5);
+  ctx.font='600 11px system-ui';const label=(roomIcons[room.type]?roomIcons[room.type]+' ':'')+room.name;ctx.lineWidth=3;ctx.strokeStyle='rgba(23,35,45,.8)';ctx.strokeText(label,x,y+8);ctx.fillStyle='#fff';ctx.fillText(label,x,y+8);
  }
- bc.putImageData(image,0,0);ctx.imageSmoothingEnabled=false;ctx.drawImage(buffer,0,0,canvas.width,canvas.height);
- ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
- for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
+ ctx.globalAlpha=1;
  drawThresholds();drawRestrictions();drawFurniture();drawPatrol();drawLive();
  if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const h=750/view.grid_size*scale;ctx.fillRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);ctx.strokeRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);}
  else if(zone.length){const [a,b=zoneHover||a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
@@ -788,7 +830,27 @@ function renderRoomTypes(){
   select.onchange=sync;name.oninput=sync;name.hidden=select.value!=='0';return line;
  }));
  $('save-room-types').disabled=true;
+ renderRoomFloors();
 }
+// ---- Floor material (roomfloors.go): the map previews the choice before it is saved.
+const floorNames={0:'Прочее',2:'Плитка',4:'Доски горизонтально',3:'Доски вертикально'};
+function renderRoomFloors(){
+ $('room-floors').replaceChildren(...(view?.rooms||[]).map(room=>{
+  const line=document.createElement('div'),select=document.createElement('select');line.className='row';
+  for(const [value,label] of Object.entries(floorNames))select.add(new Option(label,value));
+  if(room.floor===1)select.add(new Option('Доски (по длинной стороне)','1'));
+  select.value=String(room.floor in floorNames||room.floor===1?room.floor:0);select.dataset.saved=select.value;select.dataset.room=room.id;select.setAttribute('aria-label',room.name+': покрытие пола');
+  select.onchange=()=>{$('save-room-floors').disabled=busy||!changedFloors().length;draw();};
+  line.append(Object.assign(document.createElement('span'),{textContent:room.name}),select);return line;
+ }));
+ $('save-room-floors').disabled=true;
+}
+const changedFloors=()=>[...$('room-floors').querySelectorAll('select')].filter(s=>s.value!==s.dataset.saved).map(s=>({id:Number(s.dataset.room),floor:Number(s.value)}));
+$('save-room-floors').onclick=async()=>{
+ const rooms=changedFloors();if(!rooms.length)return;
+ try{await control('local.room_floors',{map_id:view.map_id,revision:view.revision,rooms});$('room-floors-status').textContent='Покрытие сохранено.';for(const delay of [1500,5000])setTimeout(()=>refreshMap(),delay);}
+ catch(e){$('room-floors-status').textContent=e.message;}
+};
 function changedRoomTypes(){
  return [...$('room-types').querySelectorAll('[data-room]')].filter(line=>{const [s,n]=line.querySelectorAll('select,input');return s.value!==s.dataset.saved||(s.value==='0'&&n.value!==n.dataset.saved);})
   .map(line=>{const [s,n]=line.querySelectorAll('select,input'),room={id:Number(line.dataset.room),type:Number(s.value)};if(room.type===0)room.name=n.value.trim();return room;});
@@ -917,6 +979,16 @@ function settingControl(def,value){
  else{input.type=def.kind==='number'?'number':def.kind==='time'?'time':'text';input.value=String(value);if(def.kind==='number'){input.min=def.min;input.max=def.max;input.step=def.step||1;}else input.maxLength=128;}
  return input;
 }
+// Groups in the order of the app's settings pages; the first matching rule wins.
+const settingGroups=[['Уборка',/^(cleaning_mode|mop_humidity|wetness_level|cleangenius(_mode)?|cleaning_route|customized_cleaning|tight_mopping|auto_recleaning|resume_cleaning|max_suction_power|ultra_clean_mode|mopping_type)$/],['Ковры',/carpet/],
+ ['Чистка пола',/^(collision_avoidance|floor_direction_cleaning|stain_avoidance|side_reach|mop_extend(_frequency)?|gap_cleaning_extension|mopping_under_furnitures|auto_mount_mop|mop_pad_swing|wider_corner_coverage|pet_focused_cleaning|dynamic_obstacle_cleaning|pressurized_cleaning|mop_pressure|ai_bit_large_particles_boost)$/],
+ ['Базовая станция',/wash|dry|uv_|dust|empty|hair|detergent|water|self_clean|mop_temperature|scraper|low_lying|change_mop|mop_cleaning_remainder/],['Препятствия и ИИ',/^ai_|obstacle|crossing|fill_light|intelligent_recognition|human_follow|lds/],
+ ['Голос',/voice/],['Не беспокоить',/^dnd/],['Прочее',/./]];
+function settingGroup(id){
+ const index=settingGroups.findIndex(([,rule])=>rule.test(id)),list=$('settings-list');
+ if(list.children.length!==settingGroups.length)list.replaceChildren(...settingGroups.map(([title])=>{const g=document.createElement('section');g.className='setting-group';g.hidden=true;g.append(Object.assign(document.createElement('h3'),{textContent:title}));return g;}));
+ return list.children[index];
+}
 function renderSettings(){
  const query=$('settings-search').value.trim().toLocaleLowerCase();let available=0;
  for(const def of settings){
@@ -938,11 +1010,12 @@ function renderSettings(){
      await control('local.setting',{siid:def.siid,piid:def.piid,expected:raw,value});settingsDirty.delete(def.id);await refreshSettings();
     }catch(e){toast(e.message,true);}
    };
-   row.append(label,input,apply);settingsRows.set(def.id,row);$('settings-list').append(row);
+   row.append(label,input,apply);settingsRows.set(def.id,row);settingGroup(def.id).append(row);
   }else if(!settingsDirty.has(def.id))row.setInput(value);
   row.querySelector('.setting-current').textContent='Сейчас: '+(typeof value==='object'?(value.enabled?'включено':'выключено')+' '+value.start+'–'+value.end:typeof value==='boolean'?(value?'включено':'выключено'):String(value));
   row.hidden=!def.label.toLocaleLowerCase().includes(query);
  }
+ for(const group of $('settings-list').children)group.hidden=![...group.querySelectorAll('.setting-row')].some(r=>!r.hidden);
  $('settings-status').textContent='Доступно настроек: '+available;
  disableControls(busy);
 }

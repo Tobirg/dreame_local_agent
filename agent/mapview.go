@@ -25,6 +25,8 @@ type mapRoom struct {
 	X    float64 `json:"x"`
 	Y    float64 `json:"y"`
 	Type int     `json:"type"` // see roomtypes.go
+	// Floor drawn like the app: 0 none, 1 planks along the longer side, 2 tiles, 3 planks along y, 4 along x; see roomfloors.go.
+	Floor int `json:"floor"`
 	// Saved seg_inf fields, for room type edits.
 	kind, index int
 	rawName     string
@@ -129,7 +131,8 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 			Name     string `json:"name"`
 			Type     int    `json:"type"`
 			Index    int    `json:"index"`
-			Material *int   `json:"material"`
+			Material  *int   `json:"material"`
+			Direction *int   `json:"direction"`
 		} `json:"seg_inf"`
 	}
 	if err := json.Unmarshal(raw[27+total:], &meta); err != nil {
@@ -234,7 +237,7 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 	}
 	for id, c := range centers {
 		info := meta.Segments[strconv.Itoa(id)]
-		view.Rooms = append(view.Rooms, mapRoom{ID: id, Name: roomName(id, info.Type, info.Index, info.Name), Type: info.Type, kind: info.Type, index: info.Index, rawName: info.Name, material: info.Material, X: float64(c.X) / float64(c.N), Y: float64(c.Y) / float64(c.N)})
+		view.Rooms = append(view.Rooms, mapRoom{ID: id, Name: roomName(id, info.Type, info.Index, info.Name), Type: info.Type, kind: info.Type, index: info.Index, rawName: info.Name, material: info.Material, Floor: floorKind(info.Material, info.Direction), X: float64(c.X) / float64(c.N), Y: float64(c.Y) / float64(c.N)})
 	}
 	sort.Slice(view.Rooms, func(i, j int) bool { return view.Rooms[i].ID < view.Rooms[j].ID })
 	sum := sha256.Sum256(raw)

@@ -158,3 +158,17 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
  .login{margin:20px auto;padding:20px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* Map: animated status marker over the robot (one element, compositor-only animations). */
+.map-wrap{position:relative}
+.map-marker{position:absolute;width:0;height:0;pointer-events:none}
+.map-marker::before,.map-marker::after{position:absolute;left:0;top:0;transform:translate(-50%,-50%)}
+.map-marker.pulse::before{content:"";width:34px;height:34px;border-radius:50%;border:2px solid #4da3ff;animation:marker-pulse 1.6s ease-out infinite}
+.map-marker.sleep::after{content:"z z";font:700 11px var(--body);color:#cfe0ea;left:14px;top:-14px;animation:marker-float 2.4s ease-in-out infinite}
+.map-marker.heat::after{content:"♨";font-size:15px;color:#ff9a62;left:0;top:-18px;animation:marker-float 1.8s ease-in-out infinite}
+.map-marker.wash::after{content:"💧";font-size:12px;left:0;top:-18px;animation:marker-float 1.4s ease-in-out infinite}
+.map-marker.charge::before{content:"";width:26px;height:26px;border-radius:50%;border:2px solid #2fbf71;animation:marker-pulse 2s ease-out infinite}
+@keyframes marker-pulse{from{transform:translate(-50%,-50%) scale(.5);opacity:.9}to{transform:translate(-50%,-50%) scale(1.4);opacity:0}}
+@keyframes marker-float{0%,100%{transform:translate(-50%,-50%);opacity:.5}50%{transform:translate(-50%,-90%);opacity:1}}
+@media (prefers-reduced-motion:reduce){.map-marker::before,.map-marker::after{animation:none}}
+.setting-group h3{margin:14px 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
