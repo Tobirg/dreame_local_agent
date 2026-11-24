@@ -90,6 +90,8 @@ const server=http.createServer((req,res)=>{
   assert.equal(await page.locator('#battery').innerText(),'95%');
   assert.match(await page.locator('#obstacles').textContent(),/Препятствия от .*: носок ×2, неизвестное препятствие/);
   await page.locator('#logs-panel').waitFor({state:'visible'});await page.locator('#logs-details').evaluate(d=>d.open=true);await page.locator('#log-source').selectOption('mqtt');assert.equal(await page.locator('#log-text').textContent(),'connected to broker');
+  const openFolds=()=>page.evaluate(()=>document.querySelectorAll('#voice-panel>details,#tokens-panel>details,#update-panel>details').forEach(d=>d.open=true));
+  await openFolds();
   await page.locator('#voice-panel').waitFor({state:'visible'});assert.match(await page.locator('#voice').innerText(),/голосом ZH[^]*RU загружен/);
   await page.locator('#voice details >> nth=1').evaluate(d=>d.open=true);await page.locator('#voice [data-hear="45"]').waitFor();assert.match(await page.locator('#voice [data-r=phrases]').innerText(),/45 I am here\.[^]*700 —/);
   await page.locator('#voice [data-use=RU]').click();await page.waitForFunction(()=>document.querySelector('#voice').textContent.includes('голосом RU'));assert.deepEqual(commands.at(-1),{method:'/api/v1/voice/use',params:{id:'RU'}});
@@ -122,7 +124,7 @@ const server=http.createServer((req,res)=>{
   await page.locator('#room-types-details summary').click();await page.locator('#room-types [data-room="2"] select').selectOption('0');await page.locator('#room-types [data-room="2"] input').fill('Детская');await page.locator('#save-room-types').click();await until(()=>commands.at(-1)?.method==='local.room_types');
   if(JSON.stringify(commands.at(-1).params.rooms)!=='[{"id":2,"type":0,"name":"Детская"}]')throw new Error('room types: '+JSON.stringify(commands.at(-1).params));
   values['3/1']=61;pushEvent();await page.waitForFunction(()=>document.querySelector('#battery').textContent==='61%');values['3/1']=95;pushEvent();await page.waitForFunction(()=>document.querySelector('#battery').textContent==='95%');
-  assert.match(await page.locator('#token-list').innerText(),/Дополнительных токенов нет/);
+  await openFolds();assert.match(await page.locator('#token-list').innerText(),/Дополнительных токенов нет/);
   await page.locator('#token-add summary').click();await page.locator('#token-name').fill('ha');await page.locator('#create-token').click();
   await page.waitForFunction(()=>document.querySelector('#token-result').textContent.includes('f'.repeat(64)));assert.deepEqual(tokens.map(t=>[t.name,t.scope]),[['ha','control']]);
   assert.match(await page.locator('#token-list').innerText(),/ha · управление/);
@@ -155,7 +157,7 @@ const server=http.createServer((req,res)=>{
   assert.equal(installedModules.length,0);assert.match(await page.locator('#module-list').innerText(),/Модули не установлены/);
   await page.locator('#nav-main').click();await page.locator('#map').waitFor();assert(await page.locator('#module-list').isHidden());
   assert.match(await page.locator('#update-status').innerText(),/Установлена версия 0\.7\.0/);assert(await page.locator('#rollback-update').isHidden());
-  await page.locator('#update-add summary').click();await page.locator('#update-file').setInputFiles({name:'dreame-local-agent',mimeType:'application/octet-stream',buffer:Buffer.from('new-agent')});
+  await openFolds();await page.locator('#update-add summary').click();await page.locator('#update-file').setInputFiles({name:'dreame-local-agent',mimeType:'application/octet-stream',buffer:Buffer.from('new-agent')});
   await page.locator('#stage-update').click();await page.locator('#update-review').waitFor({state:'visible'});assert.equal(stagedAgent,'new-agent');assert.match(await page.locator('#update-summary').innerText(),/0\.7\.0 → 0\.8\.0.*SHA-256: b{64}/);
   await page.locator('#apply-update').click();await page.waitForFunction(()=>document.querySelector('#update-result').textContent.startsWith('Результат'),null,{timeout:15000});
   assert.deepEqual(commands.at(-1),{method:'/api/v1/system/update/apply',params:{source:'staged'}});assert.match(await page.locator('#update-result').innerText(),/0\.8\.0 не запустилась, возвращена 0\.7\.0/);

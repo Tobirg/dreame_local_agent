@@ -73,7 +73,7 @@ details button{margin:0 6px 6px 0}
 .actions .danger{margin-left:auto}
 
 /* Layout: map is the one framed surface; the side column is a plain rail of ruled sections. */
-.columns{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(280px,1fr);gap:36px;align-items:start}
+.columns{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(280px,1fr);gap:36px;align-items:stretch}
 /* Every section is a block: a framed surface with a heading bar; blocks stack with an even gap. */
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;margin:0 0 16px}
 .panel>h2,.panel>.section-heading{margin:-20px -20px 16px;padding:14px 20px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;background:var(--paper)}
@@ -104,7 +104,14 @@ canvas{display:block;width:100%;height:auto;touch-action:manipulation}
 /* Sub-blocks inside the map block: inset boxes on the page colour. */
 details{border:1px solid var(--line);border-radius:10px;background:var(--paper);padding:12px 14px;margin-top:12px}
 details[open]{padding-bottom:14px}
-section.panel>details{border:0;background:none;padding:0;margin:0}
+/* Folded blocks: the summary is the heading bar; the body opens below it. */
+.panel:has(>details){padding:0;overflow:hidden}
+.panel>details{border:0;background:none;margin:0;padding:0 20px 20px;border-radius:0}
+.panel>details:not([open]){padding-bottom:0}
+.panel>details>summary{margin:0 -20px;padding:14px 20px;background:var(--paper);border-radius:14px}
+.panel>details[open]>summary{border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;margin-bottom:16px}
+.panel>details>summary::marker{color:var(--muted)}
+.main-col>.panel:last-child,.side>.panel:last-child{flex:1;margin-bottom:0}
 summary{cursor:pointer;font-size:17px;font-weight:600;overflow-wrap:anywhere;padding:2px 0}
 summary:hover{color:var(--go)}
 #wifi-summary{color:var(--muted);font-weight:400}
@@ -141,6 +148,8 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
  .columns{grid-template-columns:1fr;gap:28px}
  .panel{padding:14px}.panel>h2,.panel>.section-heading{margin:-14px -14px 14px;padding:12px 14px}
  .map-panel{margin:0 -6px 16px}
+ .panel>details{padding:0 14px 14px}.panel>details>summary{margin:0 -14px;padding:12px 14px}
+ .main-col>.panel:last-child,.side>.panel:last-child{flex:none;margin-bottom:16px}
  .actions button{flex:1 1 40%}
  .actions .primary{flex-basis:100%}
  .actions .danger{margin-left:0;flex-basis:100%}
