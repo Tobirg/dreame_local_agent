@@ -37,6 +37,42 @@ func (a *agent) roomSettings(mapID int) map[string][]int {
 	return rooms
 }
 
+// roomOrderPatch sets the cleaning order like the app's CustomOrderPage (old protocol, as on r2505):
+// {"cleanOrder": [room, ...]} writes 1, 2, ... into the order field of those rooms.
+func (a *agent) roomOrderPatch(raw json.RawMessage) (map[string]any, error) {
+	var request struct {
+		MapID    int    `json:"map_id"`
+		Revision string `json:"revision"`
+		Rooms    []int  `json:"rooms"`
+	}
+	d := json.NewDecoder(strings.NewReader(string(raw)))
+	d.DisallowUnknownFields()
+	if d.Decode(&request) != nil {
+		return nil, errors.New("invalid room order")
+	}
+	current, err := a.mapView()
+	if err != nil {
+		return nil, err
+	}
+	if current.Empty || current.RoomSettings == nil {
+		return nil, errors.New("this robot keeps no per-room settings for the current map")
+	}
+	if request.MapID != current.MapID || request.Revision == "" || request.Revision != current.Revision {
+		return nil, errors.New("map changed; refresh before editing the room order")
+	}
+	seen := map[int]bool{}
+	for _, id := range request.Rooms {
+		if _, ok := current.RoomSettings[strconv.Itoa(id)]; !ok || seen[id] {
+			return nil, errors.New("room " + strconv.Itoa(id) + " is not on the current map or repeats")
+		}
+		seen[id] = true
+	}
+	if len(request.Rooms) != len(current.RoomSettings) {
+		return nil, errors.New("list every room of the map once")
+	}
+	return map[string]any{"cleanOrder": request.Rooms}, nil
+}
+
 func (a *agent) roomSettingsPatch(raw json.RawMessage) (map[string]any, error) {
 	var request struct {
 		MapID    int    `json:"map_id"`

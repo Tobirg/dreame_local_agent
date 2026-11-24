@@ -49,7 +49,7 @@ async function api(method,params=null){
 export function assertCommand(result,method,params){
  const rows=Array.isArray(result)?result:[result];
  if(!rows.length||rows.some(r=>!r||r.code!==0))throw Error('Робот отклонил команду: '+JSON.stringify(result));
- if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
+ if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||method==='local.room_order'||method==='local.map_use'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
   if(Array.isArray(result)||!Array.isArray(result.out))throw Error('Map operation result is missing; outcome unknown.');
   const operation=result.out.filter(row=>row&&row.piid===6);
   if(operation.length!==1||!Number.isSafeInteger(operation[0].value))throw Error('Map operation result is invalid; outcome unknown.');
@@ -622,7 +622,56 @@ function renderRoomSettings(){
   rows.push(line);
  }
  $('room-settings').replaceChildren(...rows);$('save-room-settings').disabled=true;
+ roomOrder=roomsByOrder(view?.rooms||[],sets);renderRoomOrder(false);
 }
+// Cleaning order: row[3] is 1, 2, ...; rooms with 0 go last.
+let roomOrder=[];
+export function roomsByOrder(rooms,sets){
+ const order=id=>sets?.[id]?.[3]||Infinity;
+ return rooms.filter(r=>sets?.[r.id]).sort((a,b)=>order(a.id)-order(b.id)||a.id-b.id);
+}
+function renderRoomOrder(changed){
+ $('room-order').replaceChildren(...roomOrder.map((room,i)=>{
+  const line=document.createElement('div'),up=document.createElement('button');
+  line.className='module-row';line.dataset.orderRoom=room.id;
+  up.textContent='Выше';up.className='ghost';up.disabled=i===0;
+  up.onclick=()=>{[roomOrder[i-1],roomOrder[i]]=[roomOrder[i],roomOrder[i-1]];renderRoomOrder(true);};
+  line.append(Object.assign(document.createElement('span'),{textContent:(i+1)+'. '+room.name}),up);return line;
+ }));
+ $('save-room-order').disabled=busy||!changed;
+}
+// ---- Map backups (mapbackup.go): loaded when the block is opened.
+const restoreStates={0:'',1:'восстанавливается…',3:'восстановлена'};
+async function loadMapBackups(){
+ const r=await api('local.map_backup_status'),state=Array.isArray(r.restore)?r.restore[0]?.value:undefined;
+ $('map-backups-status').textContent=restoreStates[state]!==undefined?(restoreStates[state]?'Последнее восстановление: '+restoreStates[state]:''):'Состояние восстановления: '+state;
+ const ids=r.maps?.ids||[];
+ $('saved-maps').replaceChildren(...(ids.length>1?ids:[]).map(id=>{
+  const line=document.createElement('div'),use=document.createElement('button');line.className='module-row';
+  line.append(Object.assign(document.createElement('span'),{textContent:'Карта '+id+(id===r.maps.current?' · текущая':'')}));
+  use.textContent='Сделать текущей';use.className='ghost';use.disabled=id===r.maps.current;
+  use.onclick=async()=>{try{await control('local.map_use',{map_id:id});await refreshMap();await loadMapBackups();}catch(e){$('map-backups-status').textContent=e.message;}};
+  line.append(use);return line;
+ }));
+ const rows=r.backups.map(b=>{
+  const line=document.createElement('div'),use=document.createElement('button'),del=document.createElement('button');
+  line.className='module-row';
+  line.append(Object.assign(document.createElement('span'),{textContent:'Карта '+b.map_id+' · '+new Date(b.time*1000).toLocaleString('ru-RU')+' · '+Math.round(b.size/1024)+' КБ'}));
+  use.textContent='Восстановить';use.className='ghost';
+  use.onclick=async()=>{if(!window.confirm('Заменить текущую карту копией от '+new Date(b.time*1000).toLocaleString('ru-RU')+'?'))return;try{await control('local.map_restore',{name:b.name});$('map-backups-status').textContent='Робот загружает копию…';setTimeout(()=>{refreshMap().catch(()=>{});loadMapBackups().catch(()=>{});},8000);}catch(e){$('map-backups-status').textContent=e.message;}};
+  del.textContent='Удалить';del.className='ghost';
+  del.onclick=async()=>{if(!window.confirm('Удалить копию?'))return;try{await api('local.map_backup_delete',{name:b.name});await loadMapBackups();}catch(e){$('map-backups-status').textContent=e.message;}};
+  line.append(use,del);return line;
+ });
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Копий пока нет.'}));
+ $('map-backups').replaceChildren(...rows);
+}
+$('map-backups-details').ontoggle=()=>{if($('map-backups-details').open)loadMapBackups().catch(e=>{$('map-backups-status').textContent=e.message;});};
+$('make-map-backup').onclick=async()=>{try{await api('local.map_backup');await loadMapBackups();$('map-backups-status').textContent='Копия сделана.';}catch(e){$('map-backups-status').textContent=e.message;}};
+$('save-room-order').onclick=async()=>{
+ try{await control('local.room_order',{map_id:view.map_id,revision:view.revision,rooms:roomOrder.map(r=>r.id)});$('room-settings-status').textContent='Порядок сохранён.';await refreshMap();}
+ catch(e){$('room-settings-status').textContent=e.message;}
+};
 function changedRooms(){
  return [...$('room-settings').querySelectorAll('[data-room]')].filter(line=>[...line.querySelectorAll('select')].some(s=>s.value!==s.dataset.saved))
   .map(line=>Object.fromEntries([['id',Number(line.dataset.room)],...[...line.querySelectorAll('select')].map(s=>[s.dataset.key,Number(s.value)])]));

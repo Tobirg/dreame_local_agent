@@ -283,12 +283,12 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 			return nil, errors.New("local.reboot takes no parameters")
 		}
 		return a.queueReboot()
-	case "local.thresholds", "local.restrictions", "local.room_settings", "local.room_types":
+	case "local.thresholds", "local.restrictions", "local.room_settings", "local.room_order", "local.room_types", "local.map_use":
 		if err := a.robotWriteAllowed(info); err != nil {
 			return nil, err
 		}
 		build := map[string]func(json.RawMessage) (map[string]any, error){
-			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch, "local.room_types": a.roomTypesPatch,
+			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch, "local.room_order": a.roomOrderPatch, "local.room_types": a.roomTypesPatch, "local.map_use": a.useMapEdit,
 		}[req.Method]
 		patch, err := build(req.Params)
 		if err != nil {
@@ -300,6 +300,33 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 		}
 		input := map[string]any{"did": info["did"], "siid": 6, "aiid": 2, "in": []any{map[string]any{"piid": 4, "value": string(value)}}}
 		return a.miot(ctx, "action", input)
+	case "local.map_backup_status":
+		if params != nil {
+			return nil, errors.New("local.map_backup_status takes no parameters")
+		}
+		restore, err := a.miot(ctx, "get_properties", []any{map[string]any{"did": info["did"], "siid": 6, "piid": 11}})
+		if err != nil {
+			restore = nil // the list is still useful
+		}
+		return map[string]any{"backups": a.mapBackups(), "restore": restore, "maps": a.savedMaps()}, nil
+	case "local.map_backup", "local.map_restore", "local.map_backup_delete":
+		if err := a.robotWriteAllowed(info); err != nil {
+			return nil, err
+		}
+		switch req.Method {
+		case "local.map_backup":
+			if params != nil {
+				return nil, errors.New("local.map_backup takes no parameters")
+			}
+			return a.createMapBackup()
+		case "local.map_restore":
+			return a.restoreMapBackup(ctx, req.Params, info["did"])
+		}
+		name, err := backupParam(req.Params)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"deleted": name}, a.removeMapBackup(name)
 	case "local.wifi_status":
 		if params != nil {
 			return nil, errors.New("local.wifi_status takes no parameters")
@@ -440,6 +467,9 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(v)
+	}
+	if serveRestoreFile(w, r) { // the firmware's wget has no token; see mapbackup.go
+		return
 	}
 	scope, module := a.scopeOf(r.Header.Get("Authorization")), ""
 	if scope == "" {
