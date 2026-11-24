@@ -1,6 +1,8 @@
 // Slow-changing robot details read once a minute together with the state poll:
-// consumables, cleaning totals and do-not-disturb. IDs from the MIT Tasshack
-// dreame-vacuum tables; the robot answers only the ones its model has.
+// consumables, cleaning totals and do-not-disturb. Consumable siid/piid are checked against the
+// Dreame app plugins (official); tank_filter, fluffing_roller and roller_mop_filter (17, 32, 33)
+// exist only in the MIT Tasshack tables. Names are ours and stable; the robot answers only the
+// ones its model has.
 package main
 
 import (
@@ -25,7 +27,7 @@ var consumables = []consumable{
 	{"squeegee", 24, 2, 1}, {"dirty_water_channel", 25, 2, 1}, {"onboard_dirty_water_tank", 26, 2, 1},
 	{"deodorizer", 29, 2, 1}, {"wheel", 30, 2, 1}, {"scale_inhibitor", 31, 2, 1}, {"fluffing_roller", 32, 1, 2},
 	{"roller_mop_filter", 33, 1, 2}, {"water_outlet_filter", 35, 2, 1}, {"track", 36, 2, 1},
-	{"washboard", 37, 2, 1}, {"filter_cleaning", 38, 2, 1},
+	{"washboard", 37, 2, 1}, {"filter_cleaning", 38, 2, 1}, {"roller_cover", 39, 2, 1}, {"main_brush_cover", 41, 2, 1},
 }
 
 // detailProps lists every property the slow read asks for.
@@ -214,7 +216,9 @@ func (a *agent) spotInput(p commandParams) ([]any, error) {
 
 const spotHalf = 750 // half the side of the zone cleaned around a spot point, mm
 
-// errorNames maps 2/2 codes to the names of the MIT Tasshack dreame-vacuum tables.
+// errorNames maps 2/2 codes to stable machine names (the MIT Tasshack dreame-vacuum tables; the
+// firmware's own enum covers only 0..51 and has typos). Home Assistant automations use them, so
+// they stay; the text people read is the app's (officialFaults, error_text).
 var errorNames = map[int64]string{
 	0: "no_error", 1: "drop", 2: "cliff", 3: "bumper", 4: "gesture", 5: "bumper_repeat", 6: "drop_repeat",
 	7: "optical_flow", 8: "box", 9: "tankbox", 10: "waterbox_empty", 11: "box_full", 12: "brush", 13: "side_brush",

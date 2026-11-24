@@ -29,6 +29,19 @@ type settingDef struct {
 	Min  *float64 `json:"min,omitempty"`
 	Max  *float64 `json:"max,omitempty"`
 	Step *float64 `json:"step,omitempty"`
+	Src  string   `json:"src"`          // "plugin" (checked against the Dreame app) or "tasshack"
+	HW   map[string]string `json:"hw,omitempty"` // firmware hardware table values the setting needs
+}
+
+// allowedBy is false when the firmware's hardware table rules the setting out. The firmware is
+// shared by many models and answers such properties even without the part (e.g. LDS lift on r2505).
+func (d settingDef) allowedBy(hw map[string]any) bool {
+	for key, want := range d.HW {
+		if v, ok := hw["RUNTIME_"+key]; ok && fmt.Sprint(v) != want {
+			return false
+		}
+	}
+	return true
 }
 
 var settingsCatalog = sync.OnceValues(func() ([]settingDef, error) {
@@ -260,9 +273,10 @@ func (a *agent) readSettings(ctx context.Context, did string) ([]settingState, e
 	}
 	out := []settingState{}
 	seen := map[string]bool{}
+	hw := a.modelHardware()
 	for _, d := range defs {
 		r, found := raw[[2]int{d.SIID, d.PIID}]
-		if !d.simple() || seen[d.ID] || !found {
+		if !d.simple() || seen[d.ID] || !found || !d.allowedBy(hw) {
 			continue
 		}
 		if v, ok := d.decode(r); ok {
@@ -317,7 +331,7 @@ func (a *agent) setSetting(ctx context.Context, id string, value any, did string
 		return nil, err
 	}
 	for _, d := range defs {
-		if d.ID != id || !d.simple() {
+		if d.ID != id || !d.simple() || !d.allowedBy(a.modelHardware()) {
 			continue
 		}
 		if !d.valid(value) {
