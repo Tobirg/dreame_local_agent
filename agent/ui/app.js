@@ -895,7 +895,6 @@ window.addEventListener('online',scheduleResume);window.addEventListener('pagesh
 // Modules live on their own page: #modules shows it, anything else the robot dashboard.
 function showPage(){const modules=location.hash==='#modules';$('main-page').hidden=modules;$('modules-page').hidden=!modules;$('nav-main').classList.toggle('active',!modules);$('nav-modules').classList.toggle('active',modules);}
 window.addEventListener('hashchange',showPage);showPage();
-$('dock-self-repair').onclick=()=>{if(window.confirm('Запустить саморемонт станции? Это займёт около 5–10 минут.'))command('dock_self_repair').catch(()=>{});};
 // ---- Messages (messages.go): the agent's own feed, newest first.
 export function messageText(m){
  if(m.type==='error')return 'Ошибка: '+(m.text||errorTexts[m.code]||String(m.name||m.code).replaceAll('_',' '));

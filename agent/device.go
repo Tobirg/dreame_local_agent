@@ -439,8 +439,6 @@ var commandTable = map[string]command{
 	"remote_move":      {detail: true},
 	"set_schedule":     {detail: true},
 	"delete_schedule":  {detail: true},
-	// Station self-repair (app DockRepairPage): 99/8 bittest 17, about 5-10 minutes, status 15.
-	"dock_self_repair": {detail: true},
 	"go_to":            {detail: true},
 }
 
