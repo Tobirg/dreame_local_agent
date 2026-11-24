@@ -401,6 +401,7 @@ var commandTable = map[string]command{
 	"delete_schedule":  {detail: true},
 	// Station self-repair (app DockRepairPage): 99/8 bittest 17, about 5-10 minutes, status 15.
 	"dock_self_repair": {detail: true},
+	"go_to":            {detail: true},
 }
 
 type commandParams struct {
@@ -432,6 +433,13 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 	d.DisallowUnknownFields()
 	if d.Decode(&p) != nil {
 		return nil, errors.New("invalid command")
+	}
+	switch p.Name {
+	case "patrol":
+		return a.startPatrol(p, info["did"])
+	case "locate", "set_volume", "set_suction", "set_setting", "reset_consumable", "set_dnd", "set_schedule", "delete_schedule":
+	default:
+		stopPatrol() // the owner took over
 	}
 	if p.Name == "set_setting" {
 		result, err := a.setSetting(ctx, p.Setting, p.To, info["did"])

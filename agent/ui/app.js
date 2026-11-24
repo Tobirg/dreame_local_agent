@@ -47,6 +47,7 @@ async function api(method,params=null){
 }
 
 export function assertCommand(result,method,params){
+ if(result?.patrol==='started')return; // the agent runs it; no robot reply yet
  const rows=Array.isArray(result)?result:[result];
  if(!rows.length||rows.some(r=>!r||r.code!==0))throw Error('Робот отклонил команду: '+JSON.stringify(result));
  if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||method==='local.room_order'||method==='local.map_use'||method==='local.carpets'||method==='local.furniture'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
@@ -443,7 +444,7 @@ function draw(){
  bc.putImageData(image,0,0);ctx.imageSmoothingEnabled=false;ctx.drawImage(buffer,0,0,canvas.width,canvas.height);
  ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
  for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
- drawThresholds();drawRestrictions();drawFurniture();drawLive();
+ drawThresholds();drawRestrictions();drawFurniture();drawPatrol();drawLive();
  if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const h=750/view.grid_size*scale;ctx.fillRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);ctx.strokeRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);}
  else if(zone.length){const [a,b=zoneHover||a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
@@ -488,6 +489,7 @@ canvas.onclick=e=>{
  if(zoneDrawing&&!zoneSpot)return; // pointer handlers below
  if(restrictDrawing){addRestrictionPoint(x,y);return;}
  if(furniturePlacing){placeFurniture(x,y);return;}
+ if(patrolDrawing){addPatrolPoint(x,y);return;}
  if(zoneDrawing){zone.push({x,y});if(zoneSpot){zoneDrawing=false;$('zone-status').textContent='Будет убран квадрат 1,5 × 1,5 м вокруг точки. Повторы, мощность и влажность — как для комнат.';}else if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
@@ -908,3 +910,20 @@ async function loadMessages(){
 }
 $('messages-details').ontoggle=()=>{if($('messages-details').open)loadMessages().catch(e=>toast(e.message,true));};
 $('clear-messages').onclick=async()=>{if(!window.confirm('Очистить сообщения?'))return;try{await api('local.messages_clear');await loadMessages();}catch(e){toast(e.message,true);}};
+// ---- Camera trips (patrol.go): points in robot millimetres, numbered on the map.
+let patrolDrawing=false,patrolPoints=[];
+function drawPatrol(){
+ if(!patrolPoints.length)return;
+ ctx.save();ctx.font='bold 12px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+ patrolPoints.forEach((p,i)=>{const [px,py]=robotToPixel(view,p[0],p[1]),x=px*3,y=(view.height-py)*3;ctx.fillStyle='#7b4dff';ctx.beginPath();ctx.arc(x,y,9,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(String(i+1),x,y);});
+ ctx.restore();
+}
+function patrolButtons(){$('go-to-point').disabled=patrolPoints.length!==1;$('start-patrol').disabled=!patrolPoints.length;}
+function addPatrolPoint(x,y){
+ if(patrolPoints.length>=20){$('patrol-status').textContent='Не больше 20 точек.';return;}
+ patrolPoints.push(pixelToRobot(view,x,y));$('patrol-status').textContent='Точек: '+patrolPoints.length+'. Нажми ещё или начни.';patrolButtons();draw();
+}
+$('draw-patrol').onclick=()=>{if(busy||!view||view.empty)return;patrolDrawing=true;zoneDrawing=false;restrictDrawing=false;thresholdDrawing=false;furniturePlacing=false;$('patrol-status').textContent='Нажимай на карте точки по порядку.';};
+$('clear-patrol').onclick=()=>{patrolDrawing=false;patrolPoints=[];$('patrol-status').textContent='';patrolButtons();draw();};
+$('go-to-point').onclick=()=>{patrolDrawing=false;command('go_to',{points:patrolPoints}).then(()=>{$('patrol-status').textContent='Робот едет к точке.';},()=>{});};
+$('start-patrol').onclick=()=>{patrolDrawing=false;command('patrol',{points:patrolPoints}).then(()=>{$('patrol-status').textContent='Патруль начат: точек '+patrolPoints.length+'.';},()=>{});};

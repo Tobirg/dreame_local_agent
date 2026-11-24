@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestParseSchedules(t *testing.T) {
 	got := parseSchedules("1-1-08:30-111110-1-3-0-0-0;2-0-21:00-0000000-0-3-0-0-" + "1180676,8452" + ";bad")
@@ -35,5 +38,22 @@ func TestDockSelfRepair(t *testing.T) {
 	method, params, err := a.detailCommand(commandParams{Name: "dock_self_repair"}, "1")
 	if err != nil || method != "set_properties" || params.([]any)[0].(map[string]any)["value"] != `{"bittest":[17,0]}` {
 		t.Fatal(method, params, err)
+	}
+}
+
+func TestCameraPatrol(t *testing.T) {
+	a := testAgent(t)
+	maps, _ := json.Marshal(map[string]any{"curr_id": 2, "mapstr": []any{map[string]any{"id": 0, "map": syntheticFrame(t, 2, 500)}}})
+	writeFile(t, a, "/data/log/map_info.bin", string(maps))
+	_, params, err := a.detailCommand(commandParams{Name: "go_to", Points: [][]int{{0, 0}}}, "1")
+	in, _ := json.Marshal(params)
+	if err != nil || string(in) != `{"aiid":1,"did":"1","in":[{"piid":1,"value":23},{"piid":10,"value":"{\"spoint\":[],\"tpoint\":[[0,0,0,0]]}"}],"siid":4}` {
+		t.Fatal(string(in), err)
+	}
+	if _, _, err := a.detailCommand(commandParams{Name: "go_to", Points: [][]int{{0, 0}, {1, 1}}}, "1"); err == nil {
+		t.Fatal("go_to with two points accepted")
+	}
+	if _, err := a.startPatrol(commandParams{Name: "patrol", Points: [][]int{{0, 0}, {90000, 0}}}, "1"); err == nil {
+		t.Fatal("point off the map accepted")
 	}
 }

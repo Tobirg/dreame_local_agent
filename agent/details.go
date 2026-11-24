@@ -136,6 +136,27 @@ func (a *agent) detailCommand(p commandParams, did string) (string, any, error) 
 			map[string]any{"did": did, "siid": 5, "piid": 2, "value": p.Start},
 			map[string]any{"did": did, "siid": 5, "piid": 3, "value": p.End},
 		}, nil
+	case "go_to":
+		// Drive to a point for the camera, like the app's video MapControlView: 4/1 mode 23
+		// (MonitorSpotMode) with {"spoint": [], "tpoint": [[x, y, 0, 0]]}; the robot stops there
+		// in status 17. Mode 22 (patrol over saved points) ends at once without the cloud video
+		// session, so patrol.go chains go_to instead.
+		if p.Value != nil || p.Rooms != nil || p.Zones != nil || len(p.Points) != 1 {
+			return "", nil, errors.New("go_to takes one point [x, y]")
+		}
+		view, err := a.mapView()
+		if err != nil {
+			return "", nil, err
+		}
+		if view.Empty || len(view.Origin) != 2 {
+			return "", nil, errors.New("no saved map")
+		}
+		pt := p.Points[0]
+		if len(pt) != 2 || pt[0] < view.Origin[0] || pt[1] < view.Origin[1] || pt[0] > view.Origin[0]+view.Width*view.GridSize || pt[1] > view.Origin[1]+view.Height*view.GridSize {
+			return "", nil, fmt.Errorf("point %v is not [x, y] on the map", pt)
+		}
+		value, _ := json.Marshal(map[string]any{"spoint": [][]int{}, "tpoint": [][]int{{pt[0], pt[1], 0, 0}}})
+		return "action", map[string]any{"did": did, "siid": 4, "aiid": 1, "in": []any{map[string]any{"piid": 1, "value": 23}, map[string]any{"piid": 10, "value": string(value)}}}, nil
 	case "dock_self_repair":
 		a.dev.mu.Lock()
 		activity, _ := a.dev.snap.State["activity"].(string)
