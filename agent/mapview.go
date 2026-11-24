@@ -45,6 +45,10 @@ type mapView struct {
 	Carpets         []carpetShape `json:"carpets"`
 	CarpetsAdded    [][]int       `json:"carpets_added"`
 	CarpetsIgnored  [][]int       `json:"carpets_ignored"`
+	// Furniture from funiture_info; see furniture.go.
+	FurnitureEditable bool              `json:"furniture_editable"`
+	Furniture         []furnitureItem   `json:"furniture"`
+	furnitureRows     []json.RawMessage // as stored, resent unchanged
 	// Per-room cleaning settings by room id, from /data/ri/setting.json2; see roomsettings.go.
 	RoomSettings map[string][]int `json:"room_settings"`
 	Charger      []int            `json:"charger,omitempty"` // station position, robot millimetres
@@ -117,6 +121,7 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 			Version int `json:"version_flag"`
 		} `json:"walls_info"`
 		CarpetPolygon map[string][]json.RawMessage `json:"carpet_polygon"`
+		Furniture     []json.RawMessage            `json:"funiture_info"`
 		Charger       []int                        `json:"charger"`
 		Segments      map[string]struct {
 			Name  string `json:"name"`
@@ -153,6 +158,7 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		added, ignored = meta.VW.Addcpt, meta.VW.Nocpt
 	}
 	view.carpets(meta.VW != nil, meta.CarpetPolygon, added, ignored)
+	view.furniture(meta.Furniture)
 	view.Passable = [][]int{}
 	view.Impassable = [][]int{}
 	if meta.VWS != nil {

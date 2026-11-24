@@ -49,7 +49,7 @@ async function api(method,params=null){
 export function assertCommand(result,method,params){
  const rows=Array.isArray(result)?result:[result];
  if(!rows.length||rows.some(r=>!r||r.code!==0))throw Error('Робот отклонил команду: '+JSON.stringify(result));
- if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||method==='local.room_order'||method==='local.map_use'||method==='local.carpets'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
+ if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||method==='local.room_order'||method==='local.map_use'||method==='local.carpets'||method==='local.furniture'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
   if(Array.isArray(result)||!Array.isArray(result.out))throw Error('Map operation result is missing; outcome unknown.');
   const operation=result.out.filter(row=>row&&row.piid===6);
   if(operation.length!==1||!Number.isSafeInteger(operation[0].value))throw Error('Map operation result is invalid; outcome unknown.');
@@ -443,7 +443,7 @@ function draw(){
  bc.putImageData(image,0,0);ctx.imageSmoothingEnabled=false;ctx.drawImage(buffer,0,0,canvas.width,canvas.height);
  ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
  for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
- drawThresholds();drawRestrictions();drawLive();
+ drawThresholds();drawRestrictions();drawFurniture();drawLive();
  if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const h=750/view.grid_size*scale;ctx.fillRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);ctx.strokeRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);}
  else if(zone.length){const [a,b=zoneHover||a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
@@ -487,6 +487,7 @@ canvas.onclick=e=>{
  const {x,y}=mapPoint(e);
  if(zoneDrawing&&!zoneSpot)return; // pointer handlers below
  if(restrictDrawing){addRestrictionPoint(x,y);return;}
+ if(furniturePlacing){placeFurniture(x,y);return;}
  if(zoneDrawing){zone.push({x,y});if(zoneSpot){zoneDrawing=false;$('zone-status').textContent='Будет убран квадрат 1,5 × 1,5 м вокруг точки. Повторы, мощность и влажность — как для комнат.';}else if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
@@ -622,7 +623,7 @@ function renderRoomSettings(){
   rows.push(line);
  }
  $('room-settings').replaceChildren(...rows);$('save-room-settings').disabled=true;
- roomOrder=roomsByOrder(view?.rooms||[],sets);renderRoomOrder(false);
+ roomOrder=roomsByOrder(view?.rooms||[],sets);renderRoomOrder(false);renderFurniture();
 }
 // Cleaning order: row[3] is 1, 2, ...; rooms with 0 go last.
 let roomOrder=[];
@@ -640,6 +641,43 @@ function renderRoomOrder(changed){
  }));
  $('save-room-order').disabled=busy||!changed;
 }
+// ---- Furniture (furniture.go): types 1..25 and default sizes as in the app's FURNITURE_TYPE.
+const furnitureTypes={1:['Односпальная кровать',1000,2000],2:['Двуспальная кровать',1500,2000],3:['Кресло',800,700],4:['Двухместный диван',1400,600],5:['Трёхместный диван',2300,700],6:['Стол со стульями',1200,800],7:['Прикроватная тумба',500,400],8:['Журнальный столик (круглый)',1000,1000],9:['Унитаз',400,600],10:['Открытый кошачий туалет',300,500],11:['Лежанка питомца',500,400],12:['Миска',400,200],13:['Пелёнка для питомца',400,600],14:['Холодильник',600,600],15:['Стиральная машина',600,600],16:['Закрытый кошачий туалет',300,500],17:['Кондиционер',400,400],18:['Тумба под ТВ',1600,300],19:['Книжный шкаф',800,300],20:['Обувница',800,400],21:['Шкаф для одежды',2000,600],22:['Растение',300,300],23:['Напольное зеркало',800,400],24:['Угловой диван',2800,1700],25:['Журнальный столик (квадратный)',800,800]};
+let furniturePlacing=false;
+for(const [id,[name]] of Object.entries(furnitureTypes))$('furniture-type').add(new Option(name,id));
+const furnitureName=f=>furnitureTypes[f.type]?.[0]||'Предмет '+f.type;
+function drawFurniture(){
+ if(!view?.furniture?.length)return;
+ ctx.save();ctx.lineWidth=2;ctx.font='11px sans-serif';
+ for(const f of view.furniture){
+  const [px,py]=robotToPixel(view,f.x,f.y),x=px*3,y=(view.height-py)*3,w=f.width/view.grid_size*3,h=f.height/view.grid_size*3;
+  ctx.save();ctx.translate(x,y);ctx.rotate(-f.rotation*Math.PI/180);
+  const known=!!furnitureTypes[f.type];ctx.strokeStyle=known?'#c58b2b':'#888';ctx.fillStyle=known?'rgba(197,139,43,.25)':'rgba(136,136,136,.15)';
+  ctx.fillRect(-w/2,-h/2,w,h);ctx.strokeRect(-w/2,-h/2,w,h);ctx.restore();
+ }
+ ctx.restore();
+}
+function renderFurniture(){
+ $('furniture-details').hidden=!view?.furniture_editable;
+ const rows=(view?.furniture||[]).map(f=>{
+  const line=document.createElement('div'),del=document.createElement('button');line.className='module-row';
+  line.append(Object.assign(document.createElement('span'),{textContent:furnitureName(f)+' · '+f.width+'×'+f.height+' мм'}));
+  del.textContent='Убрать';del.className='ghost';
+  del.onclick=()=>{if(window.confirm('Убрать «'+furnitureName(f)+'» с карты?'))saveFurniture({remove:[f.index],add:[]});};
+  line.append(del);return line;
+ });
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Мебели на карте нет.'}));
+ $('furniture-list').replaceChildren(...rows);
+}
+async function saveFurniture(change){
+ try{await control('local.furniture',{map_id:view.map_id,revision:view.revision,...change});$('furniture-status').textContent='Сохранено. Ожидаю обновление карты.';for(const delay of [1500,5000])setTimeout(()=>refreshMap(),delay);}
+ catch(e){$('furniture-status').textContent=e.message;}
+}
+function placeFurniture(x,y){
+ furniturePlacing=false;const type=Number($('furniture-type').value),[,w,h]=furnitureTypes[type],[rx,ry]=pixelToRobot(view,x,y);
+ saveFurniture({remove:[],add:[{type,x:rx,y:ry,width:w,height:h,rotation:0}]});
+}
+$('place-furniture').onclick=()=>{if(busy||!view?.furniture_editable)return;furniturePlacing=true;restrictDrawing=false;zoneDrawing=false;thresholdDrawing=false;$('furniture-status').textContent='Нажми на карте, где стоит центр предмета.';};
 // ---- Map backups (mapbackup.go): loaded when the block is opened.
 const restoreStates={0:'',1:'восстанавливается…',3:'восстановлена'};
 async function loadMapBackups(){
