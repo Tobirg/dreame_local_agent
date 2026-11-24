@@ -34,7 +34,12 @@ var stateProps = []stateProp{
 	{"region", 4, 19}, {"region_code", 14, 3},
 	// Current or last run: minutes and square metres (Tasshack cleaning_time / cleaned_area).
 	{"cleaning_time", 4, 2}, {"cleaned_area", 4, 3},
+	// Bit mask the robot reports about itself (app plugin SUPPORT_CAPABILITY); r2505 answers 31.
+	{"device_capability", 4, 83},
 }
+
+// deviceCapabilityBits names the 4/83 bits as the app plugin does.
+var deviceCapabilityBits = []string{"video_monitor", "quick_command", "streamer_and_ai", "smart_charge", "record_sound"}
 
 // 4/1 codes, same table as ui/app.js statusNames.
 var statusNames = map[int64]string{
@@ -80,6 +85,8 @@ type device struct {
 	poke      chan struct{}
 	hashOnce  sync.Once
 	hashes    map[string]string
+	hwOnce    sync.Once
+	hw        map[string]any // this model's row of the firmware hardware table; nil if unknown
 	details   map[string]any // consumables, stats, dnd; see details.go
 	detailsAt time.Time
 	run       *cleanRun     // cleaning in progress; see history.go
@@ -177,6 +184,9 @@ func normalize(result any) (map[string]any, error) {
 	if code, ok := int64Of(state["error"]); ok {
 		if name, ok := errorNames[code]; ok {
 			state["error_name"] = name
+		}
+		if text, ok := officialFaults[code]; ok {
+			state["error_text"], state["error_text_en"] = text[0], text[1]
 		}
 	}
 	return state, nil
@@ -301,6 +311,31 @@ func (a *agent) hardware(model string) (map[string]any, error) {
 	return hw, nil
 }
 
+// deviceCapabilities decodes 4/83 into names; nil when the robot does not report it.
+func deviceCapabilities(v any) []string {
+	mask, ok := int64Of(v)
+	if !ok {
+		return nil
+	}
+	names := []string{}
+	for i, name := range deviceCapabilityBits {
+		if mask&(1<<i) != 0 {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// modelHardware is hardware() for this robot, read once: the table only changes with an OTA reboot.
+func (a *agent) modelHardware() map[string]any {
+	a.dev.hwOnce.Do(func() {
+		if info, err := a.identity(); err == nil {
+			a.dev.hw, _ = a.hardware(info["model"])
+		}
+	})
+	return a.dev.hw
+}
+
 func (a *agent) capabilities() (map[string]any, error) {
 	info, err := a.identity()
 	if err != nil {
@@ -324,14 +359,15 @@ func (a *agent) capabilities() (map[string]any, error) {
 	firmware := a.firmwareProfile(info["model"], info["fw_ver"])
 	firmware["hashes"] = a.dev.hashes
 	caps := map[string]any{
-		"agent":      map[string]string{"version": version},
-		"identity":   map[string]string{"model": info["model"], "did": info["did"], "fw_ver": info["fw_ver"]},
-		"firmware":   firmware,
-		"control":    a.robotWriteAllowed(info) == nil,
-		"hardware":   hw,
-		"properties": props,
-		"commands":   commands,
-		"modules":    a.listModules(),
+		"agent":             map[string]string{"version": version},
+		"identity":          map[string]string{"model": info["model"], "did": info["did"], "fw_ver": info["fw_ver"]},
+		"firmware":          firmware,
+		"control":           a.robotWriteAllowed(info) == nil,
+		"hardware":          hw,
+		"properties":        props,
+		"commands":          commands,
+		"device_capability": deviceCapabilities(state["device_capability"]),
+		"modules":           a.listModules(),
 	}
 	if hwErr != nil {
 		caps["hardware_error"] = hwErr.Error()

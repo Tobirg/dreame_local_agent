@@ -349,10 +349,10 @@ async function loadHistory(){
 $('refresh-history').onclick=()=>loadHistory().catch(e=>toast(e.message,true));
 $('refresh-logs').onclick=()=>loadLogs().catch(e=>toast(e.message,true));$('log-source').onchange=showLog;
 // ---- Maintenance: consumables, totals and do-not-disturb come with the state once a minute.
-const consumableNames={main_brush:'Основная щётка',side_brush:'Боковая щётка',filter:'Фильтр',sensor:'Датчики',tank_filter:'Фильтр бака',mop_pad:'Салфетки',silver_ion:'Ионы серебра',detergent:'Моющее средство',squeegee:'Скребок',dirty_water_channel:'Канал грязной воды',onboard_dirty_water_tank:'Бак грязной воды робота',deodorizer:'Дезодоратор',wheel:'Колёса',scale_inhibitor:'Антинакипин',fluffing_roller:'Взбивающий валик',roller_mop_filter:'Фильтр валика',water_outlet_filter:'Фильтр слива',track:'Направляющие',washboard:'Поддон мойки',filter_cleaning:'Очистка фильтра'};
-// Russian texts for common error codes; others show the agent's English name.
-const errorTexts={1:'колесо зависло',2:'датчик перепада',3:'бампер заклинило',8:'нет контейнера',9:'нет бака',10:'бак для воды пуст',11:'контейнер полон',12:'основная щётка застряла',13:'боковая щётка застряла',14:'вентилятор',15:'левое колесо',16:'правое колесо',17:'робот застрял',18:'робот застрял',19:'не найдена база',20:'низкий заряд',21:'ошибка зарядки',24:'камера закрыта',47:'путь заблокирован',48:'лидар',51:'фильтр забит',59:'робот в запретной зоне',68:'снимите салфетки',75:'разряжен, выключение',76:'бак грязной воды не установлен',80:'робот застрял',82:'скользкий пол',86:'бак грязной воды полон',101:'контейнер станции полон',102:'крышка станции открыта',105:'бак чистой воды',106:'бак грязной воды',107:'бак чистой воды пуст',109:'бак грязной воды засорён',117:'станция отключена',120:'нет салфеток в станции',121:'мешок для пыли полон',122:'предупреждение без описания',123:'самопроверка не пройдена',125:'слив не удался',129:'мойка не удалась',1000:'не удалось вернуться на базу'};
-const errorText=s=>errorTexts[s.error]||String(s.error_name||'неизвестная ошибка').replaceAll('_',' ');
+const consumableNames={main_brush:'Основная щётка',side_brush:'Боковая щётка',filter:'Фильтр',sensor:'Датчики',tank_filter:'Фильтр бака',mop_pad:'Салфетки',silver_ion:'Ионы серебра',detergent:'Моющее средство',squeegee:'Скребок',dirty_water_channel:'Канал грязной воды',onboard_dirty_water_tank:'Бак грязной воды робота',deodorizer:'Дезодоратор',wheel:'Колёса',scale_inhibitor:'Антинакипин',fluffing_roller:'Взбивающий валик',roller_mop_filter:'Фильтр валика',water_outlet_filter:'Фильтр слива',track:'Направляющие',washboard:'Поддон мойки',filter_cleaning:'Очистка фильтра',roller_cover:'Кожух валика',main_brush_cover:'Кожух основной щётки'};
+// Error text: the app plugin's own (error_text from the agent); these cover codes the plugin does not name.
+const errorTexts={9:'нет бака',10:'бак для воды пуст',19:'не найдена база',68:'снимите салфетки',109:'бак грязной воды засорён',122:'предупреждение без описания',123:'самопроверка не пройдена'};
+const errorText=s=>s.error_text||errorTexts[s.error]||String(s.error_name||'неизвестная ошибка').replaceAll('_',' ');
 function renderCare(s){
  const parts=s.consumables||{},key=JSON.stringify([parts,s.stats,s.dnd,s.schedules]);
  if(key===careShown)return;careShown=key;
@@ -499,7 +499,7 @@ canvas.onclick=e=>{
 };
 // Show only what this robot supports: commands the hardware table rules out and properties the robot never answers are hidden.
 export function applyCapabilities(caps){
- const id=caps.identity||{};
+ const id=caps.identity||{};hardware=caps.hardware||null;
  $('model').textContent=(id.model||'Неизвестная модель')+' · '+(id.fw_ver||'?')+(caps.firmware?.verified?'':' · прошивка не проверена');
  for(const button of document.querySelectorAll('[data-command]')){const c=caps.commands?.[button.dataset.command];button.hidden=c?.available===false;if(c?.reason)button.title=c.reason;}
  for(const [prop,input,apply] of [['suction','fan','save-fan'],['volume','volume','save-volume']]){const hide=caps.properties?.[prop]?.readable===false;$(input).closest('label').hidden=hide;$(apply).hidden=hide;}
@@ -795,7 +795,10 @@ $('save-restrict').onclick=async()=>{
  catch(e){$('restrict-status').textContent=e.message;}
 };
 
+// Firmware hardware table of this model (capabilities); settings with "hw" need these values.
+let hardware=null;
 export function decodeSetting(def,values){
+ if(def.hw&&hardware&&Object.entries(def.hw).some(([k,v])=>Object.hasOwn(hardware,'RUNTIME_'+k)&&String(hardware['RUNTIME_'+k])!==v))return undefined;
  const raw=values.get(def.siid+'/'+def.piid);if(raw===undefined||raw===null)return undefined;
  if(def.auto||def.json_key){
   let object;try{object=typeof raw==='string'?JSON.parse(raw):raw;}catch{return undefined;}
@@ -895,7 +898,7 @@ window.addEventListener('hashchange',showPage);showPage();
 $('dock-self-repair').onclick=()=>{if(window.confirm('Запустить саморемонт станции? Это займёт около 5–10 минут.'))command('dock_self_repair').catch(()=>{});};
 // ---- Messages (messages.go): the agent's own feed, newest first.
 export function messageText(m){
- if(m.type==='error')return 'Ошибка: '+(errorTexts[m.code]||String(m.name||m.code).replaceAll('_',' '));
+ if(m.type==='error')return 'Ошибка: '+(m.text||errorTexts[m.code]||String(m.name||m.code).replaceAll('_',' '));
  if(m.type==='consumable')return (consumableNames[m.name]||m.name)+(m.code===0?': ресурс исчерпан':': осталось '+m.code+' %');
  if(m.type==='run')return m.name==='docked'?'Уборка закончена, робот на базе':m.name==='error'?'Уборка прервана ошибкой':'Уборка остановлена';
  if(m.type==='self_test')return m.code===15?'Станция начала саморемонт':'Саморемонт станции закончился';

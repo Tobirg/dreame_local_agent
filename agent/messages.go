@@ -9,7 +9,7 @@ import (
 
 // The app's message list comes from the cloud; the agent keeps its own from state changes:
 // a new robot error, a consumable at 10 % or worn out, a run ending, the station self-test.
-// Texts are made by the panel from type and code.
+// Texts are made by the panel from type and code; errors also carry the app's own text.
 
 const (
 	messagesFile = "/data/dreame-local/messages.json"
@@ -21,6 +21,7 @@ type message struct {
 	Type string    `json:"type"` // error, consumable, run, self_test
 	Code int64     `json:"code,omitempty"`
 	Name string    `json:"name,omitempty"`
+	Text string    `json:"text,omitempty"` // error: the Dreame app's text (error_text)
 }
 
 // stateMessages compares two polls; prev is nil on the first one, which only sets a baseline.
@@ -32,7 +33,8 @@ func stateMessages(prev, next map[string]any, now time.Time) []message {
 	if code, ok := int64Of(next["error"]); ok && code != 0 {
 		if old, _ := int64Of(prev["error"]); old != code {
 			name, _ := next["error_name"].(string)
-			out = append(out, message{now, "error", code, name})
+			text, _ := next["error_text"].(string)
+			out = append(out, message{now, "error", code, name, text})
 		}
 	}
 	oldParts, _ := prev["consumables"].(map[string]any)
@@ -45,18 +47,18 @@ func stateMessages(prev, next map[string]any, now time.Time) []message {
 			before, had = int64Of(o["left"])
 		}
 		if ok && had && (left <= 10 && before > 10 || left == 0 && before > 0) {
-			out = append(out, message{now, "consumable", left, name})
+			out = append(out, message{now, "consumable", left, name, ""})
 		}
 	}
 	was, _ := prev["activity"].(string)
 	is, _ := next["activity"].(string)
 	if was == "cleaning" && is != "cleaning" && is != "paused" && is != "returning" || was == "returning" && is == "docked" {
-		out = append(out, message{now, "run", 0, is})
+		out = append(out, message{now, "run", 0, is, ""})
 	}
 	oldStatus, _ := int64Of(prev["status"])
 	status, _ := int64Of(next["status"])
 	if (status == 15) != (oldStatus == 15) {
-		out = append(out, message{now, "self_test", status, ""})
+		out = append(out, message{now, "self_test", status, "", ""})
 	}
 	return out
 }

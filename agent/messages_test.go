@@ -14,9 +14,9 @@ func TestStateMessages(t *testing.T) {
 		t.Fatal("first poll must only set a baseline")
 	}
 	prev := map[string]any{"error": n(0), "activity": "cleaning", "status": n(18), "consumables": part(11)}
-	next := map[string]any{"error": n(8), "error_name": "dust_bin_removed", "activity": "error", "status": n(12), "consumables": part(10)}
+	next := map[string]any{"error": n(8), "error_name": "dust_bin_removed", "error_text": "official", "activity": "error", "status": n(12), "consumables": part(10)}
 	got := stateMessages(prev, next, now)
-	if len(got) != 3 || got[0].Type != "error" || got[0].Code != 8 || got[1].Type != "consumable" || got[1].Name != "filter" || got[2].Type != "run" || got[2].Name != "error" {
+	if len(got) != 3 || got[0].Type != "error" || got[0].Code != 8 || got[0].Text != "official" || got[1].Type != "consumable" || got[1].Name != "filter" || got[2].Type != "run" || got[2].Name != "error" {
 		t.Fatalf("%+v", got)
 	}
 	// Same error, a consumable already low, docked from docked: nothing new.
