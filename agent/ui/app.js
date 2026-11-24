@@ -353,7 +353,7 @@ const consumableNames={main_brush:'Основная щётка',side_brush:'Бо
 const errorTexts={1:'колесо зависло',2:'датчик перепада',3:'бампер заклинило',8:'нет контейнера',9:'нет бака',10:'бак для воды пуст',11:'контейнер полон',12:'основная щётка застряла',13:'боковая щётка застряла',14:'вентилятор',15:'левое колесо',16:'правое колесо',17:'робот застрял',18:'робот застрял',19:'не найдена база',20:'низкий заряд',21:'ошибка зарядки',24:'камера закрыта',47:'путь заблокирован',48:'лидар',51:'фильтр забит',59:'робот в запретной зоне',68:'снимите салфетки',75:'разряжен, выключение',76:'бак грязной воды не установлен',80:'робот застрял',82:'скользкий пол',86:'бак грязной воды полон',101:'контейнер станции полон',102:'крышка станции открыта',105:'бак чистой воды',106:'бак грязной воды',107:'бак чистой воды пуст',109:'бак грязной воды засорён',117:'станция отключена',120:'нет салфеток в станции',121:'мешок для пыли полон',122:'предупреждение без описания',123:'самопроверка не пройдена',125:'слив не удался',129:'мойка не удалась',1000:'не удалось вернуться на базу'};
 const errorText=s=>errorTexts[s.error]||String(s.error_name||'неизвестная ошибка').replaceAll('_',' ');
 function renderCare(s){
- const parts=s.consumables||{},key=JSON.stringify([parts,s.stats,s.dnd]);
+ const parts=s.consumables||{},key=JSON.stringify([parts,s.stats,s.dnd,s.schedules]);
  if(key===careShown)return;careShown=key;
  $('care-panel').hidden=!Object.keys(parts).length&&!s.dnd;
  const rows=Object.entries(parts).map(([name,c])=>{
@@ -369,7 +369,32 @@ function renderCare(s){
  const st=s.stats;$('stats').textContent=st?'Всего уборок: '+(st.cleanings??'—')+' · '+(st.minutes!==undefined?Math.round(st.minutes/60)+' ч':'—')+' · '+(st.area??'—')+' м²':'';
  $('dnd').hidden=!s.dnd;
  if(s.dnd&&!dndDirty){$('dnd-enabled').checked=!!s.dnd.enabled;$('dnd-start').value=s.dnd.start||'';$('dnd-end').value=s.dnd.end||'';}
+ renderSchedules(s.schedules);
 }
+// ---- Schedules (8/2): days are seven 0/1 digits from Sunday.
+const dayNames=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+export function scheduleDays(days){const on=dayNames.filter((_,i)=>days[i]==='1');return on.length===7?'каждый день':on.length?on.join(', '):'один раз';}
+function renderSchedules(list){
+ $('schedules-block').hidden=!Array.isArray(list);if(!Array.isArray(list))return;
+ const rows=list.map(t=>{
+  const row=document.createElement('div'),text=document.createElement('span'),toggle=document.createElement('button'),del=document.createElement('button');
+  row.className='module-row';
+  text.textContent=t.time+' · '+scheduleDays(t.days||'')+' · '+(t.rooms?'комнаты '+t.rooms.join(', '):'весь дом')+(t.enabled?'':' · выключено');
+  toggle.textContent=t.enabled?'Выключить':'Включить';toggle.className='ghost';
+  toggle.onclick=()=>command('set_schedule',{id:t.id,enabled:!t.enabled,time:t.time,days:t.days}).catch(()=>{});
+  del.textContent='Удалить';del.className='ghost';
+  del.onclick=()=>{if(window.confirm('Удалить расписание на '+t.time+'?'))command('delete_schedule',{id:t.id}).catch(()=>{});};
+  row.append(text,toggle,del);return row;
+ });
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Расписаний нет.'}));
+ $('schedules').replaceChildren(...rows);
+}
+$('add-schedule').onclick=()=>{try{
+ const days=dayNames.map((_,i)=>$('schedule-days').querySelector('input[value="'+i+'"]').checked?'1':'0').join('');
+ let args={enabled:true,time:$('schedule-time').value,days};
+ if($('schedule-rooms').checked){const r=roomCommand([...selected],Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));args={...args,rooms:r.rooms,repeats:r.repeats,suction:r.suction,water:r.water};}
+ command('set_schedule',args).catch(()=>{});
+}catch(e){toast(e.message,true);}};
 for(const id of ['dnd-enabled','dnd-start','dnd-end'])$(id).oninput=()=>{dndDirty=true;};
 $('save-dnd').onclick=()=>control('/api/v1/command',{name:'set_dnd',enabled:$('dnd-enabled').checked,start:$('dnd-start').value,end:$('dnd-end').value}).then(()=>{dndDirty=false;},()=>{});
 // Live state: the agent pushes every change on /api/v1/events (Server-Sent Events read with fetch, so the token stays in a header).

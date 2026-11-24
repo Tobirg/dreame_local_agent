@@ -395,6 +395,8 @@ var commandTable = map[string]command{
 	"reset_consumable": {detail: true},
 	"set_dnd":          {detail: true},
 	"remote_move":      {detail: true},
+	"set_schedule":     {detail: true},
+	"delete_schedule":  {detail: true},
 }
 
 type commandParams struct {
@@ -414,6 +416,9 @@ type commandParams struct {
 	To         any     `json:"to"`       // set_setting: the new value
 	Velocity   *int    `json:"velocity"` // remote_move: forward speed, negative backwards
 	Rotation   *int    `json:"rotation"` // remote_move: turn rate
+	ID         *int    `json:"id"`       // set_schedule (omit to add), delete_schedule
+	Time       string  `json:"time"`     // set_schedule: HH:MM
+	Days       string  `json:"days"`     // set_schedule: seven 0/1 digits from Sunday
 }
 
 // runCommand is reached through call(), so it already holds the IPC gate and passed identity checks.
