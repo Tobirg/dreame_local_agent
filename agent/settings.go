@@ -26,11 +26,12 @@ type settingDef struct {
 		Value any    `json:"value"`
 		Label string `json:"label"`
 	} `json:"options,omitempty"`
-	Min  *float64 `json:"min,omitempty"`
-	Max  *float64 `json:"max,omitempty"`
-	Step *float64 `json:"step,omitempty"`
-	Src  string   `json:"src"`          // "plugin" (checked against the Dreame app) or "tasshack"
-	HW   map[string]string `json:"hw,omitempty"` // firmware hardware table values the setting needs
+	Min      *float64          `json:"min,omitempty"`
+	Max      *float64          `json:"max,omitempty"`
+	Step     *float64          `json:"step,omitempty"`
+	Advanced bool              `json:"advanced,omitempty"` // service or cloud-only: modules keep it out of sight by default
+	Src      string            `json:"src"`                // "plugin" (checked against the Dreame app) or "tasshack"
+	HW       map[string]string `json:"hw,omitempty"`       // firmware hardware table values the setting needs
 }
 
 // allowedBy is false when the firmware's hardware table rules the setting out. The firmware is

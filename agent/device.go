@@ -361,7 +361,11 @@ func (a *agent) capabilities() (map[string]any, error) {
 	commands := map[string]any{}
 	for name, c := range commandTable {
 		available, reason := c.available(info["model"], hw)
-		commands[name] = map[string]any{"available": available, "reason": reason}
+		entry := map[string]any{"available": available, "reason": reason}
+		if c.label != "" {
+			entry["button"] = map[string]string{"label": c.label, "icon": c.icon}
+		}
+		commands[name] = entry
 	}
 	// Hashes of the checked firmware files go into compatibility reports, so new profiles can be added.
 	firmware := a.firmwareProfile(info["model"], info["fw_ver"])
@@ -403,6 +407,8 @@ type command struct {
 	models     []string // short model ids (r2401) whose app shows this; empty means every model
 	clearRooms bool
 	detail     bool
+	// A one-press button for modules (Home Assistant): its name and an mdi icon. Empty: not a button.
+	label, icon string
 }
 
 func (c command) available(model string, hw map[string]any) (any, string) {
@@ -432,22 +438,27 @@ var commandTable = map[string]command{
 	"dock":      {method: "action", siid: 3, id: 1},
 	"locate":    {method: "action", siid: 7, id: 1},
 	"mapping":   {method: "action", siid: 4, id: 1, in: []any{map[string]any{"piid": 1, "value": 21}}},
-	"empty":     {method: "action", siid: 15, id: 1, hwKey: "AUTO_DUST_COLLECTION", hwAccepts: is("True")},
-	"wash_mop":  {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "2,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present},
-	"dry_start": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,1"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True")},
-	"dry_stop":  {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,0"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True")},
+	"empty":     {method: "action", siid: 15, id: 1, hwKey: "AUTO_DUST_COLLECTION", hwAccepts: is("True"), label: "Выгрузить пыль", icon: "mdi:delete-empty"},
+	"wash_mop":  {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "2,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present, label: "Мыть салфетки", icon: "mdi:water"},
+	"dry_start": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,1"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True"), label: "Начать сушку", icon: "mdi:fan"},
+	"dry_stop":  {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,0"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True"), label: "Остановить сушку", icon: "mdi:fan-off"},
 	// More 4/4 jobs from the app: 7 robot water tank draining (4/60: 1 running, 2 done, about
 	// 3.5 min on the r2505), 9 station water draining (27/5 = 1 for about 25 s), 5 the washboard
 	// self-clean (StationCleanPage). The app offers 5 only with showStationCleaning; the r2505
-	// accepts it but does nothing. 1, 4, 8, 10, 13 and 14 are pause/resume steps, a demo and
-	// parts the X50 lacks.
+	// accepts it but does nothing. 14 dries the dust bag (supportDustBoxDustBagDrying, 3 models).
+	// 1, 4 and 8 are pause/resume and the low-water answer, 10 empties a station hand vacuum
+	// (no plugin enables it), 13 is a demo.
 	"station_clean": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "5,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present,
-		models: []string{"r2350", "r2401", "r2412", "r2416", "r2424", "r2426", "r2437", "r2440", "r2467", "r2483", "r2485", "r2487", "r2488", "r2491", "r2493", "r2513", "r9304", "r9401", "r9406"}},
-	"tank_drain":    {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "7,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present},
-	"station_drain": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "9,1"}}, hwKey: "AUTO_WATER_SUPPLY_DRAINAGE", hwAccepts: is("True")},
-	"set_suction":   {method: "set_properties", siid: 4, id: 4, min: 0, max: 3},
-	"set_volume":    {method: "set_properties", siid: 7, id: 1, min: 0, max: 100},
-	"clean_rooms":   {method: "action", siid: 4, id: 1, clearRooms: true},
+		models: []string{"r2350", "r2401", "r2412", "r2416", "r2424", "r2426", "r2437", "r2440", "r2467", "r2483", "r2485", "r2487", "r2488", "r2491", "r2493", "r2513", "r9304", "r9401", "r9406"}, label: "Чистка поддона", icon: "mdi:spray-bottle"},
+	"tank_drain":    {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "7,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present, label: "Слить бак робота", icon: "mdi:water-minus"},
+	"station_drain": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "9,1"}}, hwKey: "AUTO_WATER_SUPPLY_DRAINAGE", hwAccepts: is("True"), label: "Слить воду станции", icon: "mdi:pipe-leak"},
+	"dust_bag_dry_start": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "14,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present,
+		models: []string{"r2501", "r2513", "r2518"}, label: "Сушка мешка для пыли", icon: "mdi:sack"},
+	"dust_bag_dry_stop": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "14,0"}}, hwKey: "DOCK_TYPE", hwAccepts: present,
+		models: []string{"r2501", "r2513", "r2518"}, label: "Остановить сушку мешка", icon: "mdi:sack-outline"},
+	"set_suction": {method: "set_properties", siid: 4, id: 4, min: 0, max: 3},
+	"set_volume":  {method: "set_properties", siid: 7, id: 1, min: 0, max: 100},
+	"clean_rooms": {method: "action", siid: 4, id: 1, clearRooms: true},
 	// Built by detailCommand in details.go.
 	"clean_zone":       {detail: true},
 	"clean_spot":       {detail: true},
@@ -459,7 +470,7 @@ var commandTable = map[string]command{
 	// Station self-repair (app DockRepairPage, 99/8 bittest 17, about 5-10 minutes, status 15).
 	// Only models whose app plugin opens that page; on the r2505 (shared firmware family)
 	// bittest 17 starts the factory LDS test instead, so it is hidden there.
-	"dock_self_repair":     {detail: true, models: []string{"p2029", "r2104", "r2205", "r2233", "r2235", "r2246", "r2247", "r2253", "r2257", "r2310", "r2317", "r2386", "r2421", "r9304"}},
+	"dock_self_repair":     {detail: true, models: []string{"p2029", "r2104", "r2205", "r2233", "r2235", "r2246", "r2247", "r2253", "r2257", "r2310", "r2317", "r2386", "r2421", "r9304"}, label: "Саморемонт станции", icon: "mdi:wrench-cog"},
 	"go_to":                {detail: true},
 	"set_dnd_period":       {detail: true},
 	"delete_dnd_period":    {detail: true},

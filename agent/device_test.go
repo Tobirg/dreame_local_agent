@@ -272,7 +272,15 @@ func TestModelGatesAppOnlyCommands(t *testing.T) {
 	a := testAgent(t) // model r2505
 	log := mockRobot(t, a)
 	a.dev.snap.State = map[string]any{"activity": "docked"}
-	for _, name := range []string{"station_clean", "dock_self_repair"} {
+	caps, _ := a.capabilities()
+	cmds := caps["commands"].(map[string]any)
+	if b := cmds["dock_self_repair"].(map[string]any); b["available"] != false || b["button"].(map[string]string)["label"] != "Саморемонт станции" {
+		t.Fatal("modules need the button even when hidden, to remove it", b)
+	}
+	if _, ok := cmds["clean_rooms"].(map[string]any)["button"]; ok {
+		t.Fatal("commands with parameters are not buttons")
+	}
+	for _, name := range []string{"station_clean", "dock_self_repair", "dust_bag_dry_start"} {
 		_, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(`{"name":"` + name + `"}`)})
 		if err == nil || !strings.Contains(err.Error(), "not offered") {
 			t.Fatal(name, err)
