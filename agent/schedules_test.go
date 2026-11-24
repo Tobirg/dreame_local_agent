@@ -45,3 +45,10 @@ func TestCameraPatrol(t *testing.T) {
 		t.Fatal("point off the map accepted")
 	}
 }
+
+func TestScheduleQuickCommand(t *testing.T) {
+	got := parseSchedules("3-1-09:00-1111111-1-2-0-8192-0")
+	if len(got) != 1 || got[0]["quick_command"] != 32 {
+		t.Fatalf("%+v", got)
+	}
+}

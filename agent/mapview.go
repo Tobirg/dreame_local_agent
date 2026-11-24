@@ -28,11 +28,13 @@ type mapRoom struct {
 	// Saved seg_inf fields, for room type edits.
 	kind, index int
 	rawName     string
+	material    *int // seg_inf material, sent back unchanged with carpet types
 }
 type mapView struct {
 	ThresholdsEditable bool                       `json:"thresholds_editable"`
 	Passable           [][]int                    `json:"passable_thresholds"`
 	Impassable         [][]int                    `json:"impassable_thresholds"`
+	Ramps              [][]int                    `json:"ramps"` // vws.ramp rectangles [x0, y0, x1, y1]
 	VWS                map[string]json.RawMessage `json:"-"`
 	// Virtual walls (vw.line), no-go zones (vw.rect) and no-mop zones (vw.mop), robot millimetres.
 	RestrictionsEditable bool    `json:"restrictions_editable"`
@@ -124,9 +126,10 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		Furniture     []json.RawMessage            `json:"funiture_info"`
 		Charger       []int                        `json:"charger"`
 		Segments      map[string]struct {
-			Name  string `json:"name"`
-			Type  int    `json:"type"`
-			Index int    `json:"index"`
+			Name     string `json:"name"`
+			Type     int    `json:"type"`
+			Index    int    `json:"index"`
+			Material *int   `json:"material"`
 		} `json:"seg_inf"`
 	}
 	if err := json.Unmarshal(raw[27+total:], &meta); err != nil {
@@ -174,6 +177,18 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 				view.ThresholdsEditable = false
 			}
 		}
+		var ramps [][]int
+		if raw, ok := meta.VWS["ramp"]; ok && string(raw) != "null" && json.Unmarshal(raw, &ramps) != nil {
+			view.ThresholdsEditable = false
+		}
+		view.Ramps = [][]int{}
+		for _, r := range ramps {
+			if len(r) < 4 {
+				view.ThresholdsEditable = false
+				continue
+			}
+			view.Ramps = append(view.Ramps, r[:4])
+		}
 		for _, lines := range [][][]int{view.Passable, view.Impassable} {
 			for _, line := range lines {
 				if len(line) != 4 {
@@ -219,7 +234,7 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 	}
 	for id, c := range centers {
 		info := meta.Segments[strconv.Itoa(id)]
-		view.Rooms = append(view.Rooms, mapRoom{ID: id, Name: roomName(id, info.Type, info.Index, info.Name), Type: info.Type, kind: info.Type, index: info.Index, rawName: info.Name, X: float64(c.X) / float64(c.N), Y: float64(c.Y) / float64(c.N)})
+		view.Rooms = append(view.Rooms, mapRoom{ID: id, Name: roomName(id, info.Type, info.Index, info.Name), Type: info.Type, kind: info.Type, index: info.Index, rawName: info.Name, material: info.Material, X: float64(c.X) / float64(c.N), Y: float64(c.Y) / float64(c.N)})
 	}
 	sort.Slice(view.Rooms, func(i, j int) bool { return view.Rooms[i].ID < view.Rooms[j].ID })
 	sum := sha256.Sum256(raw)
@@ -256,6 +271,7 @@ func (a *agent) mapView() (mapView, error) {
 			view, err := makeMapView(raw, a.cfg.ExpectedModel)
 			if err == nil {
 				view.RoomSettings = a.roomSettings(view.MapID)
+				view.attachCarpetClean(a.carpetCleanSets(view.MapID))
 				o := a.obstacles(view.MapID)
 				if view.Obstacles = o.List; !o.At.IsZero() {
 					view.ObstaclesAt = &o.At

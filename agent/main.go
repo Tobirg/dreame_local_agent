@@ -283,12 +283,12 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 			return nil, errors.New("local.reboot takes no parameters")
 		}
 		return a.queueReboot()
-	case "local.thresholds", "local.restrictions", "local.room_settings", "local.room_order", "local.room_types", "local.map_use", "local.carpets", "local.furniture":
+	case "local.thresholds", "local.restrictions", "local.room_settings", "local.room_order", "local.room_types", "local.map_use", "local.carpets", "local.carpet_types", "local.carpet_clean", "local.furniture":
 		if err := a.robotWriteAllowed(info); err != nil {
 			return nil, err
 		}
 		build := map[string]func(json.RawMessage) (map[string]any, error){
-			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch, "local.room_order": a.roomOrderPatch, "local.room_types": a.roomTypesPatch, "local.map_use": a.useMapEdit, "local.carpets": a.carpetsPatch, "local.furniture": a.furniturePatch,
+			"local.thresholds": a.thresholdPatch, "local.restrictions": a.restrictionsPatch, "local.room_settings": a.roomSettingsPatch, "local.room_order": a.roomOrderPatch, "local.room_types": a.roomTypesPatch, "local.map_use": a.useMapEdit, "local.carpets": a.carpetsPatch, "local.carpet_types": a.carpetTypesPatch, "local.carpet_clean": a.carpetCleanPatch, "local.furniture": a.furniturePatch,
 		}[req.Method]
 		patch, err := build(req.Params)
 		if err != nil {
@@ -304,6 +304,18 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 		a.dev.mu.Lock()
 		defer a.dev.mu.Unlock()
 		return a.readMessages(), nil
+	case "local.patrol_schedules_status":
+		patrolSchedulesMu.Lock()
+		defer patrolSchedulesMu.Unlock()
+		return a.readPatrolSchedules(), nil
+	case "local.patrol_schedule", "local.patrol_schedule_delete":
+		if err := a.robotWriteAllowed(info); err != nil {
+			return nil, err
+		}
+		if req.Method == "local.patrol_schedule_delete" {
+			return a.deletePatrolSchedule(req.Params)
+		}
+		return a.setPatrolSchedule(req.Params, info["did"])
 	case "local.messages_clear":
 		a.dev.mu.Lock()
 		defer a.dev.mu.Unlock()
@@ -799,6 +811,7 @@ func main() {
 	a.modules.ctx = portalContext
 	a.startServices()
 	go a.runPoller(portalContext, 5*time.Second)
+	go a.runPatrolSchedules(portalContext)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan struct{})

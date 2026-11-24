@@ -48,9 +48,12 @@ async function api(method,params=null){
 
 export function assertCommand(result,method,params){
  if(result?.patrol==='started')return; // the agent runs it; no robot reply yet
+ if(method==='local.patrol_schedule'||method==='local.patrol_schedule_delete')return; // agent-side list, no robot call
  const rows=Array.isArray(result)?result:[result];
  if(!rows.length||rows.some(r=>!r||r.code!==0))throw Error('Робот отклонил команду: '+JSON.stringify(result));
- if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||method==='local.room_order'||method==='local.map_use'||method==='local.carpets'||method==='local.furniture'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
+ // EDIT_COMMAND answers "0" in its out value when the robot took the change.
+ if(/_quick_command$/.test(params?.name||'')&&String(result?.out?.[0]?.value)!=='0')throw Error('Робот не принял быструю команду: '+JSON.stringify(result?.out));
+ if(method==='local.thresholds'||method==='local.restrictions'||method==='local.room_settings'||method==='local.room_order'||method==='local.map_use'||method==='local.carpets'||method==='local.carpet_types'||method==='local.carpet_clean'||method==='local.furniture'||(method==='action'&&params?.siid===6&&params?.aiid===2)){
   if(Array.isArray(result)||!Array.isArray(result.out))throw Error('Map operation result is missing; outcome unknown.');
   const operation=result.out.filter(row=>row&&row.piid===6);
   if(operation.length!==1||!Number.isSafeInteger(operation[0].value))throw Error('Map operation result is invalid; outcome unknown.');
@@ -254,7 +257,7 @@ function renderState(snap){
   if(!fanDirty&&document.activeElement!==$('fan')&&s.suction!==undefined)$('fan').value=String(s.suction);
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
   if(!roomOptionsDirty){if(Number.isInteger(s.suction))$('room-fan').value=s.suction;if(Number.isInteger(s.water)&&s.water>=1&&s.water<=3)$('room-water').value=s.water;}
-  $('station').textContent=s.station===undefined?'Состояние станции недоступно':'Состояние станции: '+(stationNames[s.station]||s.station);
+  $('station').textContent=s.station===undefined?'Состояние станции недоступно':'Состояние станции: '+(stationNames[s.station]||s.station)+(s.tank_drain===1?' · сливается бак робота':'')+(s.water_drain===1?' · сливается вода станции':'');
   $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—')+(s.error_name?' ('+s.error_name+')':'');
   $('robot-error').hidden=!s.error;$('robot-error').textContent=s.error?'Ошибка '+s.error+': '+errorText(s):'';
   renderCare(s);
@@ -354,7 +357,7 @@ const consumableNames={main_brush:'Основная щётка',side_brush:'Бо
 const errorTexts={9:'нет бака',10:'бак для воды пуст',19:'не найдена база',68:'снимите салфетки',109:'бак грязной воды засорён',122:'предупреждение без описания',123:'самопроверка не пройдена'};
 const errorText=s=>s.error_text||errorTexts[s.error]||String(s.error_name||'неизвестная ошибка').replaceAll('_',' ');
 function renderCare(s){
- const parts=s.consumables||{},key=JSON.stringify([parts,s.stats,s.dnd,s.schedules]);
+ const parts=s.consumables||{},key=JSON.stringify([parts,s.stats,s.dnd,s.dnd_periods,s.schedules,s.quick_commands]);
  if(key===careShown)return;careShown=key;
  $('care-panel').hidden=!Object.keys(parts).length&&!s.dnd;
  const rows=Object.entries(parts).map(([name,c])=>{
@@ -370,7 +373,7 @@ function renderCare(s){
  const st=s.stats;$('stats').textContent=st?'Всего уборок: '+(st.cleanings??'—')+' · '+(st.minutes!==undefined?Math.round(st.minutes/60)+' ч':'—')+' · '+(st.area??'—')+' м²':'';
  $('dnd').hidden=!s.dnd;
  if(s.dnd&&!dndDirty){$('dnd-enabled').checked=!!s.dnd.enabled;$('dnd-start').value=s.dnd.start||'';$('dnd-end').value=s.dnd.end||'';}
- renderSchedules(s.schedules);
+ renderQuick(s.quick_commands);renderSchedules(s.schedules);renderDNDPeriods(s.dnd_periods);
 }
 // ---- Schedules (8/2): days are seven 0/1 digits from Sunday.
 const dayNames=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
@@ -380,7 +383,8 @@ function renderSchedules(list){
  const rows=list.map(t=>{
   const row=document.createElement('div'),text=document.createElement('span'),toggle=document.createElement('button'),del=document.createElement('button');
   row.className='module-row';
-  text.textContent=t.time+' · '+scheduleDays(t.days||'')+' · '+(t.rooms?'комнаты '+t.rooms.join(', '):'весь дом')+(t.enabled?'':' · выключено');
+  const quick=t.quick_command&&(quickList.find(q=>q.id===t.quick_command)?.name||'№'+t.quick_command);
+  text.textContent=t.time+' · '+scheduleDays(t.days||'')+' · '+(quick?'команда «'+quick+'»':t.rooms?'комнаты '+t.rooms.join(', '):'весь дом')+(t.enabled?'':' · выключено');
   toggle.textContent=t.enabled?'Выключить':'Включить';toggle.className='ghost';
   toggle.onclick=()=>command('set_schedule',{id:t.id,enabled:!t.enabled,time:t.time,days:t.days}).catch(()=>{});
   del.textContent='Удалить';del.className='ghost';
@@ -393,9 +397,55 @@ function renderSchedules(list){
 $('add-schedule').onclick=()=>{try{
  const days=dayNames.map((_,i)=>$('schedule-days').querySelector('input[value="'+i+'"]').checked?'1':'0').join('');
  let args={enabled:true,time:$('schedule-time').value,days};
- if($('schedule-rooms').checked){const r=roomCommand([...selected],Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));args={...args,rooms:r.rooms,repeats:r.repeats,suction:r.suction,water:r.water};}
+ if($('schedule-quick').value)args.quick_command=Number($('schedule-quick').value);
+ else if($('schedule-rooms').checked){const r=roomCommand([...selected],Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));args={...args,rooms:r.rooms,repeats:r.repeats,suction:r.suction,water:r.water};}
  command('set_schedule',args).catch(()=>{});
 }catch(e){toast(e.message,true);}};
+// ---- Quick commands (4/48): saved room sets the robot can run from a schedule.
+let quickList=[];
+function renderQuick(list){
+ $('quick-block').hidden=!Array.isArray(list);quickList=Array.isArray(list)?list:[];
+ $('schedule-quick-label').hidden=!quickList.length;
+ const keep=$('schedule-quick').value;
+ $('schedule-quick').replaceChildren(new Option('— нет —',''),...quickList.map(q=>new Option(q.name||'№'+q.id,String(q.id))));
+ $('schedule-quick').value=quickList.some(q=>String(q.id)===keep)?keep:'';
+ if(!Array.isArray(list))return;
+ const rows=quickList.map(q=>{
+  const row=document.createElement('div'),text=document.createElement('span'),del=document.createElement('button');
+  row.className='module-row';text.textContent=q.name||'№'+q.id;
+  del.textContent='Удалить';del.className='ghost';
+  del.onclick=()=>{if(window.confirm('Удалить быструю команду «'+(q.name||q.id)+'»?'))command('delete_quick_command',{id:q.id}).catch(()=>{});};
+  row.append(text,del);return row;
+ });
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Быстрых команд нет.'}));
+ $('quick-commands').replaceChildren(...rows);
+}
+$('add-quick').onclick=()=>{
+ const rooms=[...selected];
+ if(!rooms.length)return toast('Выбери комнаты на карте',true);
+ if(!$('quick-name').value.trim())return toast('Назови команду',true);
+ command('save_quick_command',{label:$('quick-name').value.trim(),rooms}).then(()=>{$('quick-name').value='';},()=>{});
+};
+// ---- Do-not-disturb periods (5/4), same day digits as schedules.
+function renderDNDPeriods(list){
+ $('dnd-periods-block').hidden=!Array.isArray(list);if(!Array.isArray(list))return;
+ const rows=list.map(d=>{
+  const row=document.createElement('div'),text=document.createElement('span'),toggle=document.createElement('button'),del=document.createElement('button');
+  row.className='module-row';
+  text.textContent=d.start+'–'+d.end+' · '+scheduleDays(d.days||'')+(d.enabled?'':' · выключено');
+  toggle.textContent=d.enabled?'Выключить':'Включить';toggle.className='ghost';
+  toggle.onclick=()=>command('set_dnd_period',{id:d.id,enabled:!d.enabled,start:d.start,end:d.end,days:d.days}).catch(()=>{});
+  del.textContent='Удалить';del.className='ghost';
+  del.onclick=()=>{if(window.confirm('Удалить период '+d.start+'–'+d.end+'?'))command('delete_dnd_period',{id:d.id}).catch(()=>{});};
+  row.append(text,toggle,del);return row;
+ });
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Периодов нет.'}));
+ $('dnd-periods').replaceChildren(...rows);
+}
+$('add-dnd-period').onclick=()=>{
+ const days=dayNames.map((_,i)=>$('dnd-period-days').querySelector('input[value="'+i+'"]').checked?'1':'0').join('');
+ command('set_dnd_period',{enabled:true,start:$('dnd-period-start').value,end:$('dnd-period-end').value,days}).catch(()=>{});
+};
 for(const id of ['dnd-enabled','dnd-start','dnd-end'])$(id).oninput=()=>{dndDirty=true;};
 $('save-dnd').onclick=()=>control('/api/v1/command',{name:'set_dnd',enabled:$('dnd-enabled').checked,start:$('dnd-start').value,end:$('dnd-end').value}).then(()=>{dndDirty=false;},()=>{});
 // Live state: the agent pushes every change on /api/v1/events (Server-Sent Events read with fetch, so the token stays in a header).
@@ -453,14 +503,14 @@ async function refreshMap(){
  if(!token||busy)return;const epoch=viewEpoch;
  try{
   const next=await api('local.map_view');if(epoch!==viewEpoch||!token)return;
-  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();renderRoomTypes();renderObstacles();draw();disableControls(busy);return;}
+  if(next.empty){view=next;selected.clear();points=[];thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;invalidateEdit();$('map-info').textContent='Сохранённая карта ещё не создана';renderRoomButtons();renderThresholdChoices();renderRestrictions();renderCarpetTypes();renderRoomSettings();renderRoomTypes();renderObstacles();draw();disableControls(busy);return;}
   if(!Number.isInteger(next.width)||!Number.isInteger(next.height)||next.width*next.height>4194304||!Array.isArray(next.rooms))throw Error('Некорректный формат карты');
   const bytes=atob(next.pixels);if(bytes.length!==next.width*next.height)throw Error('Некорректный размер карты');
   next.grid=Uint8Array.from(bytes,c=>c.charCodeAt(0));
   if(view?.revision!==next.revision){selected=view?.map_id===next.map_id?new Set([...selected].filter(id=>next.rooms.some(r=>r.id===id))):new Set();points=[];invalidateEdit();thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;}
   view=next;canvas.width=view.width*3;canvas.height=view.height*3;
   $('map-info').textContent='Карта '+view.map_id+' · комнат: '+view.rooms.length+' · '+view.width+' × '+view.height;
-  renderRoomButtons();renderThresholdChoices();renderRestrictions();renderRoomSettings();renderRoomTypes();renderObstacles();draw();disableControls(busy);
+  renderRoomButtons();renderThresholdChoices();renderRestrictions();renderCarpetTypes();renderRoomSettings();renderRoomTypes();renderObstacles();draw();disableControls(busy);
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('map-info').textContent=e.message;connectionLost(e.message);}}
 }
 function mapPoint(e){const rect=canvas.getBoundingClientRect();return {x:(e.clientX-rect.left)*view.width/rect.width,y:view.height-(e.clientY-rect.top)*view.height/rect.height};}
@@ -508,13 +558,13 @@ async function login(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('main-page').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();loadMessages().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
+ await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
 for(const button of document.querySelectorAll('[data-command]'))button.onclick=async()=>{
  // data-command values are the agent's command names.
- try{if(button.dataset.command==='reboot')await rebootRobot();else await command(button.dataset.command);}catch{}
+ try{if(button.dataset.confirm&&!window.confirm(button.dataset.confirm))return;if(button.dataset.command==='reboot')await rebootRobot();else await command(button.dataset.command);}catch{}
 };
 $('fan').onchange=()=>{fanDirty=true;};
 $('save-fan').onclick=async()=>{try{await command('set_suction',{value:Number($('fan').value)});fanDirty=false;}catch{}};
@@ -746,7 +796,7 @@ $('save-room-types').onclick=async()=>{
  catch(e){$('room-types-status').textContent=e.message;}
 };
 // ---- Virtual walls and zones: edited locally as a draft, then all three lists are saved at once.
-const restrictKinds={walls:'Стена',no_go_zones:'Запретная зона',no_mop_zones:'Без влажной уборки',carpets_added:'Ковёр',carpets_ignored:'Не считать ковром'},carpetKinds=['carpets_added','carpets_ignored'];
+const restrictKinds={walls:'Стена',no_go_zones:'Запретная зона',no_mop_zones:'Без влажной уборки',carpets_added:'Ковёр',carpets_ignored:'Не считать ковром',ramps:'Пандус'},carpetKinds=['carpets_added','carpets_ignored'];
 const restrictions=()=>restrictDraft||Object.fromEntries(Object.keys(restrictKinds).map(k=>[k,view?.[k]||[]]));
 function renderRestrictions(){
  const lists=restrictions(),rows=[];
@@ -767,7 +817,7 @@ function drawRestrictions(){
  for(const [kind,items] of Object.entries(lists))for(const r of items){
   if(!Array.isArray(r)||r.length!==4)continue;const [x0,y0]=px(r[0],r[1]),[x1,y1]=px(r[2],r[3]);
   if(kind==='walls'){ctx.setLineDash([]);ctx.strokeStyle='#ff4d4d';ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();continue;}
-  const style={no_mop_zones:['#5aa9ff','rgba(90,169,255,.25)'],carpets_added:['#a0703c','rgba(160,112,60,.35)'],carpets_ignored:['#8a8a8a','rgba(138,138,138,.15)']}[kind]||['#ff4d4d','rgba(255,77,77,.25)'];
+  const style={no_mop_zones:['#5aa9ff','rgba(90,169,255,.25)'],carpets_added:['#a0703c','rgba(160,112,60,.35)'],carpets_ignored:['#8a8a8a','rgba(138,138,138,.15)'],ramps:['#2f9e44','rgba(47,158,68,.25)']}[kind]||['#ff4d4d','rgba(255,77,77,.25)'];
   ctx.strokeStyle=style[0];ctx.fillStyle=style[1];ctx.setLineDash(kind==='carpets_ignored'?[6,4]:[]);
   ctx.fillRect(Math.min(x0,x1),Math.min(y0,y1),Math.abs(x1-x0),Math.abs(y1-y0));ctx.strokeRect(Math.min(x0,x1),Math.min(y0,y1),Math.abs(x1-x0),Math.abs(y1-y0));
  }
@@ -791,10 +841,38 @@ $('save-restrict').onclick=async()=>{
  try{
   if(['walls','no_go_zones','no_mop_zones'].some(changed))await control('local.restrictions',{map_id:view.map_id,revision:view.revision,walls:d.walls,no_go_zones:d.no_go_zones,no_mop_zones:d.no_mop_zones});
   if(carpetKinds.some(changed)){const now=await api('local.map_view');await control('local.carpets',{map_id:now.map_id,revision:now.revision,carpets_added:d.carpets_added,carpets_ignored:d.carpets_ignored});}
+  if(changed('ramps')){const now=await api('local.map_view');await control('local.thresholds',{map_id:now.map_id,revision:now.revision,passable:now.passable_thresholds||[],impassable:now.impassable_thresholds||[],ramps:d.ramps});}
   $('restrict-status').textContent='Изменения сохранены. Ожидаю обновление сохранённой карты.';for(const delay of [1500,5000,12000])setTimeout(()=>refreshMap(),delay);}
  catch(e){$('restrict-status').textContent=e.message;}
 };
 
+// ---- Types of carpets the robot found (CarpetEditTypePage): 5 medium-to-high pile, 6 low pile, 7 other.
+const carpetTypeNames={5:'Средний и высокий ворс',6:'Низкий ворс',7:'Прочее'};
+// Per-carpet handling (carpet_clean_set); -1 follows the global carpet setting.
+const carpetCleanNames=[['-1','Как для всех ковров'],['1','Объезжать'],['2','Только пылесос'],['3','Снимать швабру'],['6','Не замечать'],['7','Проезжать']];
+function renderCarpetTypes(){
+ const list=view?.carpets||[];$('carpet-types-block').hidden=!list.length;
+ $('carpet-types').replaceChildren(...list.map(c=>{
+  const row=document.createElement('label'),select=document.createElement('select');
+  row.className='module-row';row.append('Ковёр '+c.id+' ');select.dataset.carpet=c.id;
+  for(const [v,n] of Object.entries(carpetTypeNames))select.append(new Option(n,v));select.value=String(c.type??7);
+  row.append(select);
+  if(c.clean!==undefined){const mode=document.createElement('select');mode.dataset.clean=c.id;for(const [v,n] of carpetCleanNames)mode.append(new Option(n,v));mode.value=String(c.clean);row.append(mode);}
+  return row;
+ }));
+}
+$('save-carpet-types').onclick=async()=>{
+ const types={},clean={};
+ for(const s of $('carpet-types').querySelectorAll('select[data-carpet]')){const c=view.carpets.find(x=>String(x.id)===s.dataset.carpet);if(c&&String(c.type??7)!==s.value)types[c.id]=Number(s.value);}
+ for(const s of $('carpet-types').querySelectorAll('select[data-clean]')){const c=view.carpets.find(x=>String(x.id)===s.dataset.clean);if(c&&String(c.clean)!==s.value)clean[c.id]=Number(s.value);}
+ if(!Object.keys(types).length&&!Object.keys(clean).length){$('carpet-types-status').textContent='Ничего не изменено.';return;}
+ try{
+  // A new type makes the robot pick a recommended mode, so an explicit mode goes after it.
+  if(Object.keys(types).length)await control('local.carpet_types',{map_id:view.map_id,revision:view.revision,types});
+  if(Object.keys(clean).length){const now=await api('local.map_view');await control('local.carpet_clean',{map_id:now.map_id,revision:now.revision,clean});}
+  $('carpet-types-status').textContent='Ковры сохранены.'+(Object.keys(types).length&&!Object.keys(clean).length?' Робот сам подобрал способ уборки под тип.':'');for(const delay of [1500,5000])setTimeout(()=>refreshMap(),delay);}
+ catch(e){$('carpet-types-status').textContent=e.message;}
+};
 // Firmware hardware table of this model (capabilities); settings with "hw" need these values.
 let hardware=null;
 export function decodeSetting(def,values){
@@ -929,3 +1007,24 @@ $('draw-patrol').onclick=()=>{if(busy||!view||view.empty)return;patrolDrawing=tr
 $('clear-patrol').onclick=()=>{patrolDrawing=false;patrolPoints=[];$('patrol-status').textContent='';patrolButtons();draw();};
 $('go-to-point').onclick=()=>{patrolDrawing=false;command('go_to',{points:patrolPoints}).then(()=>{$('patrol-status').textContent='Робот едет к точке.';},()=>{});};
 $('start-patrol').onclick=()=>{patrolDrawing=false;command('patrol',{points:patrolPoints}).then(()=>{$('patrol-status').textContent='Патруль начат: точек '+patrolPoints.length+'.';},()=>{});};
+
+// ---- Patrol schedules (patrolschedule.go): the agent starts its patrol at these times.
+async function loadPatrolSchedules(){
+ const list=await api('local.patrol_schedules_status');
+ const rows=(list||[]).map(p=>{
+  const row=document.createElement('div'),text=document.createElement('span'),toggle=document.createElement('button'),del=document.createElement('button');
+  row.className='module-row';text.textContent=p.time+' · '+scheduleDays(p.days)+' · точек '+p.points.length+(p.enabled?'':' · выключено');
+  toggle.textContent=p.enabled?'Выключить':'Включить';toggle.className='ghost';
+  toggle.onclick=()=>control('local.patrol_schedule',{id:p.id,enabled:!p.enabled,time:p.time,days:p.days,points:p.points}).then(loadPatrolSchedules,()=>{});
+  del.textContent='Удалить';del.className='ghost';
+  del.onclick=()=>{if(window.confirm('Удалить расписание патруля на '+p.time+'?'))control('local.patrol_schedule_delete',{id:p.id}).then(loadPatrolSchedules,()=>{});};
+  row.append(text,toggle,del);return row;
+ });
+ if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:'Расписаний патруля нет.'}));
+ $('patrol-schedules').replaceChildren(...rows);
+}
+$('add-patrol-schedule').onclick=()=>{
+ if(!patrolPoints.length)return toast('Отметь точки патруля на карте',true);
+ const days=dayNames.map((_,i)=>$('patrol-days').querySelector('input[value="'+i+'"]').checked?'1':'0').join('');
+ control('local.patrol_schedule',{enabled:true,time:$('patrol-time').value,days,points:patrolPoints}).then(()=>{$('patrol-status').textContent='Расписание патруля сохранено.';loadPatrolSchedules().catch(()=>{});},()=>{});
+};

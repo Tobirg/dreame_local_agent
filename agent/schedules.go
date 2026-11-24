@@ -37,6 +37,9 @@ func parseSchedules(value any) []map[string]any {
 			"id": id, "enabled": f[1] == "1" || f[1] == "2", "invalid": f[1] == "3", "time": f[2],
 			"days": days, "repeat": f[4] != "0", "map_id": f[5], "raw": task,
 		}
+		if mop, err := strconv.ParseUint(f[7], 10, 32); err == nil && f[8] == "0" && (mop>>8)&16383 != 0 {
+			item["quick_command"] = int((mop >> 8) & 16383) // ProtocolUtil.decodeTimingMop arr[2]
+		}
 		if f[8] != "0" {
 			rooms := []int{}
 			for _, part := range strings.Split(f[8], ",") {
@@ -103,7 +106,13 @@ func (a *agent) scheduleCommand(p commandParams, did string) (string, any, error
 			mapID, modeMop, area = f[5], f[6]+"-"+f[7], f[8]
 		}
 	}
-	if len(p.Rooms) > 0 {
+	if p.QuickCommand != nil {
+		if len(p.Rooms) > 0 || *p.QuickCommand < 1 || *p.QuickCommand > 16383 {
+			return "", nil, errors.New("quick_command is an id and goes without rooms")
+		}
+		// ProtocolUtil.encodeTimingMop(0, 0, id, 0, 0); the app keeps mode 0 and area 0.
+		modeMop, area = "0-"+strconv.Itoa(*p.QuickCommand<<8), "0"
+	} else if len(p.Rooms) > 0 {
 		if len(p.Rooms) > 32 || p.Repeats < 1 || p.Repeats > 3 || p.Suction < 0 || p.Suction > 3 || p.Water < 1 || p.Water > 3 {
 			return "", nil, errors.New("rooms need repeats 1..3, suction 0..3, water 1..3")
 		}

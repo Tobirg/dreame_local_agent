@@ -17,6 +17,11 @@ import (
 type carpetShape struct {
 	ID     int   `json:"id"`
 	Points []int `json:"points"` // x, y, x, y, ... mm
+	Type   int   `json:"type"`   // 5 medium-to-high pile, 6 low pile, 7 other (CarpetEditTypePage)
+	// How the robot treats this carpet (setting.json2 carpet_clean_set): -1 the global
+	// carpet setting (4/36), 1 avoid, 2 vacuum only, 3 vacuum with the mop taken off,
+	// 6 ignore the carpet, 7 cross it. Nil when the robot keeps no row for it.
+	Clean *int `json:"clean,omitempty"`
 }
 
 const (
@@ -32,7 +37,10 @@ func (v *mapView) carpets(hasVW bool, polygons map[string][]json.RawMessage, add
 		if err != nil || len(entry) == 0 || json.Unmarshal(entry[0], &flat) != nil || len(flat) < 6 || len(flat)%2 != 0 {
 			continue
 		}
-		shape := carpetShape{ID: id, Points: make([]int, len(flat))}
+		shape := carpetShape{ID: id, Points: make([]int, len(flat)), Type: 7}
+		if len(entry) > 1 {
+			json.Unmarshal(entry[1], &shape.Type)
+		}
 		for i, f := range flat {
 			shape.Points[i] = int(math.Round(f))
 		}
@@ -103,4 +111,126 @@ func (a *agent) carpetsPatch(raw json.RawMessage) (map[string]any, error) {
 		}
 	}
 	return map[string]any{"cpt": map[string]any{"addcpt": out[0], "nocpt": out[1]}}, nil
+}
+
+// carpetTypesPatch sets the type of carpets the robot found, like CarpetEditTypePage:
+// 6/2 {"carpetmaterial": {"origincpt": [[id, type]], "addcpt": [], "roomcpt": [[room, material]]}}.
+// The app always sends every found carpet and every room, so unchanged ones go back as they are.
+// Added rectangles get types only with a firmware id (a fifth field), which the r2505 does not give.
+func (a *agent) carpetTypesPatch(raw json.RawMessage) (map[string]any, error) {
+	var request struct {
+		MapID    int            `json:"map_id"`
+		Revision string         `json:"revision"`
+		Types    map[string]int `json:"types"` // carpet id -> 5, 6 or 7
+	}
+	d := json.NewDecoder(strings.NewReader(string(raw)))
+	d.DisallowUnknownFields()
+	if d.Decode(&request) != nil || len(request.Types) == 0 {
+		return nil, errors.New("invalid carpet types edit")
+	}
+	current, err := a.mapView()
+	if err != nil {
+		return nil, err
+	}
+	if current.Empty || len(current.Carpets) == 0 {
+		return nil, errors.New("current saved map has no carpets found by the robot")
+	}
+	if request.MapID != current.MapID || request.Revision == "" || request.Revision != current.Revision {
+		return nil, errors.New("map changed; refresh before editing carpets")
+	}
+	known := map[string]bool{}
+	origin := make([][]int, 0, len(current.Carpets))
+	for _, c := range current.Carpets {
+		id := strconv.Itoa(c.ID)
+		known[id] = true
+		t, ok := request.Types[id]
+		if !ok {
+			t = c.Type
+		}
+		origin = append(origin, []int{c.ID, t})
+	}
+	for id, t := range request.Types {
+		if !known[id] || t < 5 || t > 7 {
+			return nil, errors.New("carpet " + id + ": unknown carpet or type not 5..7")
+		}
+	}
+	rooms := [][]int{}
+	for _, r := range current.Rooms {
+		if r.material != nil {
+			rooms = append(rooms, []int{r.ID, *r.material})
+		}
+	}
+	return map[string]any{"carpetmaterial": map[string]any{"origincpt": origin, "addcpt": [][]int{}, "roomcpt": rooms}}, nil
+}
+
+// carpetCleanSets reads setting.json2 carpet_clean_set[map] = [[0, carpet id, mode], ...]
+// (0 = a carpet the robot found). Checked on r2505: the app's SingleCarpetSetPageV3 writes
+// 6/2 {"carpetcleanset": [[0, id, mode]]} and the robot updates that row; choosing a carpet
+// type also sets the recommended mode (low pile -> 3), and setting the type back does not undo it.
+func (a *agent) carpetCleanSets(mapID int) map[int]int {
+	b, err := readLimited(a.path(roomSettingsFile), 1<<20)
+	if err != nil {
+		return nil
+	}
+	var file struct {
+		Sets map[string][][]int `json:"carpet_clean_set"`
+	}
+	if json.Unmarshal(b, &file) != nil {
+		return nil
+	}
+	out := map[int]int{}
+	for _, row := range file.Sets[strconv.Itoa(mapID)] {
+		if len(row) >= 3 && row[0] == 0 {
+			out[row[1]] = row[2]
+		}
+	}
+	return out
+}
+
+func (v *mapView) attachCarpetClean(sets map[int]int) {
+	for i := range v.Carpets {
+		if mode, ok := sets[v.Carpets[i].ID]; ok {
+			v.Carpets[i].Clean = &mode
+		}
+	}
+}
+
+var carpetCleanModes = map[int]bool{-1: true, 1: true, 2: true, 3: true, 6: true, 7: true}
+
+func (a *agent) carpetCleanPatch(raw json.RawMessage) (map[string]any, error) {
+	var request struct {
+		MapID    int            `json:"map_id"`
+		Revision string         `json:"revision"`
+		Clean    map[string]int `json:"clean"` // carpet id -> mode
+	}
+	d := json.NewDecoder(strings.NewReader(string(raw)))
+	d.DisallowUnknownFields()
+	if d.Decode(&request) != nil || len(request.Clean) == 0 {
+		return nil, errors.New("invalid carpet clean edit")
+	}
+	current, err := a.mapView()
+	if err != nil {
+		return nil, err
+	}
+	if request.MapID != current.MapID || request.Revision == "" || request.Revision != current.Revision {
+		return nil, errors.New("map changed; refresh before editing carpets")
+	}
+	rows := [][]int{}
+	for _, c := range current.Carpets {
+		mode, ok := request.Clean[strconv.Itoa(c.ID)]
+		if !ok {
+			continue
+		}
+		if c.Clean == nil {
+			return nil, errors.New("the robot keeps no clean setting for carpet " + strconv.Itoa(c.ID))
+		}
+		if !carpetCleanModes[mode] {
+			return nil, errors.New("carpet clean mode must be -1, 1, 2, 3, 6 or 7")
+		}
+		rows = append(rows, []int{0, c.ID, mode})
+	}
+	if len(rows) != len(request.Clean) {
+		return nil, errors.New("unknown carpet id")
+	}
+	return map[string]any{"carpetcleanset": rows}, nil
 }

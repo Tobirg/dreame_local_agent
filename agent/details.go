@@ -33,7 +33,7 @@ var consumables = []consumable{
 // detailProps lists every property the slow read asks for.
 func detailProps() []stateProp {
 	props := []stateProp{
-		{"dnd.enabled", 5, 1}, {"dnd.start", 5, 2}, {"dnd.end", 5, 3}, {"schedules", 8, 2},
+		{"dnd.enabled", 5, 1}, {"dnd.start", 5, 2}, {"dnd.end", 5, 3}, {"dnd_periods", 5, 4}, {"schedules", 8, 2}, {"quick_commands", 4, 48},
 		{"stats.minutes", 12, 2}, {"stats.cleanings", 12, 3}, {"stats.area", 12, 4},
 	}
 	for _, c := range consumables {
@@ -75,6 +75,12 @@ func parseDetails(result any) map[string]any {
 	details := map[string]any{}
 	if dnd := group(map[string][2]int{"enabled": {5, 1}, "start": {5, 2}, "end": {5, 3}}); dnd != nil {
 		details["dnd"] = dnd
+	}
+	if v, ok := got[[2]int{5, 4}]; ok {
+		details["dnd_periods"] = parseDNDPeriods(v)
+	}
+	if v, ok := got[[2]int{4, 48}]; ok {
+		details["quick_commands"] = parseQuickCommands(v)
 	}
 	if v, ok := got[[2]int{8, 2}]; ok {
 		details["schedules"] = parseSchedules(v)
@@ -161,6 +167,10 @@ func (a *agent) detailCommand(p commandParams, did string) (string, any, error) 
 		return "action", map[string]any{"did": did, "siid": 4, "aiid": 1, "in": []any{map[string]any{"piid": 1, "value": 23}, map[string]any{"piid": 10, "value": string(value)}}}, nil
 	case "set_schedule", "delete_schedule":
 		return a.scheduleCommand(p, did)
+	case "save_quick_command", "delete_quick_command":
+		return a.quickCommandCommand(p, did)
+	case "set_dnd_period", "delete_dnd_period":
+		return a.dndPeriodCommand(p, did)
 	case "clean_spot":
 		in, err := a.spotInput(p)
 		if err != nil {

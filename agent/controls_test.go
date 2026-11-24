@@ -187,3 +187,26 @@ func encodeTestFrame(t *testing.T, raw []byte) string {
 	}
 	return base64.StdEncoding.EncodeToString(packed.Bytes())
 }
+
+func TestThresholdRamps(t *testing.T) {
+	a := testAgent(t)
+	view := thresholdFixture(t, a)
+	if len(view.Ramps) != 1 || len(view.Ramps[0]) != 4 {
+		t.Fatalf("%v", view.Ramps)
+	}
+	g := view.GridSize
+	ramp := []int{view.Origin[0], view.Origin[1], view.Origin[0] + 2*g, view.Origin[1] + 3*g}
+	input, _ := json.Marshal(map[string]any{"map_id": 2, "revision": view.Revision, "passable": [][]int{}, "impassable": [][]int{}, "ramps": [][]int{ramp}})
+	patch, err := a.thresholdPatch(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := json.Marshal(patch["vws"].(map[string]any)["ramp"])
+	if want, _ := json.Marshal([][]int{append(ramp, 0)}); string(got) != string(want) {
+		t.Fatal(string(got))
+	}
+	input, _ = json.Marshal(map[string]any{"map_id": 2, "revision": view.Revision, "passable": [][]int{}, "impassable": [][]int{}, "ramps": [][]int{{ramp[0], ramp[1], ramp[0] + g, ramp[3]}}})
+	if _, err := a.thresholdPatch(input); err == nil {
+		t.Fatal("a one-cell ramp must fail")
+	}
+}

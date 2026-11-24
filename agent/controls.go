@@ -108,6 +108,8 @@ func (a *agent) thresholdPatch(raw json.RawMessage) (map[string]any, error) {
 		Revision   string  `json:"revision"`
 		Passable   [][]int `json:"passable"`
 		Impassable [][]int `json:"impassable"`
+		// Optional: ramps as rectangles [x0, y0, x1, y1] (SillAndRampPage); omitted keeps them.
+		Ramps *[][]int `json:"ramps"`
 	}
 	d := json.NewDecoder(strings.NewReader(string(raw)))
 	d.DisallowUnknownFields()
@@ -144,13 +146,34 @@ func (a *agent) thresholdPatch(raw json.RawMessage) (map[string]any, error) {
 			}
 		}
 	}
-	// Preserve ramps, cliffs and unknown firmware fields. Only the two line lists change.
+	var ramps []any
+	if request.Ramps != nil {
+		if len(*request.Ramps) > 20 {
+			return nil, errors.New("at most 20 ramps")
+		}
+		for _, r := range *request.Ramps {
+			if len(r) != 4 || r[2]-r[0] < 2*current.GridSize || r[3]-r[1] < 2*current.GridSize {
+				return nil, errors.New("ramp requires [x0, y0, x1, y1] with x0 < x1, y0 < y1 and two cells or more")
+			}
+			if r[0] < current.Origin[0] || r[1] < current.Origin[1] || r[2] > current.Origin[0]+current.Width*current.GridSize || r[3] > current.Origin[1]+current.Height*current.GridSize {
+				return nil, errors.New("ramp coordinates are outside the map")
+			}
+			ramps = append(ramps, []int{r[0], r[1], r[2], r[3], 0}) // the app always adds a fifth 0
+		}
+	}
+	// Preserve cliffs and unknown firmware fields; ramps change only when sent.
 	vws := map[string]any{}
 	for key, value := range current.VWS {
 		vws[key] = value
 	}
 	vws["vwsl"] = request.Passable
 	vws["npthrsd"] = request.Impassable
+	if request.Ramps != nil {
+		if ramps == nil {
+			ramps = []any{}
+		}
+		vws["ramp"] = ramps
+	}
 	return map[string]any{"mapid": current.MapID, "vws": vws}, nil
 }
 

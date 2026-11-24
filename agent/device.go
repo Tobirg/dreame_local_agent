@@ -36,6 +36,9 @@ var stateProps = []stateProp{
 	{"cleaning_time", 4, 2}, {"cleaned_area", 4, 3},
 	// Bit mask the robot reports about itself (app plugin SUPPORT_CAPABILITY); r2505 answers 31.
 	{"device_capability", 4, 83},
+	// Station jobs started by 4/4 (app VacuumExtend.startBackflush): robot tank draining
+	// (1 running, 2 done) and station water draining (1 running).
+	{"tank_drain", 4, 60}, {"water_drain", 27, 5},
 }
 
 // deviceCapabilityBits names the 4/83 bits as the app plugin does.
@@ -418,28 +421,38 @@ func present(v any) bool            { return v != "N" && v != "False" && v != "n
 
 // Action IDs as used by ui/app.js.
 var commandTable = map[string]command{
-	"start":       {method: "action", siid: 2, id: 1},
-	"pause":       {method: "action", siid: 2, id: 2},
-	"stop":        {method: "action", siid: 4, id: 2},
-	"dock":        {method: "action", siid: 3, id: 1},
-	"locate":      {method: "action", siid: 7, id: 1},
-	"mapping":     {method: "action", siid: 4, id: 1, in: []any{map[string]any{"piid": 1, "value": 21}}},
-	"empty":       {method: "action", siid: 15, id: 1, hwKey: "AUTO_DUST_COLLECTION", hwAccepts: is("True")},
-	"wash_mop":    {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "2,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present},
-	"dry_start":   {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,1"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True")},
-	"dry_stop":    {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,0"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True")},
-	"set_suction": {method: "set_properties", siid: 4, id: 4, min: 0, max: 3},
-	"set_volume":  {method: "set_properties", siid: 7, id: 1, min: 0, max: 100},
-	"clean_rooms": {method: "action", siid: 4, id: 1, clearRooms: true},
+	"start":     {method: "action", siid: 2, id: 1},
+	"pause":     {method: "action", siid: 2, id: 2},
+	"stop":      {method: "action", siid: 4, id: 2},
+	"dock":      {method: "action", siid: 3, id: 1},
+	"locate":    {method: "action", siid: 7, id: 1},
+	"mapping":   {method: "action", siid: 4, id: 1, in: []any{map[string]any{"piid": 1, "value": 21}}},
+	"empty":     {method: "action", siid: 15, id: 1, hwKey: "AUTO_DUST_COLLECTION", hwAccepts: is("True")},
+	"wash_mop":  {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "2,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present},
+	"dry_start": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,1"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True")},
+	"dry_stop":  {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "3,0"}}, hwKey: "HOT_AIR_DRYING_AC_PTC", hwAccepts: is("True")},
+	// More 4/4 jobs from the app: 7 robot water tank draining (4/60: 1 running, 2 done, about
+	// 3.5 min on the r2505), 9 station water draining (27/5 = 1 for about 25 s). 5, the
+	// washboard self-clean, is accepted by the r2505 but does nothing, so it is left out;
+	// 1, 4, 8, 10, 13 and 14 are pause/resume steps, a demo and parts the X50 lacks.
+	"tank_drain":    {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "7,1"}}, hwKey: "DOCK_TYPE", hwAccepts: present},
+	"station_drain": {method: "action", siid: 4, id: 4, in: []any{map[string]any{"piid": 10, "value": "9,1"}}, hwKey: "AUTO_WATER_SUPPLY_DRAINAGE", hwAccepts: is("True")},
+	"set_suction":   {method: "set_properties", siid: 4, id: 4, min: 0, max: 3},
+	"set_volume":    {method: "set_properties", siid: 7, id: 1, min: 0, max: 100},
+	"clean_rooms":   {method: "action", siid: 4, id: 1, clearRooms: true},
 	// Built by detailCommand in details.go.
-	"clean_zone":       {detail: true},
-	"clean_spot":       {detail: true},
-	"reset_consumable": {detail: true},
-	"set_dnd":          {detail: true},
-	"remote_move":      {detail: true},
-	"set_schedule":     {detail: true},
-	"delete_schedule":  {detail: true},
-	"go_to":            {detail: true},
+	"clean_zone":           {detail: true},
+	"clean_spot":           {detail: true},
+	"reset_consumable":     {detail: true},
+	"set_dnd":              {detail: true},
+	"remote_move":          {detail: true},
+	"set_schedule":         {detail: true},
+	"delete_schedule":      {detail: true},
+	"go_to":                {detail: true},
+	"set_dnd_period":       {detail: true},
+	"delete_dnd_period":    {detail: true},
+	"save_quick_command":   {detail: true},
+	"delete_quick_command": {detail: true},
 }
 
 type commandParams struct {
@@ -462,6 +475,9 @@ type commandParams struct {
 	ID         *int    `json:"id"`       // set_schedule (omit to add), delete_schedule
 	Time       string  `json:"time"`     // set_schedule: HH:MM
 	Days       string  `json:"days"`     // set_schedule: seven 0/1 digits from Sunday
+	Label      string  `json:"label"`    // save_quick_command: its name
+	// set_schedule: run this quick command instead of rooms or the whole map.
+	QuickCommand *int `json:"quick_command"`
 }
 
 // runCommand is reached through call(), so it already holds the IPC gate and passed identity checks.
@@ -475,7 +491,7 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 	switch p.Name {
 	case "patrol":
 		return a.startPatrol(p, info["did"])
-	case "locate", "set_volume", "set_suction", "set_setting", "reset_consumable", "set_dnd", "set_schedule", "delete_schedule":
+	case "locate", "set_volume", "set_suction", "set_setting", "reset_consumable", "set_dnd", "set_dnd_period", "delete_dnd_period", "save_quick_command", "delete_quick_command", "set_schedule", "delete_schedule":
 	default:
 		stopPatrol() // the owner took over
 	}

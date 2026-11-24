@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -36,5 +38,54 @@ func TestCarpets(t *testing.T) {
 	}
 	if _, err := edit(nil, [][]int{}); err == nil {
 		t.Fatal("missing list accepted")
+	}
+}
+
+func TestCarpetTypes(t *testing.T) {
+	a := testAgent(t)
+	view := restrictionsFixture(t, a, `{"addcpt":[]},"carpet_polygon":{"3":[[-100,-200,0,-200,0,-100],7],"4":[[-100,-200,0,-200,0,-100],6]}`)
+	if len(view.Carpets) != 2 || view.Carpets[0].Type != 7 || view.Carpets[1].Type != 6 {
+		t.Fatalf("%+v", view.Carpets)
+	}
+	edit := func(types map[string]int) (map[string]any, error) {
+		raw, _ := json.Marshal(map[string]any{"map_id": view.MapID, "revision": view.Revision, "types": types})
+		return a.carpetTypesPatch(raw)
+	}
+	got, err := edit(map[string]int{"3": 5})
+	if b, _ := json.Marshal(got); err != nil || string(b) != `{"carpetmaterial":{"addcpt":[],"origincpt":[[3,5],[4,6]],"roomcpt":[]}}` {
+		t.Fatal(string(b), err)
+	}
+	for _, bad := range []map[string]int{{"9": 5}, {"3": 4}, {}} {
+		if _, err := edit(bad); err == nil {
+			t.Fatal("accepted", bad)
+		}
+	}
+}
+
+func TestCarpetClean(t *testing.T) {
+	a := testAgent(t)
+	restrictionsFixture(t, a, `{"addcpt":[]},"carpet_polygon":{"2":[[-100,-200,0,-200,0,-100],7],"3":[[-100,-200,0,-200,0,-100],7]}`)
+	if err := os.MkdirAll(filepath.Dir(a.path(roomSettingsFile)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(a.path(roomSettingsFile), []byte(`{"clean_sets":{},"carpet_clean_set":{"2":[[0,1,-1],[0,2,3]]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	view, err := a.mapView()
+	if err != nil || view.Carpets[0].Clean == nil || *view.Carpets[0].Clean != 3 || view.Carpets[1].Clean != nil {
+		t.Fatalf("%+v %v", view.Carpets, err)
+	}
+	edit := func(clean map[string]int) (map[string]any, error) {
+		raw, _ := json.Marshal(map[string]any{"map_id": view.MapID, "revision": view.Revision, "clean": clean})
+		return a.carpetCleanPatch(raw)
+	}
+	got, err := edit(map[string]int{"2": -1})
+	if b, _ := json.Marshal(got); err != nil || string(b) != `{"carpetcleanset":[[0,2,-1]]}` {
+		t.Fatal(string(b), err)
+	}
+	for _, bad := range []map[string]int{{"2": 4}, {"3": 1}, {"9": 1}} {
+		if _, err := edit(bad); err == nil {
+			t.Fatal("accepted", bad)
+		}
 	}
 }
