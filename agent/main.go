@@ -526,7 +526,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		send(200, map[string]any{"result": result})
 		return
 	}
-	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.tokenRoutes(w, r, send) || a.voiceRoutes(w, r, send) || a.logRoutes(r, send) {
+	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.firmwareRoutes(w, r, send) || a.tokenRoutes(w, r, send) || a.voiceRoutes(w, r, send) || a.logRoutes(r, send) {
 		return
 	}
 	switch r.URL.Path {
@@ -810,6 +810,7 @@ func main() {
 	a.modules.slots = make(chan struct{}, 4)
 	a.modules.ctx = portalContext
 	a.startServices()
+	a.applyFirmwareBlock()
 	go a.runPoller(portalContext, 5*time.Second)
 	go a.runPatrolSchedules(portalContext)
 	signals := make(chan os.Signal, 1)

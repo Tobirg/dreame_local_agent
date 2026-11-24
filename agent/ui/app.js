@@ -25,7 +25,7 @@ export function roomCommand(ids,fan,water,repeats=1){
 }
 const command=(name,args={})=>control('/api/v1/command',{name,...args});
 function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
-function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.live_pose'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update'||method==='/api/v1/logs';}
+function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.live_pose'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update'||method==='/api/v1/system/firmware'||method==='/api/v1/logs';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
 async function api(method,params=null){
  const read=isRead(method),requestID=read?null:Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
@@ -93,7 +93,10 @@ function renderUpdate(u){
  $('update-status').textContent='Установлена версия '+u.current+(u.last?' · последнее обновление: '+describeUpdate(u.last):'');
  $('rollback-update').hidden=!u.previous||u.applying;if(u.previous)$('rollback-update').textContent='Вернуть версию '+u.previous;
 }
-async function loadUpdate(){renderUpdate(await api('/api/v1/system/update'));}
+async function loadUpdate(){renderUpdate(await api('/api/v1/system/update'));await loadFirmware().catch(()=>{});}
+function renderFirmware(f){$('firmware-updates').checked=f.enabled;$('firmware-status').textContent=f.enabled?'Обновления прошивки разрешены. Штатное обновление сбросит рут, сервис и защиту региона.':'Обновления прошивки выключены — агент обезвредил загрузчик, установка ничего не затрёт.';}
+async function loadFirmware(){renderFirmware(await api('/api/v1/system/firmware'));}
+$('firmware-updates').onchange=async()=>{if(busy)return;busy=true;disableControls(true);try{renderFirmware(await api('/api/v1/system/firmware',{enabled:$('firmware-updates').checked}));}catch(e){toast(e.message,true);await loadFirmware().catch(()=>{});}finally{busy=false;disableControls(false);}};
 async function runUpdate(source,label){
  if(busy)return;busy=true;disableControls(true);
  try{
