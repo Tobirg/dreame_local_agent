@@ -150,14 +150,15 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 			}
 		}
 		x, y := i%view.Width, view.Height-1-i/view.Width // map rows go up, image rows go down
+		k, dim := kind[id], scale(c, 84)
 		for dy := 0; dy < ms; dy++ {
 			for dx := 0; dx < ms; dx++ {
-				X, Y, k := x*ms+dx, y*ms+dy, kind[id]
+				X, Y := x*ms+dx, y*ms+dy
 				px3, py3 := X/f, Y/f // the pattern is laid out for 3 pixels per cell and stretched
 				edge := k == 2 && (px3%36 == 0 || py3%36 == 0) || k == 4 && (py3%12 == 0 || (px3+(py3/12&1)*24)%48 == 0) || k == 3 && (px3%12 == 0 || (py3+(px3/12&1)*24)%48 == 0)
 				cc := c
 				if edge && id != 255 {
-					cc = scale(c, 84)
+					cc = dim
 				}
 				img.SetRGBA(X+pad, Y+pad, cc)
 			}
@@ -265,7 +266,7 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 
 func encodePNG(img image.Image) ([]byte, error) {
 	var out bytes.Buffer
-	if err := png.Encode(&out, img); err != nil {
+	if err := (&png.Encoder{CompressionLevel: png.BestSpeed}).Encode(&out, img); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
