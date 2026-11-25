@@ -333,7 +333,8 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 /* ---- Zone mode and the map editors as in the app: «Добавить» and «Циклы» at the right of the map; an editor takes
    the screen with ← and ✓ at the top and its tools where the cleaning buttons were. */
 .map-actions{position:absolute;right:8px;bottom:60px;display:flex;flex-direction:column;gap:8px;align-items:center}
-.map-actions .act{display:none;flex-direction:column;align-items:center;gap:3px;margin:0;font-weight:400}
+.map-actions .act{display:none;flex-direction:column;align-items:center;gap:3px;margin:0;font-weight:400;width:60px}
+.map-actions .act small{text-align:center;line-height:1.15}
 .map-actions small{font-size:12px;color:var(--ink)}
 .map-actions .tool{font-family:var(--display);font-stretch:condensed;font-size:22px;font-weight:600}
 body[data-mode=zone] .add-zone,body[data-mode=zone] .cycles,body[data-mode=room] .cycles{display:flex}
@@ -357,3 +358,6 @@ body[data-edit=restrict] [data-tool=restrict],body[data-edit=carpet] [data-tool=
 body[data-mode=room][data-selected] .clear-sel{display:flex}
 .volume-row{align-items:end;margin:8px 0 12px}
 .volume-row label{flex:1}
+
+.tune-card{display:flex;flex-direction:column;gap:10px}.tune-card .room-options,#tune-settings{display:contents}#tune-settings .setting-group{display:contents}.tune-card [data-setting=cleaning_mode]{order:-1}
+.setting-row input[type=range]{width:100%;accent-color:var(--accent,#3b82f6)}
