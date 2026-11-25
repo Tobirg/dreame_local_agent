@@ -15,6 +15,7 @@ var (
 	roomPalette = []color.RGBA{{0x7f, 0xd9, 0xc2, 255}, {0xa3, 0xbc, 0xec, 255}, {0xe5, 0xbd, 0x8a, 255}, {0xbc, 0xac, 0xeb, 255},
 		{0xa7, 0xd3, 0x9a, 255}, {0xe3, 0xa5, 0xb4, 255}, {0x93, 0xcd, 0xd9, 255}, {0xd4, 0xd0, 0x93, 255}}
 	wallColour     = color.RGBA{0xd1, 0xd9, 0xe2, 255}
+	borderColour   = color.RGBA{0x7f, 0x8b, 0x98, 255} // room outline, as the Dreame app's floor plan
 	pathColour     = color.RGBA{0xff, 0xff, 0xff, 200}
 	robotColour    = color.RGBA{0x4d, 0xa3, 0xff, 255}
 	chargerColour  = color.RGBA{0x55, 0xf2, 0xaa, 255}
@@ -61,6 +62,33 @@ func (a *agent) mapPNG() ([]byte, error) {
 		for dy := 0; dy < mapScale; dy++ {
 			for dx := 0; dx < mapScale; dx++ {
 				img.SetRGBA(x*mapScale+dx, y*mapScale+dy, c)
+			}
+		}
+	}
+	// Outer border of the rooms as in the web UI: cell sides facing outside or a wall, 2 px inside the cell.
+	outside := func(x, y int) bool {
+		return x < 0 || y < 0 || x >= view.Width || y >= view.Height || view.Pixels[y*view.Width+x] == 0 || view.Pixels[y*view.Width+x] == 255
+	}
+	for i, id := range view.Pixels {
+		if id == 0 || id == 255 {
+			continue
+		}
+		x, y := i%view.Width, i/view.Width
+		x0, y0 := x*mapScale, (view.Height-1-y)*mapScale
+		for k := 0; k < mapScale; k++ {
+			for t := 0; t < 2; t++ {
+				if outside(x-1, y) {
+					img.SetRGBA(x0+t, y0+k, borderColour)
+				}
+				if outside(x+1, y) {
+					img.SetRGBA(x0+mapScale-1-t, y0+k, borderColour)
+				}
+				if outside(x, y+1) {
+					img.SetRGBA(x0+k, y0+t, borderColour)
+				}
+				if outside(x, y-1) {
+					img.SetRGBA(x0+k, y0+mapScale-1-t, borderColour)
+				}
 			}
 		}
 	}

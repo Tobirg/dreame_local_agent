@@ -527,6 +527,15 @@ function baseLayer(){
   const edge=f===2?X%36===0||Y%36===0:f===4?Y%12===0||(X+(Y/12&1)*24)%48===0:f===3?X%12===0||(Y+(X/12&1)*24)%48===0:false;
   const c=edge?line[id]:fill[id],j=(Y*W+X)*4;d[j]=c[0];d[j+1]=c[1];d[j+2]=c[2];d[j+3]=255;
  }}
+ // Outer border of the rooms, like the app's floor plan (#7F8B98): cell sides facing outside or a wall; 2 px inside the cell.
+ const out_=(x,y)=>x<0||y<0||x>=w||y>=h||!grid[y*w+x]||grid[y*w+x]===255,paint=(X,Y)=>{const j=(Y*W+X)*4;d[j]=0x7f;d[j+1]=0x8b;d[j+2]=0x98;d[j+3]=255;};
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){const id=grid[y*w+x];if(!id||id===255)continue;const X0=x*s,Y0=(h-1-y)*s;
+  for(let k=0;k<s;k++){
+   if(out_(x-1,y))for(let t=0;t<2;t++)paint(X0+t,Y0+k);
+   if(out_(x+1,y))for(let t=0;t<2;t++)paint(X0+s-1-t,Y0+k);
+   if(out_(x,y+1))for(let t=0;t<2;t++)paint(X0+k,Y0+t);
+   if(out_(x,y-1))for(let t=0;t<2;t++)paint(X0+k,Y0+s-1-t);
+  }}
  bc.putImageData(img,0,0);baseCache={key,canvas:out};return out;
 }
 function draw(){

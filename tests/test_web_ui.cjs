@@ -98,7 +98,7 @@ const server=http.createServer((req,res)=>{
   assert.equal(await page.locator('#battery').innerText(),'95%');
   assert.match(await page.locator('#obstacles').textContent(),/Препятствия от .*: носок ×2, неизвестное препятствие/);
   await page.locator('#logs-panel').waitFor({state:'visible'});await page.locator('#logs-details').evaluate(d=>d.open=true);await page.locator('#log-source').selectOption('mqtt');assert.equal(await page.locator('#log-text').textContent(),'connected to broker');
-  const openFolds=()=>page.evaluate(()=>document.querySelectorAll('#voice-panel>details,#tokens-panel>details,#update-panel>details').forEach(d=>d.open=true));
+  const openFolds=()=>page.evaluate(()=>document.querySelectorAll('#voice-panel>details,#tokens-panel>details,#update-panel>details,#history-details').forEach(d=>d.open=true));
   await openFolds();
   await page.locator('#voice-panel').waitFor({state:'visible'});assert.match(await page.locator('#voice').innerText(),/голосом ZH[^]*RU загружен/);
   await page.locator('#voice details >> nth=1').evaluate(d=>d.open=true);await page.locator('#voice [data-hear="45"]').waitFor();assert.match(await page.locator('#voice [data-r=phrases]').innerText(),/45 I am here\.[^]*700 —/);

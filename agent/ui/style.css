@@ -1,8 +1,8 @@
-/* Appliance panel: matte mineral page like the dock's plastic, the map as the robot's dark display in both themes. */
+/* Appliance panel: matte mineral page like the dock's plastic; the map background follows the theme. */
 :root{
  --paper:#E7EBE7;--surface:#F6F8F5;--ink:#1C2528;--muted:#5D6A6C;--line:#CBD2CC;
  --go:#1D6E53;--go-ink:#FFFFFF;--go-soft:#D3E6DC;--warn:#A8402E;--warn-soft:#F3DCD5;--amber:#9A5B12;
- --screen:#141C21;--screen-ink:#B7C6C3;
+ --screen:#141C21;--screen-ink:#B7C6C3;--map-bg:#DCE3DE;--map-dot:#C3CCC6;
  --display:Bahnschrift,"DIN Alternate","DIN Next","Roboto Condensed","Arial Narrow",sans-serif;
  --body:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
  font:16px/1.5 var(--body);color:var(--ink);background:var(--paper);font-synthesis:none;
@@ -10,7 +10,7 @@
 @media (prefers-color-scheme:dark){:root{
  --paper:#141A1C;--surface:#1C2427;--ink:#E3E9E5;--muted:#94A3A0;--line:#2D383B;
  --go:#62CFA2;--go-ink:#0E2A1F;--go-soft:#1E3A30;--warn:#FF9B86;--warn-soft:#3D2522;--amber:#F0B768;
- --screen:#0D1316;
+ --screen:#0D1316;--map-bg:#0D1316;--map-dot:#26343c;
 }}
 *{box-sizing:border-box}
 body{margin:0;background:var(--paper)}
@@ -92,7 +92,7 @@ details button{margin:0 6px 6px 0}
 .side select+button,.side label+button{margin-top:2px}
 
 .map-stage{overflow:auto;max-height:64vh;min-height:160px;margin-top:12px;border-radius:10px;
- background:radial-gradient(#26343c 1px,transparent 1px) 0 0/16px 16px var(--screen)}
+ background:radial-gradient(var(--map-dot) 1px,transparent 1px) 0 0/16px 16px var(--map-bg)}
 canvas{display:block;width:100%;height:auto;touch-action:manipulation}
 .room-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
 .room-list button{display:inline-flex;align-items:center;gap:8px;padding:7px 12px 7px 9px;border-radius:999px;font-size:13px}
