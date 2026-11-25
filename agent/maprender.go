@@ -151,8 +151,29 @@ func (a *agent) mapCard() (map[string]any, error) {
 // roomOutline is the longest boundary loop of the room's cells, as cell-corner coordinates
 // with straight runs merged. shortcut: holes and separate pieces of a room are left out.
 func roomOutline(view mapView, id int) [][2]int {
+	at := func(x, y int) int {
+		if x < 0 || y < 0 || x >= view.Width || y >= view.Height {
+			return 0
+		}
+		return int(view.Pixels[y*view.Width+x])
+	}
+	// The room and the border cells touching it: the outline follows the outer edge of the wall ring that the
+	// picture shows, so the card's selection border lies on the picture's.
 	in := func(x, y int) bool {
-		return x >= 0 && y >= 0 && x < view.Width && y < view.Height && int(view.Pixels[y*view.Width+x]) == id
+		if at(x, y) == id {
+			return true
+		}
+		if at(x, y) != 255 {
+			return false
+		}
+		for dy := -1; dy <= 1; dy++ {
+			for dx := -1; dx <= 1; dx++ {
+				if at(x+dx, y+dy) == id {
+					return true
+				}
+			}
+		}
+		return false
 	}
 	next := map[[2]int][][2]int{} // boundary edges, counter-clockwise around the room
 	edge := func(a, b [2]int) { next[a] = append(next[a], b) }
