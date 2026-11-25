@@ -1040,7 +1040,7 @@ $('place-furniture').onclick=()=>{
  furnitureDraft={index:null,type,x:0,y:0,width:w,height:h,rotation:0};setFurniture({...g,w:mm(w),h:mm(h)});furnitureStatus('Предмет поставлен в центр карты. Двигай его, поворачивай за ↻, размер — за ↘, затем «Сохранить».');draw();
 };
 $('furniture-type').onchange=()=>{if(!furnitureDraft)return;const type=Number($('furniture-type').value),[,w,h]=furnitureTypes[type];furnitureDraft={...furnitureDraft,type,...(furnitureDraft.index==null?{width:w,height:h}:{})};draw();};
-$('save-furniture').onclick=()=>{const d=furnitureDraft;if(!d)return;furnitureDraft=null;saveFurniture({remove:d.index==null?[]:[d.index],add:[{type:d.type,x:d.x,y:d.y,width:d.width,height:d.height,rotation:d.rotation}]});};
+$('save-furniture').onclick=async()=>{const d=furnitureDraft;if(!d)return;furnitureDraft=null;if(!await saveFurniture({remove:d.index==null?[]:[d.index],add:[{type:d.type,x:d.x,y:d.y,width:d.width,height:d.height,rotation:d.rotation}]})){furnitureDraft=d;draw();}};
 $('cancel-furniture').onclick=()=>{furnitureDraft=null;furnitureStatus('Изменение отменено.');draw();};
 // ---- Map backups (mapbackup.go): loaded when the block is opened.
 const restoreStates={0:'',1:'восстанавливается…',3:'восстановлена'};
