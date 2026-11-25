@@ -163,12 +163,19 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 .map-wrap{position:relative}
 .map-marker{position:absolute;width:0;height:0;pointer-events:none}
 .map-marker::before,.map-marker::after{position:absolute;left:0;top:0;transform:translate(-50%,-50%)}
-.map-marker.pulse::before{content:"";width:34px;height:34px;border-radius:50%;border:2px solid #4da3ff;animation:marker-pulse 1.6s ease-out infinite}
-.map-marker.sleep::after{content:"z z";font:700 11px var(--body);color:#cfe0ea;left:14px;top:-14px;animation:marker-float 2.4s ease-in-out infinite}
-.map-marker.heat::after{content:"♨";font-size:15px;color:#ff9a62;left:0;top:-18px;animation:marker-float 1.8s ease-in-out infinite}
-.map-marker.wash::after{content:"💧";font-size:12px;left:0;top:-18px;animation:marker-float 1.4s ease-in-out infinite}
-.map-marker.charge::before{content:"";width:26px;height:26px;border-radius:50%;border:2px solid #2fbf71;animation:marker-pulse 2s ease-out infinite}
+.map-marker.pulse::before{content:"";width:calc(var(--r,8px)*4);height:calc(var(--r,8px)*4);border-radius:50%;border:2px solid #4da3ff;animation:marker-pulse 1.6s ease-out infinite}
+/* Sleep as in the app (RobotAnimView): two "z" leave the robot's top right edge to the upper right and fade, the second smaller and later. */
+.map-marker.sleep::before,.map-marker.sleep::after{content:"z";font:700 10px/1 var(--body);color:#c8d2d9;left:var(--r,8px);top:calc(var(--r,8px)*-1);opacity:0}
+.map-marker.sleep::before{animation:sleep-top 4.2s linear infinite}
+.map-marker.sleep::after{top:calc(var(--r,8px)*-1 + 2px);animation:sleep-bot 4.2s linear infinite}
+.map-marker.heat::after{content:"♨";font-size:15px;color:#ff9a62;left:0;top:calc(var(--r,8px)*-2.2);animation:marker-float 1.8s ease-in-out infinite}
+.map-marker.wash::after{content:"💧";font-size:12px;left:0;top:calc(var(--r,8px)*-2.2);animation:marker-float 1.4s ease-in-out infinite}
+/* Charging as in the app: a green glow 1.5 times the robot breathing around it. */
+.map-marker.charge::before{content:"";width:calc(var(--r,8px)*3);height:calc(var(--r,8px)*3);border-radius:50%;background:radial-gradient(circle,rgba(94,219,114,0) 58%,rgba(94,219,114,.8) 68%,rgba(94,219,114,0) 100%);animation:marker-glow 2s ease-in-out infinite}
 @keyframes marker-pulse{from{transform:translate(-50%,-50%) scale(.5);opacity:.9}to{transform:translate(-50%,-50%) scale(1.4);opacity:0}}
 @keyframes marker-float{0%,100%{transform:translate(-50%,-50%);opacity:.5}50%{transform:translate(-50%,-90%);opacity:1}}
-@media (prefers-reduced-motion:reduce){.map-marker::before,.map-marker::after{animation:none}}
+@keyframes marker-glow{0%,100%{transform:translate(-50%,-50%) scale(.85);opacity:.35}50%{transform:translate(-50%,-50%) scale(1);opacity:1}}
+@keyframes sleep-top{0%{transform:translate(-50%,-50%) scale(0);opacity:0}6%{transform:translate(calc(-50% + 2.3px),calc(-50% - 2.3px)) scale(1);opacity:1}46%{opacity:1}55%{transform:translate(calc(-50% + 20px),calc(-50% - 20px)) scale(1);opacity:.2}57%,100%{transform:translate(calc(-50% + 20px),calc(-50% - 20px)) scale(1);opacity:0}}
+@keyframes sleep-bot{0%,19%{transform:translate(-50%,-50%) scale(.5);opacity:0}51%{transform:translate(calc(-50% + 8px),calc(-50% - 10px)) scale(.9);opacity:.8}60%{transform:translate(calc(-50% + 10px),calc(-50% - 12.5px)) scale(.9);opacity:1}84%{transform:translate(calc(-50% + 16px),calc(-50% - 20px)) scale(.9);opacity:1}100%{transform:translate(calc(-50% + 20px),calc(-50% - 25px)) scale(.9);opacity:0}}
+@media (prefers-reduced-motion:reduce){.map-marker::before,.map-marker::after{animation:none}.map-marker.sleep::before{opacity:1}}
 .setting-group h3{margin:14px 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}

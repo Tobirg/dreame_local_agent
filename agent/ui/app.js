@@ -320,29 +320,32 @@ function drawLive(){
  ctx.setLineDash([]);(current?.spots||[]).forEach(p=>dot(p,'#ffae67',5));
  ctx.font='15px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
  (view.obstacles||[]).forEach(([ox,oy,type])=>{const [x,y]=px(ox,oy);ctx.fillStyle='rgba(23,35,45,.85)';ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);ctx.fill();ctx.fillText(obstacleType(type)[0],x,y+1);});
- const charger=current?.charger||view.charger;if(charger)drawCharger(...px(...charger));
- // Off a run the robot sits on the charger, as the app shows it.
+ // Sizes as in the app: the robot is 320 mm wide, the station 1.2 times the robot.
+ const r=Math.max(6,160/(view.grid_size||50)*3);
+ const charger=current?.charger||view.charger;if(charger)drawCharger(...px(...charger),r*1.2);
+ // Off a run the robot sits on the station and covers it, leaving its green rim, as in the app.
  const docked=!current?.robot&&charger&&robotState?.activity==='docked',pos=current?.robot?px(...current.robot):docked?px(...charger):null;
- if(pos)drawRobot(pos[0],pos[1],current?.robot?current.angle:null,docked);
+ if(pos)drawRobot(pos[0],pos[1],current?.robot?current.angle:null,r);
  ctx.restore();
- placeMarker(pos);
+ placeMarker(pos,r);
 }
-function drawCharger(x,y){
- ctx.fillStyle='#2fbf71';ctx.strokeStyle='#e9fff2';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fill();ctx.stroke();
- ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(x+1,y-5);ctx.lineTo(x-3,y+1);ctx.lineTo(x,y+1);ctx.lineTo(x-1,y+5);ctx.lineTo(x+3,y-1);ctx.lineTo(x,y-1);ctx.closePath();ctx.fill();
+// The app's dock_log: light green disc, green rim and bolt.
+function drawCharger(x,y,r){
+ ctx.fillStyle='#9ef0a8';ctx.strokeStyle='#5edb72';ctx.lineWidth=r*.24;ctx.beginPath();ctx.arc(x,y,r-ctx.lineWidth/2,0,Math.PI*2);ctx.fill();ctx.stroke();
+ const k=r/10;ctx.fillStyle='#5edb72';ctx.beginPath();ctx.moveTo(x+1.5*k,y-6*k);ctx.lineTo(x-3.5*k,y+.5*k);ctx.lineTo(x-.2*k,y+.5*k);ctx.lineTo(x-1.5*k,y+6*k);ctx.lineTo(x+3.5*k,y-.5*k);ctx.lineTo(x+.2*k,y-.5*k);ctx.closePath();ctx.fill();
 }
 // Round robot with the lidar turret; the notch points where it drives (robot angle in degrees, y up).
-function drawRobot(x,y,angle,docked){
- if(docked)x+=10,y-=10;
- ctx.fillStyle='#f4f7f9';ctx.strokeStyle=docked?'#2fbf71':'#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.fill();ctx.stroke();
- ctx.fillStyle='#4da3ff';ctx.beginPath();ctx.arc(x,y,3.2,0,Math.PI*2);ctx.fill();
- if(Number.isFinite(angle)){const a=-angle*Math.PI/180;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+Math.cos(a)*4.5,y+Math.sin(a)*4.5);ctx.lineTo(x+Math.cos(a)*7.5,y+Math.sin(a)*7.5);ctx.stroke();}
+function drawRobot(x,y,angle,r){
+ ctx.fillStyle='#f4f7f9';ctx.strokeStyle='#6b7780';ctx.lineWidth=Math.max(1.5,r*.14);ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#4da3ff';ctx.beginPath();ctx.arc(x,y,r*.4,0,Math.PI*2);ctx.fill();
+ if(Number.isFinite(angle)){const a=-angle*Math.PI/180;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+Math.cos(a)*r*.55,y+Math.sin(a)*r*.55);ctx.lineTo(x+Math.cos(a)*r*.92,y+Math.sin(a)*r*.92);ctx.stroke();}
 }
 // One small DOM element over the robot animated by CSS: no canvas repaint per frame.
-function placeMarker(pos){
+function placeMarker(pos,r){
  const marker=$('map-marker'),s=robotState||{},mode=!pos?'':s.activity==='cleaning'?'pulse':s.activity==='returning'?'pulse':s.station===2?'heat':s.station===1?'wash':s.charging===1&&s.battery<100?'charge':s.activity==='docked'?'sleep':'';
  marker.hidden=!mode;if(!mode)return;
- const docked=mode!=='pulse';marker.className='map-marker '+mode;marker.style.left=((pos[0]+(docked?10:0))/canvas.width*100)+'%';marker.style.top=((pos[1]-(docked?10:0))/canvas.height*100)+'%';
+ marker.className='map-marker '+mode;marker.style.left=(pos[0]/canvas.width*100)+'%';marker.style.top=(pos[1]/canvas.height*100)+'%';
+ marker.style.setProperty('--r',(r*canvas.clientWidth/canvas.width).toFixed(1)+'px'); // robot radius in page pixels
 }
 // ---- Compatibility report: capabilities without the robot's id, saved as a file to share.
 $('compat-report').onclick=async()=>{
@@ -507,7 +510,7 @@ function renderRoomButtons(){
 }
 // Rooms with their floor pattern at canvas size, rebuilt only when the map, the selection or a floor draft changes.
 // Pattern sizes in map cells as the app's buildFloorMap: tiles 12, planks 4 × 16 laid in a half-board offset.
-const roomIcons={1:'🛋',2:'🛏',15:'🛏',3:'📚',4:'🍳',5:'🍽',6:'🛁',7:'🌿',8:'👣',9:'📦',10:'👔',11:'🚪',12:'💼',13:'🏋',14:'☕'};
+const roomIcons={1:'🛋',2:'🛏',15:'🛏',3:'📚',4:'🍲',5:'🍽',6:'🛁',7:'🌿',8:'👣',9:'📦',10:'👔',11:'🚪',12:'💼',13:'🏋',14:'☕'};
 let baseCache={key:'',canvas:null};
 function floorOf(room){const draft=$('room-floors').querySelector(`[data-room="${room.id}"]`)?.value;return draft===undefined?room.floor||0:Number(draft);}
 function baseLayer(){
@@ -874,15 +877,21 @@ function renderRestrictions(){
  if(!rows.length)rows.push(Object.assign(document.createElement('p'),{className:'muted small',textContent:view?.restrictions_editable?'Запретов и добавленных ковров нет.':'Эта карта не содержит доступного формата запретов.'}));
  $('restrict-list').replaceChildren(...rows);
 }
+// Checker tile of half cells (a cell is 3 canvas pixels, so 2-pixel squares are the closest whole size).
+const carpetPatterns={};
+function carpetPattern(alpha){
+ if(!carpetPatterns[alpha]){const t=document.createElement('canvas');t.width=t.height=4;const c=t.getContext('2d');c.fillStyle=`rgba(0,0,0,${alpha})`;c.fillRect(2,0,2,2);c.fillRect(0,2,2,2);carpetPatterns[alpha]=ctx.createPattern(t,'repeat');}
+ return carpetPatterns[alpha];
+}
 function drawRestrictions(){
  const lists=restrictions(),px=(x,y)=>{const p=robotToPixel(view,x,y);return [p[0]*3,(view.height-p[1])*3];};
  ctx.save();ctx.lineWidth=2;
- // Carpets the robot found: outline only.
- ctx.strokeStyle='#a0703c';for(const c of view?.carpets||[]){ctx.beginPath();for(let i=0;i+1<c.points.length;i+=2){const [x,y]=px(c.points[i],c.points[i+1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.stroke();}
+ // Carpets the robot found: the app's texture, map cells split 2×2 with the dark halves in a checkerboard.
+ ctx.fillStyle=carpetPattern(.15);for(const c of view?.carpets||[]){ctx.beginPath();for(let i=0;i+1<c.points.length;i+=2){const [x,y]=px(c.points[i],c.points[i+1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.fill();}
  for(const [kind,items] of Object.entries(lists))for(const r of items){
   if(!Array.isArray(r)||r.length!==4)continue;const [x0,y0]=px(r[0],r[1]),[x1,y1]=px(r[2],r[3]);
   if(kind==='walls'){ctx.setLineDash([]);ctx.strokeStyle='#ff4d4d';ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();continue;}
-  const style={no_mop_zones:['#5aa9ff','rgba(90,169,255,.25)'],carpets_added:['#a0703c','rgba(160,112,60,.35)'],carpets_ignored:['#8a8a8a','rgba(138,138,138,.15)'],ramps:['#2f9e44','rgba(47,158,68,.25)']}[kind]||['#ff4d4d','rgba(255,77,77,.25)'];
+  const style={no_mop_zones:['#5aa9ff','rgba(90,169,255,.25)'],carpets_added:['rgba(0,0,0,.45)',carpetPattern(.3)],carpets_ignored:['#8a8a8a','rgba(138,138,138,.15)'],ramps:['#2f9e44','rgba(47,158,68,.25)']}[kind]||['#ff4d4d','rgba(255,77,77,.25)'];
   ctx.strokeStyle=style[0];ctx.fillStyle=style[1];ctx.setLineDash(kind==='carpets_ignored'?[6,4]:[]);
   ctx.fillRect(Math.min(x0,x1),Math.min(y0,y1),Math.abs(x1-x0),Math.abs(y1-y0));ctx.strokeRect(Math.min(x0,x1),Math.min(y0,y1),Math.abs(x1-x0),Math.abs(y1-y0));
  }
@@ -984,10 +993,12 @@ const settingGroups=[['Уборка',/^(cleaning_mode|mop_humidity|wetness_level
  ['Чистка пола',/^(collision_avoidance|floor_direction_cleaning|stain_avoidance|side_reach|mop_extend(_frequency)?|gap_cleaning_extension|mopping_under_furnitures|auto_mount_mop|mop_pad_swing|wider_corner_coverage|pet_focused_cleaning|dynamic_obstacle_cleaning|pressurized_cleaning|mop_pressure|ai_bit_large_particles_boost)$/],
  ['Базовая станция',/wash|dry|uv_|dust|empty|hair|detergent|water|self_clean|mop_temperature|scraper|low_lying|change_mop|mop_cleaning_remainder/],['Препятствия и ИИ',/^ai_|obstacle|crossing|fill_light|intelligent_recognition|human_follow|lds/],
  ['Голос',/voice/],['Не беспокоить',/^dnd/],['Прочее',/./]];
+// The station group lives in the station panel, next to its commands; the rest stay under «Все настройки пылесоса».
+const settingHomes={'Базовая станция':'station-settings'};
 function settingGroup(id){
  const index=settingGroups.findIndex(([,rule])=>rule.test(id)),list=$('settings-list');
- if(list.children.length!==settingGroups.length)list.replaceChildren(...settingGroups.map(([title])=>{const g=document.createElement('section');g.className='setting-group';g.hidden=true;g.append(Object.assign(document.createElement('h3'),{textContent:title}));return g;}));
- return list.children[index];
+ if(list.children.length!==settingGroups.length-Object.keys(settingHomes).length)for(const [title] of settingGroups){const g=document.createElement('section');g.className='setting-group';g.hidden=true;g.dataset.group=title;if(!settingHomes[title])g.append(Object.assign(document.createElement('h3'),{textContent:title}));($(settingHomes[title])||list).append(g);}
+ return document.querySelector(`.setting-group[data-group="${settingGroups[index][0]}"]`);
 }
 function renderSettings(){
  const query=$('settings-search').value.trim().toLocaleLowerCase();let available=0;
@@ -1013,9 +1024,9 @@ function renderSettings(){
    row.append(label,input,apply);settingsRows.set(def.id,row);settingGroup(def.id).append(row);
   }else if(!settingsDirty.has(def.id))row.setInput(value);
   row.querySelector('.setting-current').textContent='Сейчас: '+(typeof value==='object'?(value.enabled?'включено':'выключено')+' '+value.start+'–'+value.end:typeof value==='boolean'?(value?'включено':'выключено'):String(value));
-  row.hidden=!def.label.toLocaleLowerCase().includes(query);
+  row.hidden=!def.label.toLocaleLowerCase().includes(query)&&!row.closest('#station-settings');
  }
- for(const group of $('settings-list').children)group.hidden=![...group.querySelectorAll('.setting-row')].some(r=>!r.hidden);
+ for(const group of document.querySelectorAll('.setting-group'))group.hidden=![...group.querySelectorAll('.setting-row')].some(r=>!r.hidden);
  $('settings-status').textContent='Доступно настроек: '+available;
  disableControls(busy);
 }
@@ -1027,7 +1038,7 @@ async function refreshSettings(){
   settingsSnapshot=snapshot;for(const [id,row]of settingsRows){const def=settings.find(x=>x.id===id);if(decodeSetting(def,snapshot)===undefined)row.hidden=true;}renderSettings();
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('settings-status').textContent=e.message;connectionLost(e.message);}}finally{if(epoch===viewEpoch)settingsLoading=false;}
 }
-$('settings-details').ontoggle=()=>{if($('settings-details').open)refreshSettings();};$('refresh-settings').onclick=()=>refreshSettings();$('settings-search').oninput=()=>renderSettings();
+$('settings-details').ontoggle=$('station-settings-details').ontoggle=e=>{if(e.target.open)refreshSettings();};$('refresh-settings').onclick=()=>refreshSettings();$('settings-search').oninput=()=>renderSettings();
 
 async function rebootRobot(){
  if(busy||!window.confirm('Перезагрузить робот? Связь временно пропадёт.'))return;
@@ -1040,7 +1051,7 @@ function scheduleResume(){clearTimeout(resumeTimer);resumeTimer=setTimeout(async
  if(document.hidden||!token)return;if(busy){scheduleResume();return;}
  suspendReads();
  if($('dashboard').hidden){try{await login();}catch(e){if(!e.suspended)connectionLost(e.message);}return;}
- await refresh();streamEvents();await refreshMap();if($('settings-details').open)await refreshSettings();
+ await refresh();streamEvents();await refreshMap();if($('settings-details').open||$('station-settings-details').open)await refreshSettings();
  },250);}
 $('reconnect').onclick=scheduleResume;
 document.addEventListener('visibilitychange',()=>{if(document.hidden)suspendReads();else scheduleResume();});
