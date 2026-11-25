@@ -129,10 +129,21 @@ textarea{font-size:13px}
 .obstacle-photos figure{margin:0;font-size:13px;color:var(--muted)}
 .obstacle-photos img{width:100%;border-radius:6px;display:block;margin-bottom:4px}
 
-.setting-row{display:grid;grid-template-columns:minmax(160px,1fr) minmax(150px,1fr) auto;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.setting-row{display:grid;grid-template-columns:minmax(160px,1fr) minmax(150px,auto) auto;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
 .setting-row label{margin:0;color:var(--ink)}
 .setting-row .setting-current{display:block;color:var(--muted);font-size:12px;margin-top:4px}
 .setting-row input,.setting-row select{margin:0}
+/* Settings switches: applied on flip, so they read as switches, not form checkboxes. */
+input.switch{appearance:none;-webkit-appearance:none;width:42px;height:24px;border-radius:12px;background:var(--line);position:relative;cursor:pointer;flex:none;transition:background .2s;border:0}
+input.switch::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .2s}
+input.switch:checked{background:var(--go)}
+input.switch:checked::after{transform:translateX(18px)}
+input.switch:disabled{opacity:.5;cursor:default}
+input.switch:focus-visible{outline:2px solid var(--go);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){input.switch,input.switch::after{transition:none}}
+.setting-row>input.switch,.setting-row>select{justify-self:end}
+.side .setting-row{grid-template-columns:minmax(0,1fr) auto auto;gap:8px}
+.side .setting-row select,.side .setting-row input:not(.switch){width:auto;max-width:140px}
 .setting-window{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .setting-window input[type=time]{width:110px}
 #settings-search{width:auto;flex:1;min-width:160px;margin:0}

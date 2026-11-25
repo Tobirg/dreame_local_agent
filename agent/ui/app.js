@@ -67,7 +67,7 @@ async function control(method,params,before=null){
  finally{busy=false;disableControls(false);}
 }
 function disableControls(disabled){
- document.querySelectorAll('[data-command],#stage-update,#apply-update,#rollback-update,#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-apply').forEach(b=>b.disabled=disabled);
+ document.querySelectorAll('[data-command],#stage-update,#apply-update,#rollback-update,#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-row input,.setting-row select,.setting-apply').forEach(b=>b.disabled=disabled);
  $('clean-rooms').disabled=disabled||selected.size===0;
  $('clean-zone').disabled=disabled||zone.length!==(zoneSpot?1:2);
  $('cancel-zone').disabled=!zoneDrawing&&!zone.length;
@@ -984,7 +984,7 @@ function settingControl(def,value){
   let normalized=value;if(def.auto&&Number(value)<0&&def.options.some(x=>x.value===0))normalized=0;
   if(![...input.options].some(x=>x.value===String(normalized)))input.add(new Option('Текущее: '+value,String(value)));
   input.value=String(normalized);
- }else if(def.kind==='bool'){input.type='checkbox';input.checked=!!value;}
+ }else if(def.kind==='bool'){input.type='checkbox';input.className='switch';input.setAttribute('role','switch');input.checked=!!value;}
  else{input.type=def.kind==='number'?'number':def.kind==='time'?'time':'text';input.value=String(value);if(def.kind==='number'){input.min=def.min;input.max=def.max;input.step=def.step||1;}else input.maxLength=128;}
  return input;
 }
@@ -1014,20 +1014,29 @@ function renderSettings(){
    const current=document.createElement('span');current.className='setting-current';label.append(current);
    let input,readInput;
    if(def.kind==='window'){
-    input=document.createElement('div');input.className='setting-window';const enabled=document.createElement('input'),start=document.createElement('input'),end=document.createElement('input');enabled.type='checkbox';enabled.setAttribute('aria-label',def.label+' включено');start.type=end.type='time';start.setAttribute('aria-label',def.label+' начало');end.setAttribute('aria-label',def.label+' окончание');input.append(enabled,start,end);row.setInput=v=>{enabled.checked=v.enabled;start.value=v.start;end.value=v.end;};readInput=()=>({enabled:enabled.checked,start:start.value,end:end.value});
+    input=document.createElement('div');input.className='setting-window';const enabled=document.createElement('input'),start=document.createElement('input'),end=document.createElement('input');enabled.type='checkbox';enabled.className='switch';enabled.setAttribute('role','switch');enabled.setAttribute('aria-label',def.label+' включено');start.type=end.type='time';start.setAttribute('aria-label',def.label+' начало');end.setAttribute('aria-label',def.label+' окончание');input.append(enabled,start,end);row.setInput=v=>{enabled.checked=v.enabled;start.value=v.start;end.value=v.end;};readInput=()=>({enabled:enabled.checked,start:start.value,end:end.value});
    }else{input=settingControl(def,value);row.setInput=v=>{if(def.kind==='bool')input.checked=!!v;else input.value=String(def.auto&&v<0&&def.options?.some(x=>x.value===0)?0:v);};readInput=()=>def.kind==='bool'?input.checked:def.kind==='select'?def.options.find(x=>String(x.value)===input.value)?.value??value:def.kind==='number'?Number(input.value):input.value;}
-   row.setInput(value);input.addEventListener('input',()=>settingsDirty.add(def.id));input.addEventListener('change',()=>settingsDirty.add(def.id));
-   const apply=document.createElement('button');apply.textContent='Применить';apply.className='setting-apply';apply.onclick=async()=>{
+   row.setInput(value);input.addEventListener('input',()=>settingsDirty.add(def.id));
+   // Applied as soon as it changes; a refusal or a bad value puts back what the robot has.
+   const apply=async()=>{
+    settingsDirty.add(def.id);let sent=false;
     try{
      const chosen=readInput();if(def.kind==='number'&&(!Number.isInteger(chosen)||chosen<def.min||chosen>def.max))throw Error('Допустимое значение: '+def.min+'–'+def.max);
      if(def.kind==='time'&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(chosen))throw Error('Укажи время в формате ЧЧ:ММ');
-     const raw=settingsSnapshot.get(def.siid+'/'+def.piid),value=settingValue(def,chosen,raw);
-     await control('local.setting',{siid:def.siid,piid:def.piid,expected:raw,value});settingsDirty.delete(def.id);await refreshSettings();
-    }catch(e){toast(e.message,true);}
+     if(busy)throw Error('Робот выполняет другую команду, попробуй ещё раз');
+     const raw=settingsSnapshot.get(def.siid+'/'+def.piid);
+     sent=true;await control('local.setting',{siid:def.siid,piid:def.piid,expected:raw,value:settingValue(def,chosen,raw)});
+    }catch(e){if(!sent)toast(e.message,true); // control() already reported its own errors
+    const now=decodeSetting(def,settingsSnapshot);if(now!==undefined)row.setInput(now);}
+    finally{settingsDirty.delete(def.id);await refreshSettings();}
    };
-   row.append(label,input,apply);settingsRows.set(def.id,row);settingGroup(def.id).append(row);
+   // Switches and lists apply on change; typed values (number, time, text) wait for «ОК», a schedule's switch applies at once.
+   const typed=['number','time','text','window'].includes(def.kind);let ok=null;
+   if(typed){ok=document.createElement('button');ok.textContent='ОК';ok.className='setting-apply';ok.onclick=apply;if(def.kind==='window')input.querySelector('.switch').addEventListener('change',apply);}
+   else input.addEventListener('change',apply);
+   row.append(label,input);if(ok)row.append(ok);settingsRows.set(def.id,row);settingGroup(def.id).append(row);
   }else if(!settingsDirty.has(def.id))row.setInput(value);
-  row.querySelector('.setting-current').textContent='Сейчас: '+(typeof value==='object'?(value.enabled?'включено':'выключено')+' '+value.start+'–'+value.end:typeof value==='boolean'?(value?'включено':'выключено'):String(value));
+  row.querySelector('.setting-current').textContent=def.kind==='bool'?'':'Сейчас: '+(typeof value==='object'?(value.enabled?'включено':'выключено')+' '+value.start+'–'+value.end:typeof value==='boolean'?(value?'включено':'выключено'):String(value));
   row.hidden=!def.label.toLocaleLowerCase().includes(query)&&!row.closest('#station-settings,#voice-settings,#dnd-settings');
  }
  for(const group of document.querySelectorAll('.setting-group'))group.hidden=![...group.querySelectorAll('.setting-row')].some(r=>!r.hidden);
