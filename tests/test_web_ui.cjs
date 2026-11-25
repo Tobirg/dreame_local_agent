@@ -3,7 +3,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const assert=require('node:assert/strict');
-let refuseSetting=false; // makes the fake robot reject local.setting
+let refuseSetting=false,agentVersion='0.7.0'; // makes the fake robot reject local.setting
 const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES?process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright':'playwright');
 const root=path.resolve(__dirname,'../agent/ui'),token='a'.repeat(40),commands=[],commandReplies=new Map();
 let staleState=false,revision='test-map-1',regionCode=200,installedModules=[],stagedUpload=null,updateLast=null,updatePrevious=null,stagedAgent=null,dropNextRead=false,dropNextMutation=false;
@@ -26,6 +26,7 @@ const pushEvent=()=>{for(const c of eventClients)c.write('event: state\ndata: '+
  for(const a of actions)assert(pages.some(p=>p.title===a.page),'action on an unknown page: '+a.command);
 })().catch(e=>{console.error(e);process.exit(1);});
 const server=http.createServer((req,res)=>{
+ res.setHeader('X-Agent-Version',agentVersion);
  if(req.method==='GET'&&req.url.startsWith('/m/demo/panel.js')){
   res.setHeader('Content-Type','text/javascript; charset=utf-8');
   res.end("export default function mount(el,ctx){el.innerHTML='<p data-t=state></p><button data-t=ping>Ping</button>';ctx.onState(s=>{el.querySelector('[data-t=state]').textContent='battery '+s.battery;});el.querySelector('[data-t=ping]').onclick=async()=>{const r=await ctx.call('ping',{n:1});el.querySelector('[data-t=state]').dataset.reply=r.action;};}");return;
@@ -271,6 +272,15 @@ const server=http.createServer((req,res)=>{
   }
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));await page.screenshot({path:'/tmp/dreame-native-web-mobile.png',fullPage:true});
   for(let k=0;k<3;k++){await page.reload();await page.locator('#map').waitFor();await page.waitForTimeout(1200);assert(!/приостановлено/.test(await page.locator('#toast').textContent()),'a page reload shows no «Чтение приостановлено»');}
+  { // Agent update: a new version on reconnect reloads the page, or offers a banner while the user is typing; no reload loop
+   const restart=v=>{agentVersion=v;for(const c of eventClients)c.end();eventClients.clear();};
+   await sheet('all-settings');await page.locator('#settings-search').focus();restart('0.8.1');
+   await page.locator('#update-banner').waitFor({timeout:10000});assert.match(await page.locator('#update-banner').innerText(),/0\.8\.1/);
+   await Promise.all([page.waitForEvent('load'),page.locator('#update-reload').click()]);await page.locator('#map').waitFor();assert(await page.locator('#update-banner').isHidden());
+   await page.waitForTimeout(500);await Promise.all([page.waitForEvent('load',{timeout:10000}),restart('0.8.2')]);await page.locator('#map').waitFor();
+   await page.waitForTimeout(500);restart('0.8.3');await page.locator('#update-banner').waitFor({timeout:10000});
+   agentVersion='0.7.0';await page.reload();await page.locator('#map').waitFor();
+  }
   await sheet('menu');await page.locator('#logout').click();assert(await page.locator('#login').isVisible());assert.equal(await page.evaluate(()=>sessionStorage.getItem('dreame-token')),null);
   await page.goto(url+'/?setup=wifi');await page.locator('#wifi-ssid').waitFor({state:'visible',timeout:5000});assert(await page.locator('#wifi-ssid').isVisible());assert(await page.locator('#login').isVisible());await page.locator('#token').fill(token);await page.locator('#wifi-ssid').fill('Setup');await page.locator('#wifi-open').check();await page.locator('#save-wifi').click();await page.waitForFunction(()=>document.querySelector('#wifi-result').textContent.includes('Настройки приняты'));assert.deepEqual(commands.at(-1),{method:'local.wifi_setup',params:{ssid:'Setup',password:'',open:true}});
   { // Embedded view: signs in from the fragment, the same app screen with everything the token allows
@@ -283,6 +293,6 @@ const server=http.createServer((req,res)=>{
    await emb.close();
   }
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('Browser checks passed: reboot confirmation, collapsed final Wi-Fi panel and signal, repeated multi-room cleaning, threshold add/edit/delete, packed settings preservation, reconnection without repeating commands, stale snapshot warning, capability-hidden commands, consumables and reset, do-not-disturb and its periods, schedules with quick commands, quick commands, station jobs, error text, zones moved and resized on the map, full-screen map editors with their tools in the bottom bar, cleaning cycles button, virtual walls and zones, carpets, per-room settings, room order, furniture, messages, camera trips and patrol, video access code, monitoring screen (stream, drive, flip, light, pet search), video cloud protection, saved maps and backups, cleaning history, live position, compatibility report,  login, status, coordinates, start, room cleaning, merge, split, stale-map blocking, settings, modules page navigation, module package review, install, panel state and actions, removal, agent update with rollback report, Wi-Fi submission without password storage, captive setup form before login, mobile layout, logout, no external requests, pet photos');
+  console.log('Browser checks passed: page reload after an agent update, reboot confirmation, collapsed final Wi-Fi panel and signal, repeated multi-room cleaning, threshold add/edit/delete, packed settings preservation, reconnection without repeating commands, stale snapshot warning, capability-hidden commands, consumables and reset, do-not-disturb and its periods, schedules with quick commands, quick commands, station jobs, error text, zones moved and resized on the map, full-screen map editors with their tools in the bottom bar, cleaning cycles button, virtual walls and zones, carpets, per-room settings, room order, furniture, messages, camera trips and patrol, video access code, monitoring screen (stream, drive, flip, light, pet search), video cloud protection, saved maps and backups, cleaning history, live position, compatibility report,  login, status, coordinates, start, room cleaning, merge, split, stale-map blocking, settings, modules page navigation, module package review, install, panel state and actions, removal, agent update with rollback report, Wi-Fi submission without password storage, captive setup form before login, mobile layout, logout, no external requests, pet photos');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
