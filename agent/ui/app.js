@@ -1004,8 +1004,9 @@ function settingControl(def,value){
  return input;
 }
 // Groups in the order of the app's settings pages; the first matching rule wins.
-const settingGroups=[['Уборка',/^(cleaning_mode|mop_humidity|wetness_level|cleangenius(_mode)?|cleaning_route|customized_cleaning|tight_mopping|auto_recleaning|resume_cleaning|max_suction_power|ultra_clean_mode|mopping_type)$/],['Ковры',/carpet/],
- ['Чистка пола',/^(collision_avoidance|floor_direction_cleaning|stain_avoidance|side_reach|mop_extend(_frequency)?|gap_cleaning_extension|mopping_under_furnitures|auto_mount_mop|mop_pad_swing|wider_corner_coverage|pet_focused_cleaning|dynamic_obstacle_cleaning|pressurized_cleaning|mop_pressure|ai_bit_large_particles_boost)$/],
+const settingGroups=[['Уборка',/^(power_saving|cleaning_mode|mop_humidity|wetness_level|cleangenius(_mode)?|cleaning_route|customized_cleaning|tight_mopping|auto_recleaning|resume_cleaning|max_suction_power|ultra_clean_mode|mopping_type)$/],['Ковры',/carpet/],
+ ['MopExtend и боковой вылет',/^(side_reach|mop_extend(_frequency)?|gap_cleaning_extension|mopping_under_furnitures|wider_corner_coverage|mop_pad_swing)$/],['Ножки: преодоление препятствий',/^obstacle_crossing$/],
+ ['Чистка пола',/^(collision_avoidance|floor_direction_cleaning|stain_avoidance|auto_mount_mop|pet_focused_cleaning|dynamic_obstacle_cleaning|pressurized_cleaning|mop_pressure|ai_bit_large_particles_boost)$/],
  ['Базовая станция',/^(?!dnd_).*(wash|dry|uv_|dust|empty|hair|detergent|water|self_clean|mop_temperature|scraper|low_lying|change_mop|mop_cleaning_remainder)/],['Препятствия и ИИ',/^ai_|obstacle|crossing|fill_light|intelligent_recognition|human_follow|lds/],
  ['Голос',/voice/],['Что ограничивает ночной режим',/^dnd_(disable|reduce)/],['Не беспокоить',/^dnd/],['Прочее',/./]];
 // Groups with their own panel show there, next to the matching controls; if that panel is hidden
@@ -1039,6 +1040,7 @@ function renderSettings(){
      const chosen=readInput();if(def.kind==='number'&&(!Number.isInteger(chosen)||chosen<def.min||chosen>def.max))throw Error('Допустимое значение: '+def.min+'–'+def.max);
      if(def.kind==='time'&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(chosen))throw Error('Укажи время в формате ЧЧ:ММ');
      if(busy)throw Error('Робот выполняет другую команду, попробуй ещё раз');
+     if(def.confirm&&chosen===true&&!confirm(def.confirm))throw Error('Не включено');
      const raw=settingsSnapshot.get(def.siid+'/'+def.piid);
      sent=true;await control('local.setting',{siid:def.siid,piid:def.piid,expected:raw,value:settingValue(def,chosen,raw)});
     }catch(e){if(!sent)toast(e.message,true); // control() already reported its own errors

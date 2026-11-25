@@ -30,6 +30,7 @@ type settingDef struct {
 	Max      *float64          `json:"max,omitempty"`
 	Step     *float64          `json:"step,omitempty"`
 	Advanced bool              `json:"advanced,omitempty"` // service or cloud-only: modules keep it out of sight by default
+	Confirm  string            `json:"confirm,omitempty"`  // the web UI asks this before turning the setting on
 	Src      string            `json:"src"`                // "plugin" (checked against the Dreame app) or "tasshack"
 	HW       map[string]string `json:"hw,omitempty"`       // firmware hardware table values the setting needs
 }
