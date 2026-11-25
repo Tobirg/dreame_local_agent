@@ -535,9 +535,10 @@ function baseLayer(){
 // The whole map fits the window at 100%; the buttons zoom from there and only a zoomed map scrolls inside its frame.
 let zoom=1;
 function layoutMap(){
- const stage=document.querySelector('.map-stage'),top=stage.getBoundingClientRect().top,avail=Math.max(260,innerHeight-Math.max(0,Math.min(top,innerHeight*.3))-24);
- const fit=Math.min(stage.clientWidth,avail*canvas.width/canvas.height);
- stage.style.maxHeight=avail+'px';stage.querySelector('.map-wrap').style.width=Math.round(fit*zoom)+'px';
+ const stage=document.querySelector('.map-stage');stage.style.width='';
+ const top=stage.getBoundingClientRect().top,avail=Math.max(260,innerHeight-Math.max(0,Math.min(top,innerHeight*.3))-24);
+ const side=Math.round(Math.min(stage.clientWidth,avail)),fit=Math.min(side,side*canvas.width/canvas.height); // square frame, the same at every zoom
+ stage.style.width=side+'px';stage.style.height=side+'px';stage.querySelector('.map-wrap').style.width=Math.round(fit*zoom)+'px';
  $('zoom-fit').textContent=Math.round(zoom*100)+'%';if(markerArgs)placeMarker(...markerArgs);
 }
 const setZoom=z=>{zoom=Math.min(6,Math.max(.4,z));layoutMap();};

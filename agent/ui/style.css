@@ -91,7 +91,7 @@ details button{margin:0 6px 6px 0}
 .station-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .side select+button,.side label+button{margin-top:2px}
 
-.map-stage{overflow:hidden;touch-action:none;min-height:160px;margin-top:12px;border-radius:10px;
+.map-stage{display:flex;align-items:center;justify-content:center;margin-left:auto;margin-right:auto;overflow:hidden;touch-action:none;min-height:160px;margin-top:12px;border-radius:10px;
  background:radial-gradient(var(--map-dot) 1px,transparent 1px) 0 0/16px 16px var(--map-bg)}
 canvas{display:block;width:100%;height:auto;touch-action:none}
 .map-stage.panning{cursor:grabbing}.map-stage canvas{cursor:grab}
@@ -172,7 +172,7 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 /* Map: animated status marker over the robot (one element, compositor-only animations). */
-.map-wrap{position:relative;margin:0 auto}
+.map-wrap{position:relative;flex:none}
 .map-zoom{display:flex;gap:6px;align-items:center}.map-zoom button{margin:0}
 .map-marker{position:absolute;width:0;height:0;pointer-events:none}
 .map-marker::before,.map-marker::after{position:absolute;left:0;top:0;transform:translate(-50%,-50%)}
