@@ -34,7 +34,7 @@ func stopPatrol() {
 	}
 }
 
-func (a *agent) startPatrol(p commandParams, did string) (any, error) {
+func (a *agent) startPatrol(ctx context.Context, p commandParams, did string) (any, error) {
 	if len(p.Points) == 0 || len(p.Points) > 20 {
 		return nil, errors.New("patrol takes 1..20 points [x, y]")
 	}
@@ -48,11 +48,20 @@ func (a *agent) startPatrol(p commandParams, did string) (any, error) {
 		legs = append(legs, b)
 	}
 	stopPatrol()
-	ctx, cancel := context.WithCancel(context.Background())
+	if a.videoCodeHash() != "" { // look around inside the video monitoring session, as the app does
+		if err := a.ensureMonitor(ctx, did); err != nil {
+			return nil, err
+		}
+	}
+	release := a.holdMonitor()
+	run, cancel := context.WithCancel(context.Background())
 	patrolRun.Lock()
 	patrolRun.cancel = cancel
 	patrolRun.Unlock()
-	go a.patrol(ctx, legs)
+	go func() {
+		defer release()
+		a.patrol(run, legs)
+	}()
 	return map[string]any{"patrol": "started", "points": len(legs)}, nil
 }
 

@@ -47,6 +47,8 @@ type config struct {
 	Tokens                  []apiToken `json:"tokens,omitempty"`
 	// Origins (scheme://host[:port]) that may show the panel in a frame, e.g. a Home Assistant dashboard card.
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
+	// sha256 (hex) of the owner's video access code; opens the video monitoring session (monitor.go).
+	VideoCodeSHA256 string `json:"video_code_sha256,omitempty"`
 }
 type request struct {
 	Method string          `json:"method"`

@@ -163,6 +163,10 @@ func (a *agent) tokenRoutes(w http.ResponseWriter, r *http.Request, send func(in
 		a.embedRoute(w, r, send)
 		return true
 	}
+	if p == "/api/v1/system/video_code" {
+		a.videoCodeRoute(w, r, send)
+		return true
+	}
 	if p != "/api/v1/system/tokens" && !strings.HasPrefix(p, "/api/v1/system/tokens/") {
 		return false
 	}

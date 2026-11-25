@@ -881,7 +881,7 @@ async function login(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)document.querySelector('#sheet-wifi .sheet-body').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
+ await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('video-code-panel',loadVideoCode);await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{clearPets();stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
@@ -1361,6 +1361,15 @@ async function loadMessages(){
 }
 $('messages-details').ontoggle=()=>{if($('messages-details').open)loadMessages().catch(e=>toast(e.message,true));};
 $('clear-messages').onclick=async()=>{if(!window.confirm('Очистить сообщения?'))return;try{await api('local.messages_clear');await loadMessages();}catch(e){toast(e.message,true);}};
+// ---- Video access code (monitor.go): remote_move drives inside the video monitoring session, which needs it.
+const videoCodeText=on=>on?'Код задан: стрелки камеры ездят без мотора.':'Код не задан: ручное управление выключено.';
+async function loadVideoCode(){$('video-code-status').textContent=videoCodeText((await api('/api/v1/system/video_code')).configured);}
+async function saveVideoCode(code){
+ try{const r=await api('/api/v1/system/video_code',{code});$('video-code').value='';$('video-code-status').textContent=videoCodeText(r.configured);}
+ catch(e){$('video-code-status').textContent=e.message;}
+}
+$('save-video-code').onclick=()=>{const code=$('video-code').value.trim();if(!/^[0-9]{4,8}$/.test(code)){$('video-code-status').textContent='Код: 4–8 цифр.';return;}saveVideoCode(code);};
+$('clear-video-code').onclick=()=>saveVideoCode('');
 // ---- Camera trips (patrol.go): points in robot millimetres, numbered on the map.
 let patrolDrawing=false,patrolPoints=[];
 function drawPatrol(){

@@ -513,7 +513,7 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 	}
 	switch p.Name {
 	case "patrol":
-		return a.startPatrol(p, info["did"])
+		return a.startPatrol(ctx, p, info["did"])
 	case "locate", "set_volume", "set_suction", "set_setting", "reset_consumable", "set_dnd", "set_dnd_period", "delete_dnd_period", "save_quick_command", "delete_quick_command", "set_schedule", "delete_schedule":
 	default:
 		stopPatrol() // the owner took over
@@ -567,6 +567,13 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 			in = []any{}
 		}
 		params = map[string]any{"did": info["did"], "siid": c.siid, "aiid": c.id, "in": in}
+	}
+	// Drive for the camera inside the video monitoring session, as the app does: without it remote_move
+	// runs the vacuum motor (monitor.go). go_to uses it when a video access code is set.
+	if p.Name == "remote_move" || (p.Name == "go_to" && a.videoCodeHash() != "") {
+		if err := a.ensureMonitor(ctx, info["did"]); err != nil {
+			return nil, err
+		}
 	}
 	result, err := a.miot(ctx, method, params)
 	if err != nil {
