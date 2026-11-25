@@ -361,3 +361,7 @@ body[data-mode=room][data-selected] .clear-sel{display:flex}
 
 .tune-card{display:flex;flex-direction:column;gap:10px}.tune-card .room-options,#tune-settings{display:contents}#tune-settings .setting-group{display:contents}.tune-card [data-setting=cleaning_mode]{order:-1}
 .setting-row input[type=range]{width:100%;accent-color:var(--accent,#3b82f6)}
+#map-labels{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.room-label{position:absolute;transform:translate(-50%,.15em);white-space:nowrap;color:#fff;font-weight:600;line-height:1.2;text-shadow:0 0 2px rgba(23,35,45,.95),0 0 4px rgba(23,35,45,.8)}
+.room-label.dim{opacity:.55}
+.room-badge{position:absolute;transform:translate(-50%,-110%);min-width:1.5em;height:1.5em;padding:0 .2em;box-sizing:border-box;border-radius:.75em;border:2px solid #fff;color:#17232d;font-weight:700;font-size:.9em;line-height:1;display:grid;place-items:center}
