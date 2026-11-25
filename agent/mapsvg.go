@@ -15,8 +15,7 @@ func num(f float64) string {
 }
 
 // regionPath is the outline of the cells for which in(x, y) holds (image rows, y down) as an SVG path in
-// picture units: every boundary loop, straight runs merged, corners rounded by half a cell so the stairs
-// of single cells read as a smooth line. Loops under 2 cells of area (speckle) are left out; fill it with
+// picture units: every boundary loop, straight runs merged, sharp corners. Loops under 2 cells of area (speckle) are left out; fill it with
 // fill-rule evenodd so holes stay open.
 func regionPath(w, h int, in func(x, y int) bool) string {
 	next := map[[2]int][][2]int{}
@@ -76,21 +75,12 @@ func smoothLoop(b *strings.Builder, loop [][2]int) {
 	if len(vs) < 4 || abs(area)/2 < 2 {
 		return
 	}
-	toward := func(from, to [2]int) (float64, float64) { // half a cell, or half the edge if shorter, from `from` to `to`
-		dx, dy := float64(to[0]-from[0]), float64(to[1]-from[1])
-		d := math.Hypot(dx, dy)
-		k := math.Min(.5, d/2) / d
-		return (float64(from[0]) + dx*k) * mapScale, (float64(from[1]) + dy*k) * mapScale
-	}
 	for i, v := range vs {
-		ax, ay := toward(v, vs[(i+len(vs)-1)%len(vs)])
-		bx, by := toward(v, vs[(i+1)%len(vs)])
+		c := "L"
 		if i == 0 {
-			fmt.Fprintf(b, "M%s %s", num(ax), num(ay))
-		} else {
-			fmt.Fprintf(b, "L%s %s", num(ax), num(ay))
+			c = "M"
 		}
-		fmt.Fprintf(b, "Q%s %s %s %s", num(float64(v[0])*mapScale), num(float64(v[1])*mapScale), num(bx), num(by))
+		fmt.Fprintf(b, "%s%s %s", c, num(float64(v[0])*mapScale), num(float64(v[1])*mapScale))
 	}
 	b.WriteString("Z")
 }
