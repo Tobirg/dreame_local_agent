@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"image"
 	"image/color"
-	"image/png"
 	"math"
 	"net/url"
 	"strconv"
@@ -14,59 +11,43 @@ import (
 	"sync"
 )
 
-// Same colours as ui/app.js.
+// The map picture is one SVG: the web panel shows it under its own canvas and the MQTT module publishes it
+// to Home Assistant, so both enlarge it without loss. Units are the old picture's pixels (3 per map cell),
+// which keeps the calibration points of the Home Assistant card unchanged.
 var (
 	roomPalette = []color.RGBA{{0x7f, 0xd9, 0xc2, 255}, {0xa3, 0xbc, 0xec, 255}, {0xe5, 0xbd, 0x8a, 255}, {0xbc, 0xac, 0xeb, 255},
-		{0xa7, 0xd3, 0x9a, 255}, {0xe3, 0xa5, 0xb4, 255}, {0x93, 0xcd, 0xd9, 255}, {0xd4, 0xd0, 0x93, 255}}
-	wallColour     = color.RGBA{0xa6, 0xba, 0xd0, 255} // border cells, the room outline of the Dreame app
-	pathColour     = color.RGBA{0xff, 0xff, 0xff, 200}
-	robotColour    = color.RGBA{0x4d, 0xa3, 0xff, 255}
-	chargerColour  = color.RGBA{0x55, 0xf2, 0xaa, 255}
-	targetColour   = color.RGBA{0xff, 0xae, 0x67, 255} // zone and spot being cleaned
-	newFloorColour = color.RGBA{0xbf, 0xdc, 0xf5, 255} // found this run, not in the saved map
-	newWallColour  = color.RGBA{0x8f, 0xa3, 0xb3, 255}
-	obstacleRing   = color.RGBA{0x17, 0x23, 0x2d, 255}
-	obstacleColour = color.RGBA{0xff, 0xd2, 0x5e, 255}
-	hazardColour   = color.RGBA{0xff, 0x6b, 0x6b, 255} // the robot can get tangled in or smear it
+		{0xa7, 0xd3, 0x9a, 255}, {0xe3, 0xa5, 0xb4, 255}, {0x93, 0xcd, 0xd9, 255}, {0xd4, 0xd0, 0x93, 255}} // same colours as ui/app.js
+	wallColour = color.RGBA{0xa6, 0xba, 0xd0, 255} // border cells, the room outline of the Dreame app
 )
 
 // Obstacle types drawn as hazards: socket, wire, sock, faeces, cable, liquid stain, hair (names as in the Dreame app).
 var hazardTypes = map[int]bool{130: true, 131: true, 134: true, 135: true, 138: true, 139: true, 225: true}
 
-const mapScale = 3 // output pixels per map cell, as the web UI draws it
+const mapScale = 3 // picture units per map cell
 
 // Mop pad span of the X50 (two round pads); the band crossing into the next room is real, the pads reach over thresholds.
 const mopWidth = 300 // robot millimetres
 
-var (
-	mopColour = color.RGBA{0x4d, 0xa3, 0xff, 255} // blue, like a wet floor
-	mopAlpha  = []int{70, 120, 165}               // 1, 2 and 3+ passes
-)
-
-// mapOpts: base draws only what the web panel takes as its map layer (floors, walls, room badges);
-// the panel draws the rest itself, editable. selected dims the other rooms, floors replaces a room's floor
-// kind (the panel's unsaved choice).
+// mapOpts: base is what the web panel takes as its map layer (floors, walls, room numbers, and the saved
+// groups named in layers); the panel draws the rest itself, editable. selected dims the other rooms, floors
+// replaces a room's floor kind (the panel's unsaved choice).
 type mapOpts struct {
 	base     bool
 	selected map[int]bool
 	floors   map[int]int
-	f        int             // base only: resolution factor, the panel asks for more while zoomed in
-	layers   map[string]bool // base only: saved overlays the agent draws too (the panel draws the ones it has drafts of)
+	layers   map[string]bool
 }
 
 // The panel asks for the base layer on every page load; the last one is kept (the robot's CPU is slow).
 var baseCache struct {
 	sync.Mutex
 	key string
-	png []byte
+	svg []byte
 }
 
-// mapOptsFromQuery reads ?base=1&selected=1,3&floors=1:2,3:0.
+// mapOptsFromQuery reads ?base=1&selected=1,3&floors=1:2,3:0&layers=furniture,thresholds.
 func mapOptsFromQuery(q url.Values) mapOpts {
-	o := mapOpts{f: 1, base: q.Get("base") == "1", selected: map[int]bool{}, floors: map[int]int{}, layers: map[string]bool{}}
-	if f, err := strconv.Atoi(q.Get("f")); err == nil {
-		o.f = max(1, min(f, 4))
-	}
+	o := mapOpts{base: q.Get("base") == "1", selected: map[int]bool{}, floors: map[int]int{}, layers: map[string]bool{}}
 	for _, v := range strings.Split(q.Get("layers"), ",") {
 		o.layers[v] = true
 	}
@@ -87,273 +68,54 @@ func mapOptsFromQuery(q url.Values) mapOpts {
 	return o
 }
 
-// mapPNG renders the saved map with the station and, while cleaning, the robot and its path.
-func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
-	view, err := a.mapView()
-	if err != nil {
-		return nil, err
-	}
-	if view.Empty || len(view.Origin) != 2 {
-		return nil, errors.New("no saved map")
-	}
-	f := max(o.f, 1)
-	ms := mapScale * f
-	key := fmt.Sprintf("%s|%v|%v|%v|%d", view.Revision, o.selected, o.floors, o.layers, f)
-	if o.base {
-		baseCache.Lock()
-		defer baseCache.Unlock()
-		if baseCache.key == key {
-			return baseCache.png, nil
-		}
-	}
-	pad := 0 // room around the map for overlays that reach past it; the panel's base layer has none
-	if !o.base {
-		pad = view.overlayPad()
-	}
-	img := image.NewRGBA(image.Rect(0, 0, view.Width*ms+2*pad, view.Height*ms+2*pad))
-	// Floor texture as in the web UI: 2 tiles, 3 planks along y, 4 along x; 1 picks by the room's longer side.
-	box := map[uint8][4]int{}
-	for i, id := range view.Pixels {
-		if id == 0 || id == 255 {
-			continue
-		}
-		x, y := i%view.Width, i/view.Width
-		b, ok := box[id]
-		if !ok {
-			b = [4]int{x, x, y, y}
-		}
-		box[id] = [4]int{min(b[0], x), max(b[1], x), min(b[2], y), max(b[3], y)}
-	}
-	var kind [256]int
-	for _, r := range view.Rooms {
-		f, b := r.Floor, box[uint8(r.ID)]
-		if v, ok := o.floors[r.ID]; ok {
-			f = v
-		}
-		if f == 1 {
-			f = 3
-			if b[1]-b[0] > b[3]-b[2] {
-				f = 4
-			}
-		}
-		kind[uint8(r.ID)&255] = f
-	}
-	for i, id := range view.Pixels {
-		if id == 0 {
-			continue
-		}
-		c := wallColour
-		if id != 255 {
-			c = roomPalette[(int(id)-1)%len(roomPalette)]
-			if len(o.selected) > 0 && !o.selected[int(id)] {
-				c = scale(c, 42)
-			}
-		}
-		x, y := i%view.Width, view.Height-1-i/view.Width // map rows go up, image rows go down
-		k, dim := kind[id], scale(c, 84)
-		for dy := 0; dy < ms; dy++ {
-			for dx := 0; dx < ms; dx++ {
-				X, Y := x*ms+dx, y*ms+dy
-				px3, py3 := X/f, Y/f // the pattern is laid out for 3 pixels per cell and stretched
-				edge := k == 2 && (px3%36 == 0 || py3%36 == 0) || k == 4 && (py3%12 == 0 || (px3+(py3/12&1)*24)%48 == 0) || k == 3 && (px3%12 == 0 || (py3+(px3/12&1)*24)%48 == 0)
-				cc := c
-				if edge && id != 255 {
-					cc = dim
-				}
-				img.SetRGBA(X+pad, Y+pad, cc)
-			}
-		}
-	}
-	// Robot millimetres to image pixels.
-	px := func(p []int) (int, int) {
-		x, y := view.rawPx(p, ms)
-		return x + pad, y + pad
-	}
-	for _, r := range view.Rooms { // room number badge, as the web UI and the app
-		x, y := int((r.X+.5)*float64(ms))+pad, int((float64(view.Height)-r.Y-.5)*float64(ms))-9*f+pad
-		if x < 8*f || y < 8*f || x+8*f >= img.Rect.Dx() || y+8*f >= img.Rect.Dy() {
-			continue // the badge would not fit (a tiny map)
-		}
-		ring := scale(roomPalette[(r.ID-1)%len(roomPalette)], 100)
-		if len(o.selected) > 0 && !o.selected[r.ID] {
-			ring = scale(ring, 55)
-		}
-		disc(img, x, y, 8*f, ring)
-		disc(img, x, y, 6*f, obstacleRing)
-		digits(img, x, y, strconv.Itoa(r.Num), f)
-	}
-	drawOverlays(img, view, px, func(group string) bool { return !o.base || o.layers[group] }, ms)
-	if o.base {
-		baseCache.png, err = encodePNG(img)
-		baseCache.key = key
-		return baseCache.png, err
-	}
-	live := a.livePose()
-	if !live.Live || live.MapID != view.MapID {
-		live = livePose{}
-	}
-	// Floor and walls the robot found this run that the saved map lacks, inside the saved map's frame
-	// (the calibration points stay valid), as the web UI draws them.
-	for _, c := range live.NewCells {
-		x0, y0 := px([]int{c[0], c[1] + live.GridSize})
-		x1, y1 := px([]int{c[0] + live.GridSize, c[1]})
-		colour := newFloorColour
-		if c[2] == 2 {
-			colour = newWallColour
-		}
-		for y := max(y0, 0); y < min(y1, img.Rect.Dy()); y++ {
-			for x := max(x0, 0); x < min(x1, img.Rect.Dx()); x++ {
-				img.SetRGBA(x, y, colour)
-			}
-		}
-	}
-	passes := mopPasses(live.Path, img.Rect.Dx(), img.Rect.Dy(), mopWidth/2*ms/view.GridSize, px)
-	for i, n := range passes {
-		if n == 0 || img.Pix[i*4+3] == 0 { // only the floor gets wet
-			continue
-		}
-		alpha := mopAlpha[min(int(n), len(mopAlpha))-1]
-		p := img.Pix[i*4 : i*4+3]
-		for c, v := range []uint8{mopColour.R, mopColour.G, mopColour.B} {
-			p[c] = uint8((int(p[c])*(255-alpha) + int(v)*alpha) / 255)
-		}
-	}
-	for i := 1; i < len(live.Path); i++ {
-		x0, y0 := px(live.Path[i-1])
-		x1, y1 := px(live.Path[i])
-		line(img, x0, y0, x1, y1, pathColour)
-	}
-	for _, z := range live.Zones {
-		x0, y0 := px(z[:2])
-		x1, y1 := px(z[2:4])
-		for _, e := range [][4]int{{x0, y0, x1, y0}, {x1, y0, x1, y1}, {x1, y1, x0, y1}, {x0, y1, x0, y0}} {
-			line(img, e[0], e[1], e[2], e[3], targetColour)
-		}
-	}
-	for _, s := range live.Spots {
-		x, y := px(s)
-		disc(img, x, y, 4, targetColour)
-	}
-	for _, o := range view.Obstacles {
-		x, y := px(o[:2])
-		c := obstacleColour
-		if hazardTypes[o[2]] {
-			c = hazardColour
-		}
-		disc(img, x, y, 6, obstacleRing)
-		disc(img, x, y, 4, c)
-	}
-	// Sizes as in the app: the robot is 320 mm wide, the station 1.2 times the robot.
-	r := math.Max(6, float64(160*ms)/float64(view.GridSize))
-	charger := view.Charger
-	if live.Charger != nil {
-		charger = live.Charger
-	}
-	if charger != nil {
-		x, y := px(charger)
-		drawCharger(img, x, y, r*1.2)
-	}
-	robot, angle := live.Robot, live.Angle
-	if robot == nil && charger != nil {
-		robot = charger // off a run the robot sits on the station and covers it
-	}
-	if robot != nil {
-		x, y := px(robot)
-		drawRobot(img, x, y, r, angle)
-	}
-	return encodePNG(img)
-}
-
-func encodePNG(img image.Image) ([]byte, error) {
-	var out bytes.Buffer
-	if err := (&png.Encoder{CompressionLevel: png.BestSpeed}).Encode(&out, img); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
-}
+func colourHex(c color.RGBA) string { return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B) }
 
 func scale(c color.RGBA, percent int) color.RGBA {
 	return color.RGBA{uint8(int(c.R) * percent / 100), uint8(int(c.G) * percent / 100), uint8(int(c.B) * percent / 100), 255}
 }
 
-func disc(img *image.RGBA, cx, cy, r int, c color.RGBA) {
-	for y := -r; y <= r; y++ {
-		for x := -r; x <= r; x++ {
-			if x*x+y*y <= r*r {
-				img.SetRGBA(cx+x, cy+y, c)
+func (v mapView) rawPx(p []int) (int, int) {
+	return (p[0] - v.Origin[0]) * mapScale / v.GridSize, (v.Height*v.GridSize - (p[1] - v.Origin[1])) * mapScale / v.GridSize
+}
+
+// overlayPad is how far the saved overlays (zones, walls, thresholds, carpets, furniture, obstacles,
+// the station) reach past the map, in picture pixels; the picture grows by that on every side.
+// shortcut: capped at 150 pixels, a stray far-away point is cut instead of growing the picture.
+func (v mapView) overlayPad() int {
+	w, h := v.Width*mapScale, v.Height*mapScale
+	over := 0
+	note := func(x, y, r int) { over = max(over, r-x, x+r-w, r-y, y+r-h) }
+	pt := func(p []int) {
+		if len(p) >= 2 {
+			x, y := v.rawPx(p)
+			note(x, y, 0)
+		}
+	}
+	for _, list := range [][][]int{v.NoGo, v.NoMop, v.CarpetsAdded, v.CarpetsIgnored, v.Ramps, v.Walls, v.Passable, v.Impassable} {
+		for _, r := range list {
+			pt(r)
+			if len(r) >= 4 {
+				pt(r[2:])
 			}
 		}
 	}
-}
-
-// mopPasses counts, per image pixel, how many times the mop pads went over it. Pixels touched
-// again within 2 pad widths of travel belong to the same pass (the band of one line overlaps
-// itself at every point); coming back after moving further away is another pass.
-func mopPasses(path [][]int, w, h, r int, px func([]int) (int, int)) []uint8 {
-	count := make([]uint8, w*h)
-	last := make([]float64, w*h) // path length in mm when the pixel was last wetted
-	travelled := 0.0
-	for i := 1; i < len(path); i++ {
-		travelled += math.Hypot(float64(path[i][0]-path[i-1][0]), float64(path[i][1]-path[i-1][1]))
-		if len(path[i]) < 3 || path[i][2] != 1 {
-			continue
-		}
-		x0, y0 := px(path[i-1])
-		x1, y1 := px(path[i])
-		stroke(x0, y0, x1, y1, func(cx, cy int) {
-			for y := max(cy-r, 0); y <= min(cy+r, h-1); y++ {
-				for x := max(cx-r, 0); x <= min(cx+r, w-1); x++ {
-					if (x-cx)*(x-cx)+(y-cy)*(y-cy) > r*r {
-						continue
-					}
-					k := y*w + x
-					if count[k] == 0 || travelled-last[k] > 2*mopWidth {
-						count[k] = min(count[k]+1, 3)
-					}
-					last[k] = travelled
-				}
-			}
-		})
-	}
-	return count
-}
-
-// line draws with Bresenham's algorithm; SetRGBA ignores points outside the image.
-func line(img *image.RGBA, x0, y0, x1, y1 int, c color.RGBA) {
-	stroke(x0, y0, x1, y1, func(x, y int) { img.SetRGBA(x, y, c) })
-}
-
-func stroke(x0, y0, x1, y1 int, plot func(x, y int)) {
-	dx, dy := abs(x1-x0), -abs(y1-y0)
-	sx, sy := 1, 1
-	if x0 > x1 {
-		sx = -1
-	}
-	if y0 > y1 {
-		sy = -1
-	}
-	for e := dx + dy; ; {
-		plot(x0, y0)
-		if x0 == x1 && y0 == y1 {
-			return
-		}
-		e2 := 2 * e
-		if e2 >= dy {
-			e += dy
-			x0 += sx
-		}
-		if e2 <= dx {
-			e += dx
-			y0 += sy
+	for _, c := range v.Carpets {
+		for i := 0; i+1 < len(c.Points); i += 2 {
+			pt(c.Points[i : i+2])
 		}
 	}
-}
-
-func abs(v int) int {
-	if v < 0 {
-		return -v
+	for _, f := range v.Furniture {
+		x, y := v.rawPx([]int{f.X, f.Y})
+		note(x, y, int(math.Hypot(float64(f.Width*mapScale), float64(f.Height*mapScale))/float64(v.GridSize)/2)+2)
 	}
-	return v
+	for _, o := range v.Obstacles {
+		pt(o)
+	}
+	pt(v.Charger)
+	if over <= 0 {
+		return 0
+	}
+	return min(over+8, 150)
 }
 
 // mapCard is what a Home Assistant map card needs next to map.png: how robot millimetres land
@@ -438,24 +200,4 @@ func roomOutline(view mapView, id int) [][2]int {
 		out = append(out, p)
 	}
 	return out
-}
-
-// 3x5 digits, 2x scaled, centred on (cx, cy): enough for room numbers without a font.
-var digitFont = [10][5]uint8{{7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7}, {5, 5, 7, 1, 1}, {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 1, 1}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}}
-
-func digits(img *image.RGBA, cx, cy int, s string, f int) {
-	x0 := cx - (len(s)*8-2)*f/2
-	for n, ch := range s {
-		for row := 0; row < 5; row++ {
-			for col := 0; col < 3; col++ {
-				if digitFont[ch-'0'][row]>>(2-col)&1 == 1 {
-					for dy := 0; dy < 2*f; dy++ {
-						for dx := 0; dx < 2*f; dx++ {
-							img.SetRGBA(x0+(n*8+col*2)*f+dx, cy+(-5+row*2)*f+dy, color.RGBA{255, 255, 255, 255})
-						}
-					}
-				}
-			}
-		}
-	}
 }

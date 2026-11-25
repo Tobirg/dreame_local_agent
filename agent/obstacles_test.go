@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"image/color"
-	"image/png"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -66,12 +64,11 @@ func TestObstaclesOnMapPNG(t *testing.T) {
 	writeFile(t, a, "/data/log/map_info.bin", string(maps))
 	// A sock (hazard) at the centre of the 3x3 map of 50 mm cells: image pixel (4, 4).
 	writeFile(t, a, obstaclesFile, `{"map_id":2,"at":"2026-11-22T15:00:00Z","obstacles":[[-25,-125,134,90]]}`)
-	b, err := a.mapPNG(mapOpts{})
+	b, err := a.mapSVG(mapOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	img, _ := png.Decode(bytes.NewReader(b))
-	if got := color.RGBAModel.Convert(img.At(4, 4)).(color.RGBA); got != hazardColour {
-		t.Fatal("obstacle", got)
+	if !strings.Contains(string(b), `<circle cx="4.5" cy="4.5" r="4" fill="#ff6b6b"/>`) {
+		t.Fatal("obstacle", string(b))
 	}
 }

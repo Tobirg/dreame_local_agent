@@ -515,11 +515,12 @@ function renderRoomButtons(){
 // Rooms with their floor pattern at canvas size, rebuilt only when the map, the selection or a floor draft changes.
 // Pattern sizes in map cells as the app's buildFloorMap: tiles 12, planks 4 × 16 laid in a half-board offset.
 const roomIcons={1:'🛋',2:'🛏',15:'🛏',3:'📚',4:'🍲',5:'🍽',6:'🛁',7:'🌿',8:'👣',9:'📦',10:'👔',11:'🚪',12:'💼',13:'🏋',14:'☕'};
-let baseCache={key:'',canvas:null,pending:'',layers:null};
+let baseCache={key:'',pending:'',layers:null,url:''};
 function floorOf(room){const draft=$('room-floors').querySelector(`[data-room="${room.id}"]`)?.value;return draft===undefined?room.floor||0:Number(draft);}
-// The base layer (floors, walls, room badges) and the saved furniture, restrictions and thresholds are drawn by the
-// agent, the same code as the picture for Home Assistant. The panel draws a layer itself only while it has a draft
-// of it. The previous picture stays until the new one arrives.
+// The base layer (floors, walls, room numbers) and the saved furniture, restrictions and thresholds are one SVG drawn
+// by the agent, the same picture as in Home Assistant. It sits under the canvas as an <img>, so the browser
+// redraws it sharp at every zoom and nothing is fetched again. The panel draws a layer itself only while it has a
+// draft of it. The previous picture stays until the new one arrives.
 const draftOf={restrictions:()=>restrictDraft,thresholds:()=>thresholdDraft?.line};
 const agentDraws=g=>baseCache.layers?.has(g)&&!draftOf[g]?.();
 function baseLayer(){
@@ -527,11 +528,10 @@ function baseLayer(){
   key=view.revision+'|'+sel+'|'+floors+'|'+layers;
  if(baseCache.key!==key&&baseCache.pending!==key){
   baseCache.pending=key;
-  fetch('/api/v1/map.png?base=1&selected='+sel+'&floors='+floors+'&layers='+layers,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
-   .then(r=>r.ok?r.blob():Promise.reject(Error('map.png '+r.status))).then(createImageBitmap)
-   .then(bitmap=>{if(baseCache.pending===key){baseCache={key,canvas:bitmap,pending:'',layers:new Set(layers)};draw();}},()=>{if(baseCache.pending===key)baseCache.pending='';});
+  fetch('/api/v1/map.svg?base=1&selected='+sel+'&floors='+floors+'&layers='+layers,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
+   .then(r=>r.ok?r.blob():Promise.reject(Error('map.svg '+r.status)))
+   .then(blob=>{if(baseCache.pending!==key)return;const url=URL.createObjectURL(blob);$('map-base').src=url;if(baseCache.url)URL.revokeObjectURL(baseCache.url);baseCache={key,pending:'',layers:new Set(layers),url};draw();},()=>{if(baseCache.pending===key)baseCache.pending='';});
  }
- return baseCache.canvas;
 }
 // The whole map fits the window at 100%; the buttons zoom from there and only a zoomed map scrolls inside its frame.
 let zoom=1,res=0; // res: canvas pixels per 3 drawing units; the canvas gets sharper while zoomed in
@@ -583,8 +583,7 @@ function draw(){
  layoutMap();
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;ctx.setTransform(res,0,0,res,0,0);
- const scale=3;{const base=baseLayer();if(base){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(base,0,0,view.width*3,view.height*3);}}
- // (the same picture as in Home Assistant, smoothly enlarged)
+ const scale=3;baseLayer();
  // Room labels like the app: type icon and name (the number badge is in the agent's picture).
  ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
  for(const room of view.rooms){

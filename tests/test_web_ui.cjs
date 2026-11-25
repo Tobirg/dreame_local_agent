@@ -23,20 +23,12 @@ const pushEvent=()=>{for(const c of eventClients)c.write('event: state\ndata: '+
  for(const s of ids)assert(seen.has(s)||pages.some(p=>new RegExp(p.match).test(s)),'setting without a page: '+s);
  for(const a of actions)assert(pages.some(p=>p.title===a.page),'action on an unknown page: '+a.command);
 })().catch(e=>{console.error(e);process.exit(1);});
-function stubPng(w,h){ // the agent's map picture, as a flat grey PNG
- const crcT=[...Array(256)].map((_,n)=>{let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0;});
- const crc=b=>{let c=0xffffffff;for(const x of b)c=crcT[(c^x)&255]^(c>>>8);return(c^0xffffffff)>>>0;};
- const chunk=(t,d)=>{const l=Buffer.alloc(4);l.writeUInt32BE(d.length);const td=Buffer.concat([Buffer.from(t),d]),c=Buffer.alloc(4);c.writeUInt32BE(crc(td));return Buffer.concat([l,td,c]);};
- const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(w,0);ihdr.writeUInt32BE(h,4);ihdr[8]=8;ihdr[9]=2;
- const raw=Buffer.alloc((w*3+1)*h,0x80);for(let y=0;y<h;y++)raw[y*(w*3+1)]=0;
- return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',require('zlib').deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]);
-}
 const server=http.createServer((req,res)=>{
  if(req.method==='GET'&&req.url.startsWith('/m/demo/panel.js')){
   res.setHeader('Content-Type','text/javascript; charset=utf-8');
   res.end("export default function mount(el,ctx){el.innerHTML='<p data-t=state></p><button data-t=ping>Ping</button>';ctx.onState(s=>{el.querySelector('[data-t=state]').textContent='battery '+s.battery;});el.querySelector('[data-t=ping]').onclick=async()=>{const r=await ctx.call('ping',{n:1});el.querySelector('[data-t=state]').dataset.reply=r.action;};}");return;
  }
- if(req.method==='GET'&&req.url.startsWith('/api/v1/map.png')){res.setHeader('Content-Type','image/png');res.end(stubPng(120,84));return;}
+ if(req.method==='GET'&&req.url.startsWith('/api/v1/map.svg')){res.setHeader('Content-Type','image/svg+xml');res.end('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="84" viewBox="0 0 120 84"><rect width="120" height="84" fill="#888"/></svg>');return;}
  if(req.method==='GET'&&req.url.startsWith('/api/v1/')){
   res.setHeader('Content-Type','application/json');
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
@@ -59,7 +51,7 @@ const server=http.createServer((req,res)=>{
   if(!name){res.writeHead(404);res.end();return;}
   const type=name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html';
   res.setHeader('Content-Type',type+'; charset=utf-8');
-  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'none'");
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'none'");
   res.end(fs.readFileSync(path.join(root,name)));return;
  }
  let body='';req.on('data',b=>body+=b);req.on('end',()=>{
@@ -108,7 +100,7 @@ const server=http.createServer((req,res)=>{
  const url='http://127.0.0.1:'+server.address().port;
  const browser=await chromium.launch({headless:true,executablePath:process.env.DREAME_TEST_CHROMIUM||undefined,args:['--no-sandbox','--disable-dev-shm-usage','--no-zygote']});
  const page=await browser.newPage({viewport:{width:1280,height:1000}}),errors=[],external=[];
- page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(!r.url().startsWith(url))external.push(r.url());});
+ page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(!r.url().startsWith(url)&&!r.url().startsWith('blob:'+url))external.push(r.url());});
  try{
   await page.goto(url);assert(await page.locator('#login').isVisible());
   await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});await page.getByRole('button',{name:'Кухня · 1',exact:true}).waitFor();

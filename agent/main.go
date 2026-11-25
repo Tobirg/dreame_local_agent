@@ -530,17 +530,17 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
-	case "/api/v1/map.png":
+	case "/api/v1/map.svg":
 		if r.Method != "GET" {
 			send(405, map[string]string{"error": "GET required"})
 			return
 		}
-		img, err := a.mapPNG(mapOptsFromQuery(r.URL.Query()))
+		img, err := a.mapSVG(mapOptsFromQuery(r.URL.Query()))
 		if err != nil {
 			send(404, map[string]string{"error": err.Error()})
 			return
 		}
-		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Type", "image/svg+xml")
 		_, _ = w.Write(img)
 		return
 	case "/api/v1/map":

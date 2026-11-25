@@ -173,6 +173,8 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 
 /* Map: animated status marker over the robot (one element, compositor-only animations). */
 .map-wrap{position:relative;flex:none}
+#map-base{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;user-select:none}
+.map-wrap canvas{position:relative}
 .map-zoom{display:flex;gap:6px;align-items:center}.map-zoom button{margin:0}
 .map-marker{position:absolute;width:0;height:0;pointer-events:none}
 .map-marker::before,.map-marker::after{position:absolute;left:0;top:0;transform:translate(-50%,-50%)}
