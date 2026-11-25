@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -41,7 +42,7 @@ func TestCameraPatrol(t *testing.T) {
 	if _, _, err := a.detailCommand(commandParams{Name: "go_to", Points: [][]int{{0, 0}, {1, 1}}}, "1"); err == nil {
 		t.Fatal("go_to with two points accepted")
 	}
-	if _, err := a.startPatrol(commandParams{Name: "patrol", Points: [][]int{{0, 0}, {90000, 0}}}, "1"); err == nil {
+	if _, err := a.startPatrol(context.Background(), commandParams{Name: "patrol", Points: [][]int{{0, 0}, {90000, 0}}}, "1"); err == nil {
 		t.Fatal("point off the map accepted")
 	}
 }
