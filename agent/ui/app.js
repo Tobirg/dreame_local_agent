@@ -991,14 +991,18 @@ function settingControl(def,value){
 // Groups in the order of the app's settings pages; the first matching rule wins.
 const settingGroups=[['Уборка',/^(cleaning_mode|mop_humidity|wetness_level|cleangenius(_mode)?|cleaning_route|customized_cleaning|tight_mopping|auto_recleaning|resume_cleaning|max_suction_power|ultra_clean_mode|mopping_type)$/],['Ковры',/carpet/],
  ['Чистка пола',/^(collision_avoidance|floor_direction_cleaning|stain_avoidance|side_reach|mop_extend(_frequency)?|gap_cleaning_extension|mopping_under_furnitures|auto_mount_mop|mop_pad_swing|wider_corner_coverage|pet_focused_cleaning|dynamic_obstacle_cleaning|pressurized_cleaning|mop_pressure|ai_bit_large_particles_boost)$/],
- ['Базовая станция',/wash|dry|uv_|dust|empty|hair|detergent|water|self_clean|mop_temperature|scraper|low_lying|change_mop|mop_cleaning_remainder/],['Препятствия и ИИ',/^ai_|obstacle|crossing|fill_light|intelligent_recognition|human_follow|lds/],
- ['Голос',/voice/],['Не беспокоить',/^dnd/],['Прочее',/./]];
-// The station group lives in the station panel, next to its commands; the rest stay under «Все настройки пылесоса».
-const settingHomes={'Базовая станция':'station-settings'};
+ ['Базовая станция',/^(?!dnd_).*(wash|dry|uv_|dust|empty|hair|detergent|water|self_clean|mop_temperature|scraper|low_lying|change_mop|mop_cleaning_remainder)/],['Препятствия и ИИ',/^ai_|obstacle|crossing|fill_light|intelligent_recognition|human_follow|lds/],
+ ['Голос',/voice/],['Что ограничивает ночной режим',/^dnd_(disable|reduce)/],['Не беспокоить',/^dnd/],['Прочее',/./]];
+// Groups with their own panel show there, next to the matching controls; if that panel is hidden
+// (no rights or the robot lacks it) they stay under «Все настройки пылесоса».
+const settingHomes={'Базовая станция':'station-settings','Голос':'voice-settings','Что ограничивает ночной режим':'dnd-settings'};
 function settingGroup(id){
- const index=settingGroups.findIndex(([,rule])=>rule.test(id)),list=$('settings-list');
- if(list.children.length!==settingGroups.length-Object.keys(settingHomes).length)for(const [title] of settingGroups){const g=document.createElement('section');g.className='setting-group';g.hidden=true;g.dataset.group=title;if(!settingHomes[title])g.append(Object.assign(document.createElement('h3'),{textContent:title}));($(settingHomes[title])||list).append(g);}
- return document.querySelector(`.setting-group[data-group="${settingGroups[index][0]}"]`);
+ const title=settingGroups.find(([,rule])=>rule.test(id))[0];
+ if(!document.querySelector('.setting-group'))for(const [name] of settingGroups){
+  const g=document.createElement('section'),home=$(settingHomes[name]),inHome=home&&!home.closest('[hidden]');g.className='setting-group';g.hidden=true;g.dataset.group=name;
+  if(!inHome)g.append(Object.assign(document.createElement('h3'),{textContent:name}));(inHome?home:$('settings-list')).append(g);
+ }
+ return document.querySelector(`.setting-group[data-group="${title}"]`);
 }
 function renderSettings(){
  const query=$('settings-search').value.trim().toLocaleLowerCase();let available=0;
@@ -1024,7 +1028,7 @@ function renderSettings(){
    row.append(label,input,apply);settingsRows.set(def.id,row);settingGroup(def.id).append(row);
   }else if(!settingsDirty.has(def.id))row.setInput(value);
   row.querySelector('.setting-current').textContent='Сейчас: '+(typeof value==='object'?(value.enabled?'включено':'выключено')+' '+value.start+'–'+value.end:typeof value==='boolean'?(value?'включено':'выключено'):String(value));
-  row.hidden=!def.label.toLocaleLowerCase().includes(query)&&!row.closest('#station-settings');
+  row.hidden=!def.label.toLocaleLowerCase().includes(query)&&!row.closest('#station-settings,#voice-settings,#dnd-settings');
  }
  for(const group of document.querySelectorAll('.setting-group'))group.hidden=![...group.querySelectorAll('.setting-row')].some(r=>!r.hidden);
  $('settings-status').textContent='Доступно настроек: '+available;
@@ -1038,7 +1042,7 @@ async function refreshSettings(){
   settingsSnapshot=snapshot;for(const [id,row]of settingsRows){const def=settings.find(x=>x.id===id);if(decodeSetting(def,snapshot)===undefined)row.hidden=true;}renderSettings();
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('settings-status').textContent=e.message;connectionLost(e.message);}}finally{if(epoch===viewEpoch)settingsLoading=false;}
 }
-$('settings-details').ontoggle=$('station-settings-details').ontoggle=e=>{if(e.target.open)refreshSettings();};$('refresh-settings').onclick=()=>refreshSettings();$('settings-search').oninput=()=>renderSettings();
+for(const id of ['settings-details','station-settings-details','voice-settings-details','dnd-settings-details'])$(id).ontoggle=e=>{if(e.target.open)refreshSettings();};$('refresh-settings').onclick=()=>refreshSettings();$('settings-search').oninput=()=>renderSettings();
 
 async function rebootRobot(){
  if(busy||!window.confirm('Перезагрузить робот? Связь временно пропадёт.'))return;
@@ -1051,7 +1055,7 @@ function scheduleResume(){clearTimeout(resumeTimer);resumeTimer=setTimeout(async
  if(document.hidden||!token)return;if(busy){scheduleResume();return;}
  suspendReads();
  if($('dashboard').hidden){try{await login();}catch(e){if(!e.suspended)connectionLost(e.message);}return;}
- await refresh();streamEvents();await refreshMap();if($('settings-details').open||$('station-settings-details').open)await refreshSettings();
+ await refresh();streamEvents();await refreshMap();if(document.querySelector('[id$=settings-details][open]'))await refreshSettings();
  },250);}
 $('reconnect').onclick=scheduleResume;
 document.addEventListener('visibilitychange',()=>{if(document.hidden)suspendReads();else scheduleResume();});
