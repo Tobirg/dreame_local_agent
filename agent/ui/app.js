@@ -543,6 +543,36 @@ function layoutMap(){
 const setZoom=z=>{zoom=Math.min(6,Math.max(.4,z));layoutMap();};
 $('zoom-in').onclick=()=>setZoom(zoom*1.25);$('zoom-out').onclick=()=>setZoom(zoom/1.25);$('zoom-fit').onclick=()=>setZoom(1);
 addEventListener('resize',layoutMap);
+// Wheel and pinch zoom around the pointer; holding the mouse drags the map (a finger scrolls the zoomed map natively).
+const mapStage=document.querySelector('.map-stage'),touches=new Map();
+function zoomAt(z,cx,cy){
+ const r=canvas.getBoundingClientRect(),fx=(cx-r.left)/r.width,fy=(cy-r.top)/r.height;
+ setZoom(z);const n=canvas.getBoundingClientRect();
+ mapStage.scrollLeft+=n.left+fx*n.width-cx;mapStage.scrollTop+=n.top+fy*n.height-cy;
+}
+mapStage.addEventListener('wheel',e=>{e.preventDefault();zoomAt(zoom*Math.exp(-e.deltaY*(e.deltaMode?.05:.0015)),e.clientX,e.clientY);},{passive:false});
+let pan=null,pinch=0;
+const pinchDist=()=>{const [a,b]=[...touches.values()];return Math.hypot(a.x-b.x,a.y-b.y);};
+mapStage.addEventListener('pointerdown',e=>{
+ if(e.pointerType==='touch'){touches.set(e.pointerId,{x:e.clientX,y:e.clientY});if(touches.size===2)pinch=pinchDist();return;}
+ if(e.button!==0||(zoneDrawing&&!zoneSpot))return;
+ pan={x:e.clientX,y:e.clientY,l:mapStage.scrollLeft,t:mapStage.scrollTop,moved:false};
+});
+mapStage.addEventListener('pointermove',e=>{
+ if(touches.has(e.pointerId)){
+  touches.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(touches.size===2&&pinch){const [a,b]=[...touches.values()],d=pinchDist();zoomAt(zoom*d/pinch,(a.x+b.x)/2,(a.y+b.y)/2);pinch=d;}
+  return;
+ }
+ if(!pan||!(e.buttons&1))return;
+ const dx=e.clientX-pan.x,dy=e.clientY-pan.y;
+ if(!pan.moved&&Math.hypot(dx,dy)>6){pan.moved=true;mapStage.classList.add('panning');mapStage.setPointerCapture?.(e.pointerId);}
+ if(pan.moved){mapStage.scrollLeft=pan.l-dx;mapStage.scrollTop=pan.t-dy;}
+});
+const endPointer=e=>{touches.delete(e.pointerId);if(touches.size<2)pinch=0;if(pan?.moved)setTimeout(()=>{panMoved=false;},0);panMoved=!!pan?.moved;pan=null;mapStage.classList.remove('panning');};
+let panMoved=false;
+mapStage.addEventListener('pointerup',endPointer);mapStage.addEventListener('pointercancel',endPointer);
+mapStage.addEventListener('click',e=>{if(panMoved){e.stopPropagation();e.preventDefault();panMoved=false;}},true); // a drag is not a tap on a room
 function draw(){
  layoutMap();
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
