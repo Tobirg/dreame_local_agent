@@ -135,7 +135,7 @@ const server=http.createServer((req,res)=>{
   await shown('logs-panel');await sheet('logs');await page.locator('#logs-details').evaluate(d=>d.open=true);await page.locator('#log-source').selectOption('mqtt');assert.equal(await page.locator('#log-text').textContent(),'connected to broker');
   const openFolds=()=>page.evaluate(()=>document.querySelectorAll('#voice-panel>details,#tokens-panel>details,#update-panel>details,#history-details').forEach(d=>d.open=true));
   await openFolds();
-  await shown('voice-panel');await sheet('voice');assert.match(await page.locator('#voice').innerText(),/голосом ZH[^]*RU загружен/);
+  await shown('voice-panel');await sheet('voice');assert(await page.locator('#sheet-voice #volume').isVisible(),'volume lives in the voice sheet');assert.equal(await page.locator('#sheet-all-settings #volume').count(),0);assert.match(await page.locator('#voice').innerText(),/голосом ZH[^]*RU загружен/);
   await page.locator('#voice details >> nth=1').evaluate(d=>d.open=true);await page.locator('#voice [data-hear="45"]').waitFor();assert.match(await page.locator('#voice [data-r=phrases]').innerText(),/45 I am here\.[^]*700 —/);
   await page.locator('#voice [data-use=RU]').click();await page.waitForFunction(()=>document.querySelector('#voice').textContent.includes('голосом RU'));assert.deepEqual(commands.at(-1),{method:'/api/v1/voice/use',params:{id:'RU'}});
   await page.evaluate(async()=>(await import('/app.js')).closeSheet());
