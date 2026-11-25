@@ -263,8 +263,6 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 .map-marker.sleep::before,.map-marker.sleep::after{content:"z";font:700 10px/1 var(--body);color:#c8d2d9;left:var(--r,8px);top:calc(var(--r,8px)*-1);opacity:0}
 .map-marker.sleep::before{animation:sleep-top 4.2s linear infinite}
 .map-marker.sleep::after{top:calc(var(--r,8px)*-1 + 2px);animation:sleep-bot 4.2s linear infinite}
-.map-marker.heat::after{content:"♨";font-size:15px;color:#ff9a62;left:0;top:calc(var(--r,8px)*-2.2);animation:marker-float 1.8s ease-in-out infinite}
-.map-marker.wash::after{content:"💧";font-size:12px;left:0;top:calc(var(--r,8px)*-2.2);animation:marker-float 1.4s ease-in-out infinite}
 /* Charging as in the app: a green glow 1.5 times the robot breathing around it. */
 .map-marker.charge::before{content:"";width:calc(var(--r,8px)*3);height:calc(var(--r,8px)*3);border-radius:50%;background:radial-gradient(circle,rgba(94,219,114,0) 58%,rgba(94,219,114,.8) 68%,rgba(94,219,114,0) 100%);animation:marker-glow 2s ease-in-out infinite}
 @keyframes marker-pulse{from{transform:translate(-50%,-50%) scale(.5);opacity:.9}to{transform:translate(-50%,-50%) scale(1.4);opacity:0}}
@@ -367,8 +365,8 @@ body[data-mode=room][data-selected] .clear-sel{display:flex}
 .volume-row{align-items:end;margin:8px 0 12px}
 .volume-row label{flex:1}
 
-.tune-card{display:flex;flex-direction:column;gap:10px}.tune-card .room-options,#tune-settings{display:contents}#tune-settings .setting-group{display:contents}.tune-card [data-setting=cleaning_mode]{order:-1}
-.setting-row input[type=range]{width:100%;accent-color:var(--accent,#3b82f6)}
+.tune-card{display:flex;flex-direction:column;gap:10px}.tune-card .room-options,#tune-settings{display:contents}#tune-settings .setting-group{display:contents}.tune-card [data-setting=cleaning_mode]{order:-1}.tune-card [data-setting=wetness_level]{order:1}.tune-card [data-setting=self_clean_frequency]{order:2}.tune-card [data-setting=self_clean_value]{order:3}.tune-card [data-setting=cleaning_route]{order:4}
+.setting-row input[type=range]{width:100%;accent-color:var(--go)}
 #map-labels{position:absolute;inset:0;pointer-events:none;overflow:visible}
 .room-label{position:absolute;transform:translate(-50%,.15em);white-space:nowrap;color:#fff;font-weight:600;line-height:1.2;text-shadow:0 0 2px rgba(23,35,45,.95),0 0 4px rgba(23,35,45,.8)}
 .room-label.dim{opacity:.55}
@@ -398,3 +396,36 @@ body[data-monitor]{overflow:hidden}
 .mon-pad button:nth-child(1){grid-area:a}.mon-pad button:nth-child(2){grid-area:b}.mon-pad button:nth-child(3){grid-area:c}.mon-pad button:nth-child(4){grid-area:d}
 .mon-pad svg{width:30px;height:30px}
 @media (max-width:420px){.mon-mini{width:120px;height:90px}.mon-left{left:142px}.mon-right{grid-template-columns:64px}.mon-pad{width:150px;height:150px}}
+/* Station bubble (app plugin renderWashAnim): fan while washing (orange with hot water, blue without), heat waves while drying, purple bin while emptying dust. */
+.station-bubble{position:absolute;pointer-events:none;z-index:2;filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))}
+.station-bubble svg{width:100%;height:100%;display:block;overflow:visible;stroke:none}
+.station-bubble .fan{fill:#4da3ff;transform-origin:24px 24px;animation:sb-spin 1.2s linear infinite}
+.station-bubble.hot .fan{fill:#ff8a3d}
+.station-bubble.paused .fan{animation:none}
+.station-bubble .waves{stroke:#ffb36b}
+.station-bubble .waves path{animation:sb-rise 1.6s ease-in-out infinite}
+.station-bubble .waves path:nth-child(2){animation-delay:.3s}.station-bubble .waves path:nth-child(3){animation-delay:.6s}
+.station-bubble.bagdry .waves{stroke:#ffd896}
+.station-bubble .bubbles circle{animation:sb-bubble 1.4s ease-in infinite}
+.station-bubble .bubbles circle:nth-child(2){animation-delay:.45s}.station-bubble .bubbles circle:nth-child(3){animation-delay:.9s}
+@keyframes sb-spin{to{transform:rotate(360deg)}}
+@keyframes sb-rise{0%{transform:translateY(4px);opacity:0}40%{opacity:1}100%{transform:translateY(-5px);opacity:0}}
+@keyframes sb-bubble{0%{transform:translateY(8px) scale(.6);opacity:0}30%{opacity:1}100%{transform:translateY(-8px) scale(1);opacity:0}}
+@media (prefers-reduced-motion:reduce){.station-bubble *{animation:none!important}}
+/* «Настроить» like the app: each choice is a section with a title and a row of round icons with captions. */
+.tune-card{display:flex;flex-direction:column;gap:12px;background:none;border:0;box-shadow:none;padding:0}
+.tune-card .room-options>label,#tune-settings .setting-row{display:block;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 14px 12px;margin:0;font-size:16px;font-weight:700;color:var(--ink)}
+.tune-card .room-options>label[hidden],#tune-settings .setting-row[hidden]{display:none}
+#tune-settings .setting-row>label{display:flex;justify-content:space-between;align-items:baseline;font-size:16px;font-weight:700}
+#tune-settings .setting-current{display:none}
+#tune-settings .setting-row:has(input[type=range]) .setting-current{display:block;font-size:20px;font-weight:700;color:var(--go);margin:0}
+#tune-settings .setting-row input[type=range]{display:block;width:100%;max-width:none;margin:14px 0 4px;height:28px}
+#tune-settings .setting-row .setting-apply{display:none}
+.chips.icons{display:flex;gap:4px;margin:12px 0 0;overflow-x:auto;scrollbar-width:none}
+.chips.icons button{flex:1 0 66px;display:flex;flex-direction:column;align-items:center;gap:7px;padding:2px 0;background:none;border:0;border-radius:12px;font-size:13px;font-weight:500;color:var(--ink);line-height:1.2;white-space:normal;text-align:center}
+.chips.icons .ic{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:var(--paper);transition:background .15s,color .15s}
+.chips.icons .ic svg{width:26px;height:26px}
+.chips.icons button[aria-checked=true]{color:var(--go);font-weight:700;background:none}
+.chips.icons button[aria-checked=true] .ic{background:var(--go-soft);color:var(--go);box-shadow:inset 0 0 0 1.5px var(--go)}
+#tune-settings .setting-row:has(input[type=range]) .setting-current::after{content:attr(data-unit);font-size:14px;font-weight:600}
+.chips.icons .cap{hyphens:auto;overflow-wrap:anywhere}

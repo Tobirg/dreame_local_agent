@@ -7,7 +7,8 @@ const $=id=>document.getElementById(id);
 const captiveSetup=new URLSearchParams(location.search).get('setup')==='wifi';
 const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',13:'Ручное управление',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту',15:'Тестовый режим',1527:'Саморемонт станции',22:'Патрулирование',23:'Едет к точке камеры',1501:'Проверка воды'};
 // Station codes observed on r2505; other codes are shown as numbers.
-const stationNames={0:'ожидание',1:'мойка салфеток',2:'сушка'};
+// 4/25 as the app plugin names it (washStation).
+const stationNames={0:'ожидание',1:'мойка салфеток',2:'сушка',3:'возврат на мойку',4:'мойка на паузе',5:'набор воды',6:'грязная вода, возврат на станцию',7:'швабре нужна вода'};
 const palette=['#7fd9c2','#a3bcec','#e5bd8a','#bcaceb','#a7d39a','#e3a5b4','#93cdd9','#d4d093'];
 // Embedded in a dashboard (Home Assistant): /?embed=1#token=… shows only the map and the start controls; the token
 // comes in the fragment (never sent to a server), is kept for the tab only and is removed from the address.
@@ -272,7 +273,7 @@ function renderState(snap){
   if(!snap?.state||typeof snap.state!=='object')throw Error('Некорректный ответ статуса');
   if(snap.stale&&!snap.updated_at)throw Error(snap.error||'Агент ещё не прочитал состояние робота');
   const s=snap.state;
-  $('status').textContent=statusNames[s.status]||(s.status>1510&&s.status<1600?'Самопроверка: проверка '+(s.status-1510):'Статус '+(s.status??'недоступен'));
+  $('status').textContent=s.dust_status===1?'Автоочистка':statusNames[s.status]||(s.status>1510&&s.status<1600?'Самопроверка: проверка '+(s.status-1510):'Статус '+(s.status??'недоступен'));
   $('battery').textContent=s.battery===undefined?'—':s.battery+'%';$('battery').style.setProperty('--charge',(s.battery??0)+'%');
   $('stat-area').textContent=Number.isFinite(s.cleaned_area)?String(s.cleaned_area):'—';$('stat-time').textContent=Number.isFinite(s.cleaning_time)?String(s.cleaning_time):'—';document.body.dataset.activity=s.activity||'';
   $('updated').textContent='Обновлено '+new Date(snap.updated_at).toLocaleTimeString();
@@ -284,7 +285,7 @@ function renderState(snap){
   $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—')+(s.error_name?' ('+s.error_name+')':'');
   $('robot-error').hidden=!s.error;$('robot-error').textContent=s.error?'Ошибка '+s.error+': '+errorText(s):'';
   renderCare(s);
-  const look=[s.activity,s.station,s.charging,s.battery===100].join();if(look!==robotLook){robotLook=look;robotState=s;if(view&&!view.empty)draw();}robotState=s;
+  const look=[s.activity,s.station,s.charging,s.battery===100,s.dust_status,s.dust_bag_dry,s.hot_water,s.water_temperature].join();if(look!==robotLook){robotLook=look;robotState=s;if(view&&!view.empty)draw();}robotState=s;
   // The agent records a finished run after its next totals read; reload the history then.
   const active=['cleaning','paused','returning'].includes(s.activity);if(wasActive&&!active)setTimeout(()=>{loadHistory().catch(()=>{});loadMessages().catch(()=>{});},12000);wasActive=active;followLive(active);
   for(const listener of stateListeners)try{listener.fn(s);}catch{}
@@ -347,7 +348,7 @@ function drawLive(){
  const docked=!current?.robot&&charger&&robotState?.activity==='docked',pos=current?.robot?px(...current.robot):docked?px(...charger):null;
  if(pos)drawRobot(pos[0],pos[1],current?.robot?current.angle:null,r);
  ctx.restore();
- placeMarker(pos,r);
+ placeMarker(pos,r);placeStation(charger?px(...charger):null,r);
 }
 // The app's dock_log: light green disc, green rim and bolt.
 function drawCharger(x,y,r){
@@ -360,11 +361,34 @@ function drawRobot(x,y,angle,r){
  ctx.fillStyle='#4da3ff';ctx.beginPath();ctx.arc(x,y,r*.4,0,Math.PI*2);ctx.fill();
  if(Number.isFinite(angle)){const a=-angle*Math.PI/180;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+Math.cos(a)*r*.55,y+Math.sin(a)*r*.55);ctx.lineTo(x+Math.cos(a)*r*.92,y+Math.sin(a)*r*.92);ctx.stroke();}
 }
+// The station bubble of the app (plugin renderWashAnim): above the dock, a little to the left, looping.
+// Dust emptying wins over drying, drying over washing; a paused wash shows the fan standing still.
+function stationJob(s){
+ if(s.dust_status===1)return 'dust';if(s.dust_bag_dry===1)return 'bagdry';if(s.station===2)return 'dry';
+ if(s.station===4)return 'wash paused';if(s.station===1||s.station===5)return 'wash';return '';
+}
+const stationArt={
+ wash:'<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff"/><g class="fan"><ellipse cx="24" cy="14.5" rx="5.2" ry="8.5"/><ellipse cx="24" cy="14.5" rx="5.2" ry="8.5" transform="rotate(120 24 24)"/><ellipse cx="24" cy="14.5" rx="5.2" ry="8.5" transform="rotate(240 24 24)"/></g><circle cx="24" cy="24" r="3.2" fill="#fff"/></svg>',
+ dry:'<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff"/><g class="waves" fill="none" stroke-width="2.6" stroke-linecap="round"><path d="M15 26c-3-3 3-5 0-8s3-5 0-8"/><path d="M24 26c-3-3 3-5 0-8s3-5 0-8"/><path d="M33 26c-3-3 3-5 0-8s3-5 0-8"/></g><rect x="8" y="30" width="32" height="9" rx="4.5" fill="#ff9a62"/></svg>',
+ dust:'<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff"/><g class="bubbles" fill="#fff" stroke="#8f7bf2" stroke-width="1.2"><circle cx="18" cy="16" r="3"/><circle cx="27" cy="12" r="2.2"/><circle cx="31" cy="19" r="2.6"/></g><path d="M13 22h22l-2.5 19a3 3 0 0 1-3 2.6H18.5a3 3 0 0 1-3-2.6z" fill="#8f7bf2"/><rect x="11" y="19" width="26" height="4" rx="2" fill="#7563e0"/></svg>',
+};
+stationArt.bagdry=stationArt.dry;
+function placeStation(dock,r){
+ const el=$('station-bubble'),s=robotState||{},job=dock?stationJob(s):'';
+ el.hidden=!job;if(!job)return;
+ const kind=job.split(' ')[0];if(el.dataset.kind!==kind){el.innerHTML=stationArt[kind];el.dataset.kind=kind;}
+ const hot=s.hot_water===1||s.water_temperature>0;el.className='station-bubble '+job+(hot?' hot':'');
+ // Plugin sizes: w = 1.2 robot widths, box 1.5w, left = dock.x - 0.7w, top = dock.y - 2.2w.
+ const k=canvas.clientWidth/(view.width*3),w=Math.min(32,Math.max(18,2*r*1.2*k)); // kept readable at any zoom
+ el.style.width=el.style.height=(1.5*w).toFixed(1)+'px';
+ el.style.left=`calc(${dock[0]/(view.width*3)*100}% - ${(0.7*w).toFixed(1)}px)`;el.style.top=`calc(${dock[1]/(view.height*3)*100}% - ${(2.2*w).toFixed(1)}px)`;
+ el.title={dust:'Автоочистка',bagdry:'Сушка мешка для пыли',dry:'Сушка швабр',wash:'Мойка швабр'}[kind]+(job.includes('paused')?' (пауза)':'');
+}
 // One small DOM element over the robot animated by CSS: no canvas repaint per frame.
 let markerArgs=null;
 function placeMarker(pos,r){
  markerArgs=[pos,r];
- const marker=$('map-marker'),s=robotState||{},mode=!pos?'':s.activity==='cleaning'?'pulse':s.activity==='returning'?'pulse':s.station===2?'heat':s.station===1?'wash':s.charging===1&&s.battery<100?'charge':s.activity==='docked'?'sleep':'';
+ const marker=$('map-marker'),s=robotState||{},mode=!pos?'':s.activity==='cleaning'?'pulse':s.activity==='returning'?'pulse':stationJob(s)?'':s.charging===1&&s.battery<100?'charge':s.activity==='docked'?'sleep':'';
  marker.hidden=!mode;if(!mode)return;
  marker.className='map-marker '+mode;marker.style.left=(pos[0]/(view.width*3)*100)+'%';marker.style.top=(pos[1]/(view.height*3)*100)+'%';
  marker.style.setProperty('--r',(r*canvas.clientWidth/(view.width*3)).toFixed(1)+'px'); // robot radius in page pixels
@@ -996,7 +1020,7 @@ async function submitThreshold(remove=false){
 }
 $('save-threshold').onclick=()=>submitThreshold();$('delete-threshold').onclick=()=>submitThreshold(true);
 // ---- Per-room settings: robot row [suction, water, repeats, order, mode, extra]; only changed rooms are sent.
-const roomFields=[['suction',0,{0:'Тихо',1:'Стандарт',2:'Сильный',3:'Турбо'}],['water',1,{1:'Низкая',2:'Средняя',3:'Высокая'}],['repeats',2,{1:'1 раз',2:'2 раза',3:'3 раза'}],['mode',4,{0:'Только сухая',1:'Только влажная',2:'Сухая и влажная'}]];
+const roomFields=[['suction',0,{0:'Тихий',1:'Стандартный',2:'Турбо',3:'Максимум'}],['water',1,{1:'Низкая',2:'Средняя',3:'Высокая'}],['repeats',2,{1:'1 раз',2:'2 раза',3:'3 раза'}],['mode',4,{0:'Только сухая',1:'Только влажная',2:'Сухая и влажная'}]];
 function renderRoomSettings(){
  const sets=view?.room_settings,rows=[];
  $('room-settings-details').hidden=!sets;
@@ -1266,7 +1290,7 @@ export function settingValue(def,value,raw){
  if(def.kind==='bool')return typeof raw==='boolean'?!!value:value&&Number(raw)>0?raw:Number(!!value);
  return value;
 }
-const isSlider=def=>def.kind==='number'&&def.max-def.min<=40; // a short range is a slider applied on release
+const isSlider=def=>def.kind==='number'&&def.max-def.min<=60; // a short range is a slider applied on release
 function settingControl(def,value){
  const input=document.createElement(def.kind==='select'?'select':'input');input.id='setting-'+def.id;input.setAttribute('aria-label',def.label);
  if(def.kind==='select'){
@@ -1317,16 +1341,17 @@ function renderSettings(){
     finally{settingsDirty.delete(def.id);await refreshSettings();}
    };
    // Switches and lists apply on change; typed values (number, time, text) wait for «ОК», a schedule's switch applies at once.
-   const typed=['number','time','text','window'].includes(def.kind)&&!isSlider(def);if(isSlider(def))input.addEventListener('input',()=>{current.textContent='Сейчас: '+input.value;});let ok=null;
+   const typed=['number','time','text','window'].includes(def.kind)&&!isSlider(def);if(isSlider(def))input.addEventListener('input',()=>{current.textContent=input.value;});let ok=null;
    if(typed){ok=document.createElement('button');ok.textContent='ОК';ok.className='setting-apply';ok.onclick=apply;if(def.kind==='window')input.querySelector('.switch').addEventListener('change',apply);}
    else input.addEventListener('change',apply);
-   row.append(label,input);if(ok)row.append(ok);settingsRows.set(def.id,row);settingGroup(def.id).append(row);
+   row.append(label,input);if(ok)row.append(ok);settingsRows.set(def.id,row);settingGroup(def.id).append(row);if(row.closest('#tune-settings'))chipSetting(def,input);
   }else if(!settingsDirty.has(def.id))row.setInput(value);
-  row.querySelector('.setting-current').textContent=def.kind==='bool'?'':'Сейчас: '+(typeof value==='object'?(value.enabled?'включено':'выключено')+' '+value.start+'–'+value.end:typeof value==='boolean'?(value?'включено':'выключено'):String(value));
+  row.querySelector('.setting-current').textContent=def.kind==='bool'?'':isSlider(def)?String(value):'Сейчас: '+(typeof value==='object'?(value.enabled?'включено':'выключено')+' '+value.start+'–'+value.end:typeof value==='boolean'?(value?'включено':'выключено'):String(value));
   row.hidden=!def.label.toLocaleLowerCase().includes(query)&&!row.closest('#station-settings,#voice-settings,#dnd-settings');
  }
  for(const group of document.querySelectorAll('.setting-group'))group.hidden=![...group.querySelectorAll('.setting-row')].some(r=>!r.hidden);
  {const wet=settings.find(d=>d.id==='wetness_level');$('room-water').closest('label').hidden=!!wet&&decodeSetting(wet,settingsSnapshot)!==undefined;} // 1–32 replaces the three steps
+ syncChips();tuneExtras();
  $('settings-status').textContent='Доступно настроек: '+available;
  disableControls(busy);
 }
@@ -1519,15 +1544,44 @@ document.addEventListener('pointerdown',e=>{
 },true);
 document.addEventListener('click',e=>{if(swallowClick){swallowClick=false;e.stopPropagation();e.preventDefault();}},true);
 $('nav-modules').addEventListener('click',()=>closeSheet());
-// «Настроить»: choices as tap targets like the app; the select stays the source of truth (and what the code reads).
-function chipsFor(select){
- const box=document.createElement('div');box.className='chips';box.setAttribute('role','radiogroup');
- for(const o of select.options){const b=document.createElement('button');b.type='button';b.textContent=o.textContent;b.dataset.value=o.value;b.setAttribute('role','radio');
-  b.onclick=()=>{select.value=o.value;select.dispatchEvent(new Event('change',{bubbles:true}));syncChips();};box.append(b);}
- select.classList.add('chip-source');select.closest('label').after(box);return box;
+// «Настроить»: choices as round icons with a caption, as in the app; the select stays the source of truth
+// (and what the code reads). Settings rows of the robot get the same look when they land in this sheet.
+const I=d=>`<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const fanI=n=>I(`<circle cx="12" cy="12" r="1.6"/>${[0,120,240].map(a=>`<path d="M12 10.4c-${n} -3 -${n/2} -6 0-7 ${n/2} 1.6 1.2 4.2 0 7" transform="rotate(${a} 12 12)"/>`).join('')}`);
+const dropI='<path d="M12 3.5c3.3 4 5 6.8 5 9.2a5 5 0 0 1-10 0c0-2.4 1.7-5.2 5-9.2z"/>';
+const chipIcons={
+ 'cleaning_mode:0':fanI(2),'cleaning_mode:1':I(dropI),
+ 'cleaning_mode:2':I('<path d="M9 5.5c2.4 3 3.6 5 3.6 6.8a3.6 3.6 0 0 1-7.2 0c0-1.8 1.2-3.8 3.6-6.8z"/><path d="M15.5 11.5c1.6-1.4 3.7-1 4.3.6-1.6.4-2.6 1.6-2.6 3.3-1.8-.4-2.7-2.4-1.7-3.9z"/>'),
+ 'cleaning_mode:3':I('<path d="M6.5 5v5M5 6.3 6.5 5"/><path d="M16 13.5c1.8 2.2 2.7 3.7 2.7 5a2.7 2.7 0 0 1-5.4 0c0-1.3.9-2.8 2.7-5z"/><path d="M5 14.5h3.2L5 19h3.4"/><path d="M11 9.5h5m-2-2 2 2-2 2"/>'),
+ 'room-fan:0':I('<path d="M16.5 15.8A6.5 6.5 0 0 1 9.2 6a6.5 6.5 0 1 0 7.3 9.8z"/>'),
+ 'room-fan:1':fanI(1.5),'room-fan:2':fanI(2.5),'room-fan:3':I('<circle cx="12" cy="12" r="8.5"/>'+fanI(3).slice(fanI(3).indexOf('>')+1,-6)),
+ 'room-water:1':I(dropI),'room-water:2':I('<path d="M8.5 6c2.3 2.8 3.5 4.7 3.5 6.4a3.5 3.5 0 0 1-7 0c0-1.7 1.2-3.6 3.5-6.4zM15.5 9c2.3 2.8 3.5 4.7 3.5 6.4a3.5 3.5 0 0 1-7 0"/>'),
+ 'room-water:3':I('<path d="M12 3c1.9 2.3 2.9 3.9 2.9 5.3a2.9 2.9 0 0 1-5.8 0C9.1 6.9 10.1 5.3 12 3zM7 11c1.9 2.3 2.9 3.9 2.9 5.3a2.9 2.9 0 0 1-5.8 0C4.1 14.9 5.1 13.3 7 11zm10 0c1.9 2.3 2.9 3.9 2.9 5.3a2.9 2.9 0 0 1-5.8 0c0-1.4 1-3 2.9-5.3z"/>'),
+ 'self_clean_frequency:1':I('<rect x="4.5" y="4.5" width="15" height="15" rx="2"/><path d="M4.5 12h15M12 4.5v15"/>'),
+ 'self_clean_frequency:2':I('<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>'),
+ 'self_clean_frequency:3':I('<path d="M6 20V5.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1V20M4 20h16"/><circle cx="14.5" cy="12.5" r=".9"/>'),
+ 'self_clean_frequency:4':I('<path d="M12 3.5l1.8 5 5 1.8-5 1.8-1.8 5-1.8-5-5-1.8 5-1.8z"/><path d="M18.5 16v4M16.5 18h4"/>'),
+ 'cleaning_route:1':I('<path d="M5 6h14v4H5v4h14v4H5"/>'),'cleaning_route:4':I('<path d="M5 7h14l-14 10h14"/><path d="M17 4.5 19.5 7 17 9.5"/>'),
+};
+const chipCaps={'cleaning_mode:0':'Сухая','cleaning_mode:1':'Влажная','cleaning_mode:2':'Сухая и влажная','cleaning_mode:3':'Влажная после сухой','self_clean_frequency:4':'Умная'};
+// Titles in «Настроить» as the app has them; the settings catalog keeps its own names elsewhere.
+const tuneTitles={self_clean_frequency:'Промывка швабры',self_clean_value:'Интервал промывки',wetness_level:'Влажность швабры'};
+// The washing interval counts square metres or minutes; by room and smart washing need none.
+function tuneExtras(){
+ const f=decodeSetting(settings.find(d=>d.id==='self_clean_frequency')||{},settingsSnapshot),row=settingsRows.get('self_clean_value');
+ if(row&&row.closest('#tune-settings')){if(f===3||f===4)row.hidden=true;const cur=row.querySelector('.setting-current');cur.dataset.unit=f===1?' м²':f===2?' мин':'';}
+ for(const [id,t] of Object.entries(tuneTitles)){const lab=settingsRows.get(id)?.querySelector('label');if(lab&&lab.closest('#tune-settings')&&lab.firstChild.nodeType===3)lab.firstChild.textContent=t;}
 }
-const chipSets=[...document.querySelectorAll('#sheet-tune select')].map(s=>[s,chipsFor(s)]);
-function syncChips(){for(const [s,box] of chipSets)for(const b of box.children)b.setAttribute('aria-checked',String(b.dataset.value===s.value));}
+function chipsFor(select,key){
+ const box=document.createElement('div');box.className='chips icons';box.setAttribute('role','radiogroup');
+ for(const o of select.options){const b=document.createElement('button');b.type='button';b.dataset.value=o.value;b.setAttribute('role','radio');
+  b.innerHTML=`<span class="ic">${chipIcons[key+':'+o.value]||I('<circle cx="12" cy="12" r="3"/>')}</span><span class="cap"></span>`;b.lastChild.textContent=chipCaps[key+':'+o.value]||o.textContent;
+  b.onclick=()=>{select.value=o.value;select.dispatchEvent(new Event('change',{bubbles:true}));syncChips();};box.append(b);}
+ select.classList.add('chip-source');const label=select.closest('label');if(label)label.append(box);else select.after(box);return box;
+}
+const chipSets=[...document.querySelectorAll('#sheet-tune select')].map(s=>[s,chipsFor(s,s.id)]);
+function syncChips(){for(const [s,box] of chipSets){if(box.children.length!==s.options.length){box.remove();chipSets.splice(chipSets.findIndex(c=>c[0]===s),1,[s,chipsFor(s,s.dataset.chips||s.id)]);return syncChips();}for(const b of box.children)b.setAttribute('aria-checked',String(b.dataset.value===s.value));}}
+function chipSetting(def,input){if(def.kind!=='select'||chipSets.some(c=>c[0]===input))return;input.dataset.chips=def.id;chipSets.push([input,chipsFor(input,def.id)]);input.addEventListener('change',syncChips);}
 for(const [s] of chipSets)s.addEventListener('change',syncChips);
 document.querySelector('[data-sheet="tune"]').addEventListener('click',()=>requestAnimationFrame(syncChips));
 syncChips();
