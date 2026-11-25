@@ -49,6 +49,8 @@ type config struct {
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
 	// sha256 (hex) of the owner's video access code; opens the video monitoring session (monitor.go).
 	VideoCodeSHA256 string `json:"video_code_sha256,omitempty"`
+	// While the agent holds a video monitoring session, refuse new outbound connections to the internet.
+	VideoCloudBlock bool `json:"video_cloud_block,omitempty"`
 	// Room label size on the panel map in screen pixels; 0 keeps the automatic 10–14 px.
 	LabelSize int `json:"label_size,omitempty"`
 }
@@ -61,7 +63,8 @@ type agent struct {
 	memos  map[string]*commandMemo
 
 	rebootQueued  atomic.Bool
-	rebootCommand string // Only overridden by tests.
+	rebootCommand string   // Only overridden by tests.
+	iptables      []string // argv prefix for the video cloud block (monitor.go); tests record instead
 
 	portal     portalState
 	network    networkJob
@@ -849,7 +852,8 @@ func main() {
 	if err != nil {
 		log.Fatal("avacmd not found in PATH")
 	}
-	a := &agent{cfg: cfg, avacmd: path, gate: make(chan struct{}, 1)}
+	a := &agent{cfg: cfg, avacmd: path, gate: make(chan struct{}, 1), iptables: []string{"iptables"}}
+	a.cloudBlock(false) // a rule left by a crash while a session was open
 	if abs, err := filepath.Abs(*cfgPath); err == nil {
 		a.configPath = abs
 	}

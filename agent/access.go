@@ -169,6 +169,10 @@ func (a *agent) tokenRoutes(w http.ResponseWriter, r *http.Request, send func(in
 		a.videoCodeRoute(w, r, send)
 		return true
 	}
+	if p == "/api/v1/system/video_cloud" {
+		a.videoCloudRoute(w, r, send)
+		return true
+	}
 	if p == "/api/v1/ui" {
 		a.uiRoute(w, r, send)
 		return true

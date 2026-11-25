@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -95,11 +98,21 @@ func (a *agent) ensureMonitor(ctx context.Context, did string) error {
 	default:
 		return errors.New("unexpected answer to the video access code")
 	}
+	// The firmware encodes the camera and streams it to its cloud while a session is open (RTMP to an
+	// address the cloud hands out). With video_cloud_block (panel: protections) new outbound connections
+	// are refused while the session lasts; existing ones, such as the cloud MQTT, stay up.
+	if a.videoCloudBlocked() {
+		if err := a.cloudBlock(true); err != nil {
+			return errors.New("cannot keep the robot's video off the cloud: " + err.Error())
+		}
+	}
 	result, err = a.miot(ctx, "action", monitorAction(did, 1, 1, map[string]any{"token": "alify", "channelId": monitorSession, "area": "0", "operType": "monitor", "operation": "start"}))
 	if err != nil {
+		a.cloudBlock(false)
 		return err
 	}
 	if rejected(result) != nil {
+		a.cloudBlock(false)
 		monitor.refused = hash
 		return errors.New("the robot did not open video monitoring: wrong video access code?")
 	}
@@ -150,6 +163,7 @@ func (a *agent) keepMonitor(stop chan struct{}) {
 			if monitor.stop == stop {
 				monitor.open = false
 				monitor.stop = nil
+				a.cloudBlock(false)
 			}
 			monitor.Unlock()
 			return
@@ -250,6 +264,7 @@ func (a *agent) endMonitor(ctx context.Context, did string) bool {
 	}
 	close(monitor.stop)
 	monitor.open, monitor.stop = false, nil
+	a.cloudBlock(false)
 	return false
 }
 
@@ -287,4 +302,82 @@ func (a *agent) findPet(ctx context.Context, p commandParams, did string) (any, 
 	}()
 	a.refreshSoon()
 	return result, nil
+}
+
+// cloudBlock adds (or removes) nat OUTPUT chain DREAME_VIDEO, which sends every new outbound TCP/UDP
+// connection to a public address to 127.0.0.1:9 (refused). The r2505 kernel has only the nat table
+// (no filter, owner or cgroup match) and every firmware process runs as root, so it cannot single out
+// video_monitor; the block lasts only while the session is open. Removing is best effort and idempotent.
+func (a *agent) cloudBlock(on bool) error {
+	if len(a.iptables) == 0 {
+		return nil
+	}
+	run := func(args ...string) error {
+		cmd := exec.Command(a.iptables[0], append(append([]string{}, a.iptables[1:]...), args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("iptables %s: %v %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	const chain = "DREAME_VIDEO"
+	for _, p := range []string{"tcp", "udp"} {
+		for run("-t", "nat", "-D", "OUTPUT", "-p", p, "-j", chain) == nil {
+		}
+	}
+	_ = run("-t", "nat", "-F", chain)
+	_ = run("-t", "nat", "-X", chain)
+	if !on {
+		return nil
+	}
+	steps := [][]string{{"-t", "nat", "-N", chain}}
+	for _, private := range []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4"} {
+		steps = append(steps, []string{"-t", "nat", "-A", chain, "-d", private, "-j", "RETURN"})
+	}
+	steps = append(steps,
+		[]string{"-t", "nat", "-A", chain, "-p", "tcp", "-j", "DNAT", "--to-destination", "127.0.0.1:9"},
+		[]string{"-t", "nat", "-A", chain, "-p", "udp", "-j", "DNAT", "--to-destination", "127.0.0.1:9"},
+		[]string{"-t", "nat", "-I", "OUTPUT", "-p", "tcp", "-j", chain},
+		[]string{"-t", "nat", "-I", "OUTPUT", "-p", "udp", "-j", chain})
+	for _, s := range steps {
+		if err := run(s...); err != nil {
+			a.cloudBlock(false)
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *agent) videoCloudBlocked() bool {
+	a.tokensMu.RLock()
+	defer a.tokensMu.RUnlock()
+	return a.cfg.VideoCloudBlock
+}
+
+// videoCloudRoute: GET/POST {"enabled": bool} for video_cloud_block (main token only).
+func (a *agent) videoCloudRoute(w http.ResponseWriter, r *http.Request, send func(int, any)) {
+	switch r.Method {
+	case "GET":
+		send(200, map[string]any{"result": map[string]any{"enabled": a.videoCloudBlocked()}})
+	case "POST":
+		var req struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req) != nil || req.Enabled == nil {
+			send(400, map[string]string{"error": "enabled (true/false) required"})
+			return
+		}
+		a.tokensMu.Lock()
+		err := a.saveConfigField("video_cloud_block", *req.Enabled)
+		if err == nil {
+			a.cfg.VideoCloudBlock = *req.Enabled
+		}
+		a.tokensMu.Unlock()
+		if err != nil {
+			send(500, map[string]string{"error": err.Error()})
+			return
+		}
+		send(200, map[string]any{"result": map[string]any{"enabled": *req.Enabled}})
+	default:
+		send(405, map[string]string{"error": "method not allowed"})
+	}
 }
