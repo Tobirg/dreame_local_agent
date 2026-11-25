@@ -103,7 +103,8 @@ function renderUpdate(u){
 }
 async function loadUpdate(){renderUpdate(await api('/api/v1/system/update'));await loadFirmware().catch(()=>{});}
 function renderFirmware(f){$('firmware-updates').checked=f.enabled;$('firmware-status').textContent=f.enabled?'Обновления прошивки разрешены. Штатное обновление сбросит рут, сервис и защиту региона.':'Обновления прошивки выключены — агент обезвредил загрузчик, установка ничего не затрёт.';}
-async function loadFirmware(){renderFirmware(await api('/api/v1/system/firmware'));}
+async function loadFirmware(){renderFirmware(await api('/api/v1/system/firmware'));$('video-cloud').checked=(await api('/api/v1/system/video_cloud')).enabled;}
+$('video-cloud').onchange=async()=>{try{$('video-cloud').checked=(await api('/api/v1/system/video_cloud',{enabled:$('video-cloud').checked})).enabled;toast($('video-cloud').checked?'Видео не уйдёт в облако, пока едешь из агента':'Защита видео выключена');}catch(e){toast(e.message,true);$('video-cloud').checked=!$('video-cloud').checked;}};
 $('firmware-updates').onchange=async()=>{if(busy)return;busy=true;disableControls(true);try{renderFirmware(await api('/api/v1/system/firmware',{enabled:$('firmware-updates').checked}));}catch(e){toast(e.message,true);await loadFirmware().catch(()=>{});}finally{busy=false;disableControls(false);}};
 async function runUpdate(source,label){
  if(busy)return;busy=true;disableControls(true);

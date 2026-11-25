@@ -205,3 +205,36 @@ func TestCameraStream(t *testing.T) {
 		t.Fatal("stream does not ask the module to capture")
 	}
 }
+
+func TestVideoCloudBlockDuringSession(t *testing.T) {
+	a, calls := monitorAgent(t, 2)
+	a.cfg.VideoCloudBlock = true
+	rules := filepath.Join(a.root, "iptables.log")
+	fake := filepath.Join(a.root, "iptables")
+	// -D and -X fail when there is nothing to delete, as the real one does.
+	script := "#!/bin/sh\necho \"$*\" >> " + rules + "\ncase \"$*\" in *' -D '*|*' -X '*|*' -F '*) exit 1;; esac\n"
+	if err := os.WriteFile(fake, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.iptables = []string{fake}
+	run := func(body string) {
+		if _, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(body)}); err != nil {
+			t.Fatal(body, err)
+		}
+	}
+	run(`{"name":"video_monitor","enabled":true}`)
+	b, _ := os.ReadFile(rules)
+	log := string(b)
+	if !strings.Contains(log, "-t nat -A DREAME_VIDEO -d 192.168.0.0/16 -j RETURN") || !strings.Contains(log, "-t nat -A DREAME_VIDEO -p tcp -j DNAT --to-destination 127.0.0.1:9") || !strings.Contains(log, "-t nat -I OUTPUT -p udp -j DREAME_VIDEO") {
+		t.Fatal(log)
+	}
+	if got := calls(); len(got) != 2 { // the block is in place before monitor start
+		t.Fatal(got)
+	}
+	_ = os.Remove(rules)
+	run(`{"name":"video_monitor","enabled":false}`)
+	b, _ = os.ReadFile(rules)
+	if !strings.Contains(string(b), "-t nat -D OUTPUT -p tcp -j DREAME_VIDEO") || strings.Contains(string(b), " -I ") {
+		t.Fatal(string(b))
+	}
+}
