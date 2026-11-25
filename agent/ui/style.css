@@ -194,3 +194,7 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 @keyframes sleep-bot{0%,19%{transform:translate(-50%,-50%) scale(.5);opacity:0}51%{transform:translate(calc(-50% + 8px),calc(-50% - 10px)) scale(.9);opacity:.8}60%{transform:translate(calc(-50% + 10px),calc(-50% - 12.5px)) scale(.9);opacity:1}84%{transform:translate(calc(-50% + 16px),calc(-50% - 20px)) scale(.9);opacity:1}100%{transform:translate(calc(-50% + 20px),calc(-50% - 25px)) scale(.9);opacity:0}}
 @media (prefers-reduced-motion:reduce){.map-marker::before,.map-marker::after{animation:none}.map-marker.sleep::before{opacity:1}}
 .setting-group h3{margin:14px 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+
+/* Embedded view (?embed=1): status, start controls and the map with room cleaning, nothing else. */
+.embed header,.embed .tabs,.embed .side-col,.embed .columns>:not(.main-col),.embed .main-col>:not(.map-panel),.embed #main-page>:not(.hero):not(.controls):not(.columns),.embed .controls [data-command=locate],.embed .controls [data-command=mapping],.embed .controls [data-command=reboot],.embed .map-panel .row:has(#clean-rooms)~*{display:none}
+.embed main{padding:8px}

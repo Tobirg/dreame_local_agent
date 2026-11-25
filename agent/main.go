@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,8 @@ type config struct {
 	// Commands and setting changes are refused on firmware that matches no checked profile unless this is set.
 	AllowUnverifiedFirmware bool       `json:"allow_unverified_firmware,omitempty"`
 	Tokens                  []apiToken `json:"tokens,omitempty"`
+	// Origins (scheme://host[:port]) that may show the panel in a frame, e.g. a Home Assistant dashboard card.
+	EmbedOrigins []string `json:"embed_origins,omitempty"`
 }
 type request struct {
 	Method string          `json:"method"`
@@ -441,11 +444,27 @@ func (a *agent) runAvacmd(ctx context.Context, args ...string) ([]byte, error) {
 	return out.buf.Bytes(), nil
 }
 
+var originRe = regexp.MustCompile(`^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$`)
+
+// frameAncestors is the CSP source list for pages that may frame the panel: none unless embed_origins names some.
+func (a *agent) frameAncestors() string {
+	ok := []string{}
+	for _, o := range a.cfg.EmbedOrigins {
+		if originRe.MatchString(o) {
+			ok = append(ok, o)
+		}
+	}
+	if len(ok) == 0 {
+		return "'none'"
+	}
+	return strings.Join(ok, " ")
+}
+
 func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors "+a.frameAncestors()+"; form-action 'none'; base-uri 'none'")
 	if r.Method == "GET" {
 		asset := ""
 		contentType := ""

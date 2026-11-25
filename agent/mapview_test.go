@@ -155,3 +155,19 @@ func TestR2505CellFlags(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestFrameAncestors(t *testing.T) {
+	a := testAgent(t)
+	csp := func() string {
+		w := httptest.NewRecorder()
+		a.handler(w, httptest.NewRequest("GET", "/", nil))
+		return w.Header().Get("Content-Security-Policy")
+	}
+	if !strings.Contains(csp(), "frame-ancestors 'none'") {
+		t.Fatal("no framing by default", csp())
+	}
+	a.cfg.EmbedOrigins = []string{"https://ha.home:8123", "http://192.168.2.5:8123", "*", "https://x.y;script-src *"}
+	if c := csp(); !strings.Contains(c, "frame-ancestors https://ha.home:8123 http://192.168.2.5:8123;") {
+		t.Fatal("only well-formed origins are allowed", c)
+	}
+}

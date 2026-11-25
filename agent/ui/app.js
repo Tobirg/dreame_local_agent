@@ -8,7 +8,12 @@ const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Во�
 // Station codes observed on r2505; other codes are shown as numbers.
 const stationNames={0:'ожидание',1:'мойка салфеток',2:'сушка'};
 const palette=['#7fd9c2','#a3bcec','#e5bd8a','#bcaceb','#a7d39a','#e3a5b4','#93cdd9','#d4d093'];
-let token=sessionStorage.getItem('dreame-token')||localStorage.getItem('dreame-token')||'';
+// Embedded in a dashboard (Home Assistant): /?embed=1#token=… shows only the map and the start controls; the token
+// comes in the fragment (never sent to a server), is kept for the tab only and is removed from the address.
+const embed=new URLSearchParams(location.search).get('embed')==='1',hashToken=new URLSearchParams(location.hash.slice(1)).get('token')||'';
+if(embed)document.body.classList.add('embed');
+if(hashToken){sessionStorage.setItem('dreame-token',hashToken);history.replaceState(null,'',location.pathname+location.search);}
+let token=sessionStorage.getItem('dreame-token')||(embed?'':localStorage.getItem('dreame-token'))||'';
 let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false;
 let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
 const activeReads=new Set(),settingsDirty=new Set();
