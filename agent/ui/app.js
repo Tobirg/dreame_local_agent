@@ -145,7 +145,14 @@ async function loadLogs(){
  $('log-source').replaceChildren(...logs.map(l=>{const o=document.createElement('option');o.value=l.source;o.textContent=logNames[l.source]||'Модуль '+l.source;o.selected=l.source===keep;return o;}));
  showLog();
 }
+async function loadEmbed(){$('embed-origins').value=((await api('/api/v1/system/embed')).origins||[]).join('\n');}
+$('save-embed').onclick=async()=>{
+ const origins=$('embed-origins').value.split('\n').map(s=>s.trim()).filter(Boolean);
+ try{const r=await api('/api/v1/system/embed',{origins});$('embed-origins').value=r.origins.join('\n');$('embed-status').textContent=r.origins.length?'Сохранено. Страницу можно встроить с этих адресов.':'Сохранено. Встраивание запрещено.';}
+ catch(e){$('embed-status').textContent=e.message;}
+};
 async function loadTokens(){
+ await loadEmbed().catch(()=>{});
  const list=await api('/api/v1/system/tokens');$('token-list').replaceChildren();
  for(const t of list){
   const row=document.createElement('div'),label=document.createElement('span'),remove=document.createElement('button');

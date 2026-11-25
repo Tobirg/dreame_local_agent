@@ -78,6 +78,11 @@ func (a *agent) listTokens() []map[string]string {
 
 // saveTokens writes the token list into the config file, keeping every other field as it is.
 func (a *agent) saveTokens(tokens []apiToken) error {
+	return a.saveConfigField("tokens", tokens)
+}
+
+// saveConfigField writes one field of the config file, keeping every other field as it is.
+func (a *agent) saveConfigField(key string, value any) error {
 	if a.configPath == "" {
 		return errors.New("agent was started without a configuration path")
 	}
@@ -89,7 +94,7 @@ func (a *agent) saveTokens(tokens []apiToken) error {
 	if json.Unmarshal(b, &raw) != nil {
 		return errors.New("invalid configuration")
 	}
-	if raw["tokens"], err = json.Marshal(tokens); err != nil {
+	if raw[key], err = json.Marshal(value); err != nil {
 		return err
 	}
 	out, err := json.MarshalIndent(raw, "", "  ")
@@ -150,6 +155,10 @@ func (a *agent) revokeToken(name string) error {
 
 func (a *agent) tokenRoutes(w http.ResponseWriter, r *http.Request, send func(int, any)) bool {
 	p := r.URL.Path
+	if p == "/api/v1/system/embed" {
+		a.embedRoute(w, r, send)
+		return true
+	}
 	if p != "/api/v1/system/tokens" && !strings.HasPrefix(p, "/api/v1/system/tokens/") {
 		return false
 	}
@@ -240,5 +249,41 @@ func (a *agent) serveEvents(w http.ResponseWriter, r *http.Request, send func(in
 				return
 			}
 		}
+	}
+}
+
+// embedRoute reads and sets the origins that may show the panel in a frame (main token only: scoped tokens
+// reach no /api/v1/system route).
+func (a *agent) embedRoute(w http.ResponseWriter, r *http.Request, send func(int, any)) {
+	switch r.Method {
+	case "GET":
+		a.tokensMu.RLock()
+		list := append([]string{}, a.cfg.EmbedOrigins...)
+		a.tokensMu.RUnlock()
+		send(200, map[string]any{"result": map[string]any{"origins": list}})
+	case "POST":
+		var req struct {
+			Origins []string `json:"origins"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req) != nil || len(req.Origins) > 20 {
+			send(400, map[string]string{"error": "invalid request"})
+			return
+		}
+		for _, o := range req.Origins {
+			if !originRe.MatchString(o) {
+				send(400, map[string]string{"error": "address must look like https://ha.home:8123 (scheme, host, optional port, no path): " + o})
+				return
+			}
+		}
+		a.tokensMu.Lock()
+		defer a.tokensMu.Unlock()
+		if err := a.saveConfigField("embed_origins", req.Origins); err != nil {
+			send(500, map[string]string{"error": err.Error()})
+			return
+		}
+		a.cfg.EmbedOrigins = req.Origins
+		send(200, map[string]any{"result": map[string]any{"origins": req.Origins}})
+	default:
+		send(405, map[string]string{"error": "method not allowed"})
 	}
 }

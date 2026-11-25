@@ -449,6 +449,8 @@ var originRe = regexp.MustCompile(`^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$`)
 // frameAncestors is the CSP source list for pages that may frame the panel: none unless embed_origins names some.
 func (a *agent) frameAncestors() string {
 	ok := []string{}
+	a.tokensMu.RLock()
+	defer a.tokensMu.RUnlock()
 	for _, o := range a.cfg.EmbedOrigins {
 		if originRe.MatchString(o) {
 			ok = append(ok, o)

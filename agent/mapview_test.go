@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -169,5 +170,27 @@ func TestFrameAncestors(t *testing.T) {
 	a.cfg.EmbedOrigins = []string{"https://ha.home:8123", "http://192.168.2.5:8123", "*", "https://x.y;script-src *"}
 	if c := csp(); !strings.Contains(c, "frame-ancestors https://ha.home:8123 http://192.168.2.5:8123;") {
 		t.Fatal("only well-formed origins are allowed", c)
+	}
+}
+
+func TestEmbedOriginsRoute(t *testing.T) {
+	a := testAgent(t)
+	a.configPath = filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(a.configPath, []byte(`{"port":8765}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	post := func(body string) int {
+		w := httptest.NewRecorder()
+		a.embedRoute(w, httptest.NewRequest("POST", "/api/v1/system/embed", strings.NewReader(body)), func(code int, _ any) { w.Code = code })
+		return w.Code
+	}
+	if post(`{"origins":["https://ha.home:8123/path"]}`) != 400 || post(`{"origins":["*"]}`) != 400 {
+		t.Fatal("malformed origins must be refused")
+	}
+	if post(`{"origins":["https://ha.home:8123"]}`) != 200 || len(a.cfg.EmbedOrigins) != 1 {
+		t.Fatal("valid origin")
+	}
+	if b, _ := os.ReadFile(a.configPath); !strings.Contains(string(b), `"embed_origins"`) || !strings.Contains(string(b), `"port"`) {
+		t.Fatal("saved next to the other fields", string(b))
 	}
 }
