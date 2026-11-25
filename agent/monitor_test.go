@@ -33,6 +33,8 @@ open(` + "'" + logPath + "'" + `,'a').write(json.dumps(p)+'\n')
 res=p
 if isinstance(p,dict) and p.get('siid')==10001 and p.get('aiid')==4:
     res={'siid':10001,'aiid':4,'code':0,'out':[{'piid':1102,'value':'{"code":` + string(rune('0'+answer)) + `, "fail":0}'}]}
+if isinstance(p,list) and len(p)==1 and p[0].get('siid')==7 and 'value' not in p[0]:
+    res=[{'siid':7,'piid':1,'code':0,'value':50}]
 if '\\"operation\\":\\"start\\"' in json.dumps(p) and not os.path.exists(` + "'" + avaLog + ".off'" + `):
     open(` + "'" + avaLog + "'" + `,'a').write('video state type=19, value=1\n')
 print(json.dumps({'id':r['id'],'result':res}))
@@ -62,9 +64,10 @@ func TestRemoteMoveOpensMonitoringFirst(t *testing.T) {
 		}
 	}
 	got := calls()
-	if len(got) != 4 || !strings.Contains(got[0], `\"oldcode\":\"abab`) || !strings.Contains(got[0], `"piid": 1102`) ||
+	if len(got) != 5 || !strings.Contains(got[0], `\"oldcode\":\"abab`) || !strings.Contains(got[0], `"piid": 1102`) ||
 		!strings.Contains(got[1], `\"operType\":\"monitor\"`) || !strings.Contains(got[1], `\"operation\":\"start\"`) ||
-		!strings.Contains(got[2], `"piid": 15`) || !strings.Contains(got[3], `"piid": 15`) || !strings.Contains(got[3], `timestamp`) {
+		!strings.Contains(got[2], `"piid": 9`) || // fill light auto, as the app
+		!strings.Contains(got[3], `"piid": 15`) || !strings.Contains(got[4], `"piid": 15`) || !strings.Contains(got[4], `timestamp`) {
 		t.Fatal(strings.Join(got, "\n"))
 	}
 }
@@ -87,6 +90,34 @@ func TestRemoteMoveRefusedWhenMonitoringUnconfirmed(t *testing.T) {
 		}
 	}
 	if !strings.Contains(got[len(got)-1], `\"operation\":\"end\"`) || monitor.open {
+		t.Fatal(strings.Join(got, "\n"))
+	}
+}
+
+func TestMonitoringQuietWithFillLightAuto(t *testing.T) {
+	a, calls := monitorAgent(t, 2)
+	a.cfg.VideoVoiceMute = true
+	defer func(v time.Duration) { monitorVoice = v }(monitorVoice)
+	monitorVoice = 50 * time.Millisecond
+	run := func(cmd string) {
+		if _, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(cmd)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(`{"name":"video_monitor","enabled":true}`)
+	run(`{"name":"video_monitor","enabled":false}`)
+	time.Sleep(300 * time.Millisecond)
+	got := calls()
+	var volumes []string
+	fillAuto := false
+	for _, c := range got {
+		if strings.Contains(c, `"siid": 7`) && strings.Contains(c, `"value"`) {
+			volumes = append(volumes, c[strings.Index(c, `"value"`):])
+		}
+		fillAuto = fillAuto || strings.Contains(c, `"aiid": 3`) && strings.Contains(c, `"piid": 9`) && strings.Contains(c, `\"value\":\"101\"`)
+	}
+	// One mute over the start and the quick end, then the saved volume back.
+	if !fillAuto || len(volumes) != 2 || !strings.HasPrefix(volumes[0], `"value": 0`) || !strings.HasPrefix(volumes[1], `"value": 50`) {
 		t.Fatal(strings.Join(got, "\n"))
 	}
 }
@@ -173,7 +204,7 @@ func TestVideoMonitorOpenAndEnd(t *testing.T) {
 	run(`{"name":"video_monitor","enabled":true}`) // heartbeat: no second start
 	run(`{"name":"video_monitor","enabled":false}`)
 	got := calls()
-	if len(got) != 3 || !strings.Contains(got[1], `\"operation\":\"start\"`) || !strings.Contains(got[2], `\"operation\":\"end\"`) || monitor.open {
+	if len(got) != 4 || !strings.Contains(got[1], `\"operation\":\"start\"`) || !strings.Contains(got[3], `\"operation\":\"end\"`) || monitor.open {
 		t.Fatal(strings.Join(got, "\n"))
 	}
 }
@@ -184,7 +215,7 @@ func TestFindPetInsideMonitoring(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := calls()
-	if len(got) != 3 || !strings.Contains(got[2], `"value": 22`) || !strings.Contains(got[2], `findpet`) {
+	if len(got) != 4 || !strings.Contains(got[3], `"value": 22`) || !strings.Contains(got[3], `findpet`) {
 		t.Fatal(strings.Join(got, "\n"))
 	}
 	monitor.Lock()
@@ -257,7 +288,7 @@ func TestVideoCloudBlockDuringSession(t *testing.T) {
 	if !strings.Contains(log, "-t nat -A DREAME_VIDEO -d 192.168.0.0/16 -j RETURN") || !strings.Contains(log, "-t nat -A DREAME_VIDEO -p tcp -j DNAT --to-destination 127.0.0.1:9") || !strings.Contains(log, "-t nat -I OUTPUT -p udp -j DREAME_VIDEO") {
 		t.Fatal(log)
 	}
-	if got := calls(); len(got) != 2 { // the block is in place before monitor start
+	if got := calls(); len(got) != 3 { // the block is in place before monitor start (1102, start, fill light auto)
 		t.Fatal(got)
 	}
 	_ = os.Remove(rules)
