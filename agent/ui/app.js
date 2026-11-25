@@ -15,7 +15,7 @@ if(embed)document.body.classList.add('embed');
 if(hashToken){sessionStorage.setItem('dreame-token',hashToken);history.replaceState(null,'',location.pathname+location.search);}
 let token=sessionStorage.getItem('dreame-token')||(embed?'':localStorage.getItem('dreame-token'))||'';
 let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false;
-let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
+let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,fanPending=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
 const activeReads=new Set(),settingsDirty=new Set();
 let dndDirty=false,careShown='',restrictDraft=null,restrictSel=null,zones=[],zoneSel=-1,furnitureDraft=null,patrolSel=-1;
 const canvas=$('map'),ctx=canvas.getContext('2d');
@@ -273,7 +273,8 @@ function renderState(snap){
   $('stat-area').textContent=Number.isFinite(s.cleaned_area)?String(s.cleaned_area):'—';$('stat-time').textContent=Number.isFinite(s.cleaning_time)?String(s.cleaning_time):'—';document.body.dataset.activity=s.activity||'';
   $('updated').textContent='Обновлено '+new Date(snap.updated_at).toLocaleTimeString();
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
-  if(!roomOptionsDirty){if(Number.isInteger(s.suction))$('room-fan').value=s.suction;if(Number.isInteger(s.water)&&s.water>=1&&s.water<=3)$('room-water').value=s.water;}
+  if(!fanPending&&Number.isInteger(s.suction))$('room-fan').value=s.suction; // one suction: the robot's own value
+  if(!roomOptionsDirty){if(Number.isInteger(s.water)&&s.water>=1&&s.water<=3)$('room-water').value=s.water;}
   syncChips();
   $('station').textContent=s.station===undefined?'Состояние станции недоступно':'Состояние станции: '+(stationNames[s.station]||s.station)+(s.tank_drain===1?' · сливается бак робота':'')+(s.water_drain===1?' · сливается вода станции':'');
   $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—')+(s.error_name?' ('+s.error_name+')':'');
@@ -612,7 +613,7 @@ function keepMap(change){
  const before=view&&!view.empty?canvas.getBoundingClientRect():null;change();
  if(!before||!before.width)return;
  const stage=document.querySelector('.map-stage'),w=stage.clientWidth-16,h=stage.clientHeight-16;if(w<=0||h<=0)return;
- const fit=Math.max(1,Math.min(w,h*canvas.width/canvas.height));zoom=before.width/fit;layoutMap();
+ const fit=Math.max(1,Math.min(w,h*canvas.width/canvas.height));zoom=Math.min(6,Math.max(.4,before.width/fit));layoutMap();
  const after=canvas.getBoundingClientRect();panX+=before.left-after.left;panY+=before.top-after.top;applyPan();
 }
 $('zoom-in').onclick=()=>setZoom(zoom*1.25);$('zoom-out').onclick=()=>setZoom(zoom/1.25);$('zoom-fit').onclick=()=>setZoom(1);
@@ -901,7 +902,7 @@ $('clear-selection').onclick=()=>{selected.clear();points=[];invalidateEdit();re
 $('clean-rooms').onclick=async()=>{try{const ids=[...selected],mapID=view?.map_id;const args=roomCommand(ids,Number($('room-fan').value),Number($('room-water').value),Number($('room-repeats').value));await control('/api/v1/command',args,async()=>{const current=await api('local.map_view');if(current.map_id!==mapID||!ids.every(id=>current.rooms.some(r=>r.id===id)))throw Error('Комнаты изменились. Обнови карту и выбери их заново.');});}catch(e){toast(e.message,true);}};
 for(const id of ['room-water','room-repeats'])$(id).onchange=()=>{roomOptionsDirty=true;};
 // One suction choice, as in the app: it is the robot's own setting (the whole home) and goes with room and zone cleaning.
-$('room-fan').onchange=async()=>{roomOptionsDirty=true;try{await command('set_suction',{value:Number($('room-fan').value)});}catch{}};
+$('room-fan').onchange=async()=>{fanPending=true;try{await command('set_suction',{value:Number($('room-fan').value)});}catch{}finally{fanPending=false;}};
 // ---- Zone cleaning: up to 5 rectangles, added in the middle of the map and edited with the handles.
 $('draw-zone').onclick=()=>{if(!view||view.empty||busy||zones.length>=5)return;zones.push(newRect(2000,2000,zones.length));zoneSel=zones.length-1;zoneStatus();draw();};
 $('clean-zone').onclick=async()=>{
