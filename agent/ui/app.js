@@ -1020,7 +1020,7 @@ async function submitThreshold(remove=false){
 }
 $('save-threshold').onclick=()=>submitThreshold();$('delete-threshold').onclick=()=>submitThreshold(true);
 // ---- Per-room settings: robot row [suction, water, repeats, order, mode, extra]; only changed rooms are sent.
-const roomFields=[['suction',0,{0:'Тихо',1:'Стандарт',2:'Сильный',3:'Турбо'}],['water',1,{1:'Низкая',2:'Средняя',3:'Высокая'}],['repeats',2,{1:'1 раз',2:'2 раза',3:'3 раза'}],['mode',4,{0:'Только сухая',1:'Только влажная',2:'Сухая и влажная'}]];
+const roomFields=[['suction',0,{0:'Тихий',1:'Стандартный',2:'Турбо',3:'Максимум'}],['water',1,{1:'Низкая',2:'Средняя',3:'Высокая'}],['repeats',2,{1:'1 раз',2:'2 раза',3:'3 раза'}],['mode',4,{0:'Только сухая',1:'Только влажная',2:'Сухая и влажная'}]];
 function renderRoomSettings(){
  const sets=view?.room_settings,rows=[];
  $('room-settings-details').hidden=!sets;
@@ -1404,7 +1404,8 @@ $('messages-details').ontoggle=()=>{if($('messages-details').open)loadMessages()
 $('clear-messages').onclick=async()=>{if(!window.confirm('Очистить сообщения?'))return;try{await api('local.messages_clear');await loadMessages();}catch(e){toast(e.message,true);}};
 // ---- Video access code (monitor.go): remote_move drives inside the video monitoring session, which needs it.
 const videoCodeText=on=>on?'Код задан: стрелки камеры ездят без мотора.':'Код не задан: ручное управление выключено.';
-async function loadVideoCode(){$('video-code-status').textContent=videoCodeText((await api('/api/v1/system/video_code')).configured);}
+async function loadVideoCode(){$('video-code-status').textContent=videoCodeText((await api('/api/v1/system/video_code')).configured);$('video-voice').checked=(await api('/api/v1/system/video_voice')).enabled;}
+$('video-voice').onchange=async()=>{try{$('video-voice').checked=(await api('/api/v1/system/video_voice',{enabled:$('video-voice').checked})).enabled;toast($('video-voice').checked?'Робот промолчит про мониторинг':'Робот снова говорит про мониторинг');}catch(e){toast(e.message,true);$('video-voice').checked=!$('video-voice').checked;}};
 async function saveVideoCode(code){
  try{const r=await api('/api/v1/system/video_code',{code});$('video-code').value='';$('video-code-status').textContent=videoCodeText(r.configured);}
  catch(e){$('video-code-status').textContent=e.message;}

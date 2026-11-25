@@ -51,6 +51,7 @@ type config struct {
 	VideoCodeSHA256 string `json:"video_code_sha256,omitempty"`
 	// While the agent holds a video monitoring session, refuse new outbound connections to the internet.
 	VideoCloudBlock bool `json:"video_cloud_block,omitempty"`
+	VideoVoiceMute  bool `json:"video_voice_mute,omitempty"`
 	// Room label size on the panel map in screen pixels; 0 keeps the automatic 10–14 px.
 	LabelSize int `json:"label_size,omitempty"`
 }
