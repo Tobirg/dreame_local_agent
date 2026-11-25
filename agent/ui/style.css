@@ -91,9 +91,9 @@ details button{margin:0 6px 6px 0}
 .station-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .side select+button,.side label+button{margin-top:2px}
 
-.map-stage{overflow:auto;min-height:160px;margin-top:12px;border-radius:10px;
+.map-stage{overflow:hidden;touch-action:none;min-height:160px;margin-top:12px;border-radius:10px;
  background:radial-gradient(var(--map-dot) 1px,transparent 1px) 0 0/16px 16px var(--map-bg)}
-canvas{display:block;width:100%;height:auto;touch-action:pan-x pan-y}
+canvas{display:block;width:100%;height:auto;touch-action:none}
 .map-stage.panning{cursor:grabbing}.map-stage canvas{cursor:grab}
 .room-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
 .room-list button{display:inline-flex;align-items:center;gap:8px;padding:7px 12px 7px 9px;border-radius:999px;font-size:13px}

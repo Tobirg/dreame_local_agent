@@ -105,8 +105,8 @@ const server=http.createServer((req,res)=>{
   await page.locator('#voice [data-use=RU]').click();await page.waitForFunction(()=>document.querySelector('#voice').textContent.includes('голосом RU'));assert.deepEqual(commands.at(-1),{method:'/api/v1/voice/use',params:{id:'RU'}});
   {const w0=await page.locator('.map-wrap').evaluate(e=>e.clientWidth);await page.locator('#zoom-in').click();assert.equal(await page.locator('#zoom-fit').textContent(),'125%');assert((await page.locator('.map-wrap').evaluate(e=>e.clientWidth))>w0);await page.locator('#zoom-fit').click();assert.equal(await page.locator('#zoom-fit').textContent(),'100%');
   {const box=await page.locator('canvas').first().boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,-300);assert((await page.locator('#zoom-fit').textContent())!=='100%','wheel zooms');
-   const st=page.locator('.map-stage');await page.mouse.wheel(0,-600);const l0=await st.evaluate(e=>e.scrollLeft);await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2-60,box.y+box.height/2-40,{steps:4});await page.mouse.up();
-   assert((await st.evaluate(e=>e.scrollLeft))>l0,'drag pans');await page.locator('#zoom-fit').click();}}
+   const st=page.locator('.map-stage');await page.mouse.wheel(0,-600);const l0=await page.locator('.map-wrap').evaluate(e=>e.getBoundingClientRect().left);await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2-60,box.y+box.height/2-40,{steps:4});await page.mouse.up();
+   assert((await page.locator('.map-wrap').evaluate(e=>e.getBoundingClientRect().left))<l0-50,'drag pans');await page.locator('#zoom-fit').click();}}
   
   const until=async f=>{for(let i=0;i<100&&!f();i++)await new Promise(r=>setTimeout(r,50));assert(f(),String(f));};
   await page.waitForFunction(()=>document.querySelector('#history').textContent.length>0);assert.match(await page.locator('#history').innerText(),/Уборка комнат · 24 мин · 31 м² · на базе[^]*Уборка · 5 мин · ошибка: bin full/);
