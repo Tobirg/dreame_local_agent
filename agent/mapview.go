@@ -56,6 +56,7 @@ type mapView struct {
 	// Per-room cleaning settings by room id, from /data/ri/setting.json2; see roomsettings.go.
 	RoomSettings map[string][]int `json:"room_settings"`
 	Charger      []int            `json:"charger,omitempty"` // station position, robot millimetres
+	PlanWalls    []planWall       `json:"plan_walls"`        // room outline as in the Dreame app; see floorplan.go
 	Empty        bool             `json:"empty"`
 	MapID        int              `json:"map_id"`
 	Width        int              `json:"width"`
@@ -123,6 +124,7 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		} `json:"vw"`
 		Walls struct {
 			Version int `json:"version_flag"`
+			planInfo
 		} `json:"walls_info"`
 		CarpetPolygon map[string][]json.RawMessage `json:"carpet_polygon"`
 		Furniture     []json.RawMessage            `json:"funiture_info"`
@@ -165,6 +167,7 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 	}
 	view.carpets(meta.VW != nil, meta.CarpetPolygon, added, ignored)
 	view.furniture(meta.Furniture)
+	view.PlanWalls = planWalls(meta.Walls.planInfo)
 	view.Passable = [][]int{}
 	view.Impassable = [][]int{}
 	if meta.VWS != nil {

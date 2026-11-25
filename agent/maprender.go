@@ -65,12 +65,12 @@ func (a *agent) mapPNG() ([]byte, error) {
 			}
 		}
 	}
-	// Outer border of the rooms as in the web UI: cell sides facing outside or a wall, 2 px inside the cell.
+	// Without the app's floor plan in the map: border from the cells, sides facing outside or a wall, 2 px inside the cell.
 	outside := func(x, y int) bool {
 		return x < 0 || y < 0 || x >= view.Width || y >= view.Height || view.Pixels[y*view.Width+x] == 0 || view.Pixels[y*view.Width+x] == 255
 	}
 	for i, id := range view.Pixels {
-		if id == 0 || id == 255 {
+		if id == 0 || id == 255 || len(view.PlanWalls) > 0 {
 			continue
 		}
 		x, y := i%view.Width, i/view.Width
@@ -95,6 +95,16 @@ func (a *agent) mapPNG() ([]byte, error) {
 	// Robot millimetres to image pixels.
 	px := func(p []int) (int, int) {
 		return (p[0] - view.Origin[0]) * mapScale / view.GridSize, (view.Height*view.GridSize - (p[1] - view.Origin[1])) * mapScale / view.GridSize
+	}
+	// The app's floor plan: walls one cell wide, shifted by half a cell like the app does.
+	for _, w := range view.PlanWalls {
+		x0, y1 := px([]int{w.Seg[0] - view.GridSize/2, w.Seg[1] - view.GridSize/2})
+		x1, y0 := px([]int{w.Seg[2] - view.GridSize/2, w.Seg[3] - view.GridSize/2})
+		for y := max(y0-1, 0); y <= min(y1+1, img.Rect.Dy()-1); y++ {
+			for x := max(x0-1, 0); x <= min(x1+1, img.Rect.Dx()-1); x++ {
+				img.SetRGBA(x, y, borderColour)
+			}
+		}
 	}
 	live := a.livePose()
 	if !live.Live || live.MapID != view.MapID {
