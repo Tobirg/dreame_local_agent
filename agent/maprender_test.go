@@ -95,14 +95,19 @@ func TestMapPNG(t *testing.T) {
 }
 
 func TestMapPNGOptionsAndOverlays(t *testing.T) {
-	o := mapOptsFromQuery(url.Values{"base": {"1"}, "selected": {"2"}, "floors": {"1:2,x:y"}})
-	if !o.base || !o.selected[2] || o.floors[1] != 2 || len(o.floors) != 1 {
+	o := mapOptsFromQuery(url.Values{"base": {"1"}, "selected": {"2"}, "floors": {"1:2,x:y"}, "layers": {"furniture,thresholds"}})
+	if !o.base || !o.selected[2] || o.floors[1] != 2 || len(o.floors) != 1 || !o.layers["furniture"] {
 		t.Fatal(o)
 	}
 	img := image.NewRGBA(image.Rect(0, 0, 30, 30))
 	view := mapView{GridSize: 50, Height: 10, Origin: []int{0, 0}, NoGo: [][]int{{100, 100, 500, 500}}, Furniture: []furnitureItem{{X: 1000, Y: 1000, Width: 500, Height: 500}}}
 	px := func(p []int) (int, int) { return p[0] * mapScale / 50, p[1] * mapScale / 50 }
-	drawOverlays(img, view, px)
+	drawOverlays(img, view, px, func(string) bool { return true })
+	none := image.NewRGBA(img.Rect)
+	drawOverlays(none, view, px, func(g string) bool { return g == "thresholds" })
+	if none.RGBAAt(12, 12).R != 0 {
+		t.Fatal("a group that is not asked for was drawn")
+	}
 	if got := img.RGBAAt(12, 12); got.R == 0 {
 		t.Fatal("no-go zone fill missing", got)
 	}

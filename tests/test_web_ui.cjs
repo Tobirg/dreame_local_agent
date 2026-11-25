@@ -15,6 +15,14 @@ for(let y=2;y<28;y++)for(let x=2;x<38;x++)grid[y*40+x]=(x===2||x===37||y===2||y=
 let voiceCurrent='ZH',livePolls=0,tokens=[],restrict={walls:[[-900,-900,-500,-900]],no_go_zones:[],no_mop_zones:[]};const eventClients=new Set();
 const snapshot=()=>{const v=k=>values[k],state={activity:v('4/1')===2?'cleaning':'docked',status:v('4/1'),error:v('2/2'),battery:v('3/1'),charging:1,suction:v('4/4'),water:v('4/5'),station:v('4/25'),volume:v('7/1'),region:regionCode===200?'matched':'mismatched',region_code:regionCode,consumables:{main_brush:{left:52,hours:158},filter:{left:6,hours:8}},stats:{minutes:308,cleanings:22,area:264},dnd:{enabled:false,start:'22:00',end:'08:00'},schedules:[{id:3,enabled:true,time:'09:30',days:'0111110',rooms:[4]},{id:4,enabled:true,time:'10:00',days:'1111111',quick_command:32}],dnd_periods:[{id:0,enabled:true,start:'22:00',end:'08:00',days:'1111111'}],quick_commands:[{id:32,name:'Кухня'}],tank_drain:1};return {seq:1,updated_at:new Date().toISOString(),stale:staleState,error:staleState?'avacmd timed out':undefined,state};};
 const pushEvent=()=>{for(const c of eventClients)c.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');};
+// Every setting sits on exactly one page, and every page item and action page exists.
+(async()=>{
+ const ui=p=>import(require('node:url').pathToFileURL(path.join(__dirname,'..','agent','ui',p)).href),{settings}=await ui('settings.js'),{pages}=await ui('pages.js'),{actions}=await ui('actions.js');
+ const ids=new Set(settings.map(s=>s.id)),seen=new Set();
+ for(const p of pages)for(const i of p.items){assert(ids.has(i),'unknown setting on a page: '+i);assert(!seen.has(i),'setting on two pages: '+i);seen.add(i);}
+ for(const s of ids)assert(seen.has(s)||pages.some(p=>new RegExp(p.match).test(s)),'setting without a page: '+s);
+ for(const a of actions)assert(pages.some(p=>p.title===a.page),'action on an unknown page: '+a.command);
+})().catch(e=>{console.error(e);process.exit(1);});
 function stubPng(w,h){ // the agent's map picture, as a flat grey PNG
  const crcT=[...Array(256)].map((_,n)=>{let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0;});
  const crc=b=>{let c=0xffffffff;for(const x of b)c=crcT[(c^x)&255]^(c>>>8);return(c^0xffffffff)>>>0;};
@@ -47,7 +55,7 @@ const server=http.createServer((req,res)=>{
   res.end(JSON.stringify({result:capabilities}));return;
  }
  if(req.method==='GET'){
-  const names={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/settings.js':'settings.js','/voice.js':'voice.js','/phrases.js':'phrases.js'},name=names[req.url.split('?')[0]];
+  const names={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/settings.js':'settings.js','/pages.js':'pages.js','/actions.js':'actions.js','/voice.js':'voice.js','/phrases.js':'phrases.js'},name=names[req.url.split('?')[0]];
   if(!name){res.writeHead(404);res.end();return;}
   const type=name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html';
   res.setHeader('Content-Type',type+'; charset=utf-8');

@@ -8,10 +8,15 @@ import (
 
 // Saved overlays of the map picture, same colours as ui/app.js: thresholds, virtual walls and zones,
 // carpets, furniture. px turns robot millimetres into image pixels.
-func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int)) {
+// want says whether a group (restrictions, thresholds, furniture) is drawn.
+func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int), want func(string) bool) {
 	rgb := func(r, g, b uint8) color.RGBA { return color.RGBA{r, g, b, 255} }
 	// Carpets the robot found: the app's texture, a checkerboard of darker half cells.
-	for _, c := range view.Carpets {
+	carpets := view.Carpets
+	if !want("restrictions") {
+		carpets = nil
+	}
+	for _, c := range carpets {
 		poly := [][2]float64{}
 		for i := 0; i+1 < len(c.Points); i += 2 {
 			x, y := px(c.Points[i : i+2])
@@ -32,6 +37,9 @@ func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int)) {
 		{view.Ramps, rgb(0x2f, 0x9e, 0x44), 25, false, false},
 	}
 	for _, k := range rects {
+		if !want("restrictions") {
+			break
+		}
 		for _, r := range k.list {
 			if len(r) != 4 {
 				continue
@@ -54,13 +62,16 @@ func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int)) {
 		}
 	}
 	for _, w := range view.Walls {
-		if len(w) == 4 {
+		if len(w) == 4 && want("restrictions") {
 			x0, y0 := px(w[:2])
 			x1, y1 := px(w[2:4])
 			thick(img, x0, y0, x1, y1, rgb(0xff, 0x4d, 0x4d), false)
 		}
 	}
 	for kind, list := range map[string][][]int{"p": view.Passable, "i": view.Impassable} {
+		if !want("thresholds") {
+			break
+		}
 		c := rgb(0x55, 0xf2, 0xaa)
 		if kind == "i" {
 			c = rgb(0xff, 0x6b, 0x80)
@@ -74,12 +85,18 @@ func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int)) {
 		}
 	}
 	for _, f := range view.Furniture {
+		if !want("furniture") {
+			break
+		}
 		cx, cy := px([]int{f.X, f.Y})
 		w, h := float64(f.Width*mapScale)/float64(view.GridSize), float64(f.Height*mapScale)/float64(view.GridSize)
 		rot := f.Rotation * math.Pi / 180
 		sin, cos := math.Sincos(rot)
 		reach := int(math.Hypot(w, h)/2) + 2
 		edge := rgb(0xc5, 0x8b, 0x2b)
+		if f.Type < 1 || f.Type > 25 {
+			edge = rgb(0x88, 0x88, 0x88) // a type the app does not name
+		}
 		for y := cy - reach; y <= cy+reach; y++ {
 			for x := cx - reach; x <= cx+reach; x++ {
 				dx, dy := float64(x-cx), float64(y-cy)

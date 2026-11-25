@@ -1,4 +1,6 @@
 import {settings} from '/settings.js';
+import {pages} from '/pages.js';
+import {actions} from '/actions.js';
 import {mountVoice} from '/voice.js';
 const $=id=>document.getElementById(id);
 const captiveSetup=new URLSearchParams(location.search).get('setup')==='wifi';
@@ -513,17 +515,21 @@ function renderRoomButtons(){
 // Rooms with their floor pattern at canvas size, rebuilt only when the map, the selection or a floor draft changes.
 // Pattern sizes in map cells as the app's buildFloorMap: tiles 12, planks 4 × 16 laid in a half-board offset.
 const roomIcons={1:'🛋',2:'🛏',15:'🛏',3:'📚',4:'🍲',5:'🍽',6:'🛁',7:'🌿',8:'👣',9:'📦',10:'👔',11:'🚪',12:'💼',13:'🏋',14:'☕'};
-let baseCache={key:'',canvas:null,pending:''};
+let baseCache={key:'',canvas:null,pending:'',layers:null};
 function floorOf(room){const draft=$('room-floors').querySelector(`[data-room="${room.id}"]`)?.value;return draft===undefined?room.floor||0:Number(draft);}
-// The base layer (floors, walls, room badges) is drawn by the agent, the same code as the picture for Home Assistant.
-// The previous picture stays until the new one arrives.
+// The base layer (floors, walls, room badges) and the saved furniture, restrictions and thresholds are drawn by the
+// agent, the same code as the picture for Home Assistant. The panel draws a layer itself only while it has a draft
+// of it. The previous picture stays until the new one arrives.
+const draftOf={restrictions:()=>restrictDraft,thresholds:()=>thresholdDraft?.line};
+const agentDraws=g=>baseCache.layers?.has(g)&&!draftOf[g]?.();
 function baseLayer(){
- const floors=view.rooms.map(r=>r.id+':'+floorOf(r)).join(','),sel=[...selected].join(','),key=view.revision+'|'+sel+'|'+floors;
+ const floors=view.rooms.map(r=>r.id+':'+floorOf(r)).join(','),sel=[...selected].join(','),layers=['furniture','restrictions','thresholds'].filter(g=>!draftOf[g]?.()),
+  key=view.revision+'|'+sel+'|'+floors+'|'+layers;
  if(baseCache.key!==key&&baseCache.pending!==key){
   baseCache.pending=key;
-  fetch('/api/v1/map.png?base=1&selected='+sel+'&floors='+floors,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
+  fetch('/api/v1/map.png?base=1&selected='+sel+'&floors='+floors+'&layers='+layers,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
    .then(r=>r.ok?r.blob():Promise.reject(Error('map.png '+r.status))).then(createImageBitmap)
-   .then(bitmap=>{if(baseCache.pending===key){baseCache={key,canvas:bitmap,pending:''};draw();}},()=>{if(baseCache.pending===key)baseCache.pending='';});
+   .then(bitmap=>{if(baseCache.pending===key){baseCache={key,canvas:bitmap,pending:'',layers:new Set(layers)};draw();}},()=>{if(baseCache.pending===key)baseCache.pending='';});
  }
  return baseCache.canvas;
 }
@@ -652,6 +658,12 @@ async function login(){
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
+// Buttons of the actions catalog (actions.js) go to their page's container; data-command keeps them under
+// the capability hiding, the busy lock and the click handler below.
+for(const act of actions){
+ const box=document.querySelector(`.page-actions[data-page="${act.page}"]`);if(!box)continue;
+ const b=document.createElement('button');b.textContent=act.label;b.dataset.command=act.command;if(act.confirm)b.dataset.confirm=act.confirm;if(act.danger)b.classList.add('danger');box.append(b);
+}
 for(const button of document.querySelectorAll('[data-command]'))button.onclick=async()=>{
  // data-command values are the agent's command names.
  try{if(button.dataset.confirm&&!window.confirm(button.dataset.confirm))return;if(button.dataset.command==='reboot')await rebootRobot();else await command(button.dataset.command);}catch{}
@@ -708,7 +720,7 @@ function strokeThreshold(line,kind,dashed=false){
  const start=robotToPixel(view,line[0],line[1]),end=robotToPixel(view,line[2],line[3]);
  ctx.save();ctx.strokeStyle=kind==='passable'?'#55f2aa':'#ff6b80';ctx.lineWidth=dashed?3:2;ctx.setLineDash(dashed?[5,3]:[]);ctx.beginPath();ctx.moveTo(start[0]*3,(view.height-start[1])*3);ctx.lineTo(end[0]*3,(view.height-end[1])*3);ctx.stroke();ctx.restore();
 }
-function drawThresholds(){for(const item of thresholdLines())strokeThreshold(item.line,item.kind);if(thresholdDraft?.line)strokeThreshold(thresholdDraft.line,$('threshold-kind').value,true);}
+function drawThresholds(){if(!agentDraws('thresholds'))for(const item of thresholdLines())strokeThreshold(item.line,item.kind);if(thresholdDraft?.line)strokeThreshold(thresholdDraft.line,$('threshold-kind').value,true);}
 function chooseThreshold(){
  thresholdDrawing=false;points=[];
  const [kind,rawIndex]=$('threshold-choice').value.split(':'),index=Number(rawIndex),line=view?.[kind+'_thresholds']?.[index];
@@ -789,7 +801,7 @@ let furniturePlacing=false;
 for(const [id,[name]] of Object.entries(furnitureTypes))$('furniture-type').add(new Option(name,id));
 const furnitureName=f=>furnitureTypes[f.type]?.[0]||'Предмет '+f.type;
 function drawFurniture(){
- if(!view?.furniture?.length)return;
+ if(!view?.furniture?.length||agentDraws('furniture'))return;
  ctx.save();ctx.lineWidth=2;ctx.font='11px sans-serif';
  for(const f of view.furniture){
   const [px,py]=robotToPixel(view,f.x,f.y),x=px*3,y=(view.height-py)*3,w=f.width/view.grid_size*3,h=f.height/view.grid_size*3;
@@ -929,8 +941,9 @@ function drawRestrictions(){
  const lists=restrictions(),px=(x,y)=>{const p=robotToPixel(view,x,y);return [p[0]*3,(view.height-p[1])*3];};
  ctx.save();ctx.lineWidth=2;
  // Carpets the robot found: the app's texture, map cells split 2×2 with the dark halves in a checkerboard.
- ctx.fillStyle=carpetPattern(.15);for(const c of view?.carpets||[]){ctx.beginPath();for(let i=0;i+1<c.points.length;i+=2){const [x,y]=px(c.points[i],c.points[i+1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.fill();}
- for(const [kind,items] of Object.entries(lists))for(const r of items){
+ const saved=!agentDraws('restrictions');
+ ctx.fillStyle=carpetPattern(.15);for(const c of saved?view?.carpets||[]:[]){ctx.beginPath();for(let i=0;i+1<c.points.length;i+=2){const [x,y]=px(c.points[i],c.points[i+1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.fill();}
+ for(const [kind,items] of Object.entries(saved?lists:{}))for(const r of items){
   if(!Array.isArray(r)||r.length!==4)continue;const [x0,y0]=px(r[0],r[1]),[x1,y1]=px(r[2],r[3]);
   if(kind==='walls'){ctx.setLineDash([]);ctx.strokeStyle='#ff4d4d';ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();continue;}
   const style={no_mop_zones:['#5aa9ff','rgba(90,169,255,.25)'],carpets_added:['rgba(0,0,0,.45)',carpetPattern(.3)],carpets_ignored:['#8a8a8a','rgba(138,138,138,.15)'],ramps:['#2f9e44','rgba(47,158,68,.25)']}[kind]||['#ff4d4d','rgba(255,77,77,.25)'];
@@ -1030,19 +1043,12 @@ function settingControl(def,value){
  else{input.type=def.kind==='number'?'number':def.kind==='time'?'time':'text';input.value=String(value);if(def.kind==='number'){input.min=def.min;input.max=def.max;input.step=def.step||1;}else input.maxLength=128;}
  return input;
 }
-// Groups in the order of the app's settings pages; the first matching rule wins.
-const settingGroups=[['Уборка',/^(power_saving|cleaning_mode|mop_humidity|wetness_level|cleangenius(_mode)?|cleaning_route|customized_cleaning|tight_mopping|auto_recleaning|resume_cleaning|max_suction_power|ultra_clean_mode|mopping_type)$/],['Ковры',/carpet/],
- ['MopExtend и боковой вылет',/^(side_reach|mop_extend(_frequency)?|gap_cleaning_extension|mopping_under_furnitures|wider_corner_coverage|mop_pad_swing)$/],['Ножки: преодоление препятствий',/^obstacle_crossing$/],
- ['Чистка пола',/^(collision_avoidance|floor_direction_cleaning|stain_avoidance|auto_mount_mop|pet_focused_cleaning|dynamic_obstacle_cleaning|pressurized_cleaning|mop_pressure|ai_bit_large_particles_boost)$/],
- ['Базовая станция',/^(?!dnd_).*(wash|dry|uv_|dust|empty|hair|detergent|water|self_clean|mop_temperature|scraper|low_lying|change_mop|mop_cleaning_remainder)/],['Препятствия и ИИ',/^ai_|obstacle|crossing|fill_light|intelligent_recognition|human_follow|lds/],
- ['Голос',/voice/],['Что ограничивает ночной режим',/^dnd_(disable|reduce)/],['Не беспокоить',/^dnd/],['Прочее',/./]];
-// Groups with their own panel show there, next to the matching controls; if that panel is hidden
+// Pages (pages.js) with their own panel show there, next to the matching controls; if that panel is hidden
 // (no rights or the robot lacks it) they stay under «Все настройки пылесоса».
-const settingHomes={'Базовая станция':'station-settings','Голос':'voice-settings','Что ограничивает ночной режим':'dnd-settings'};
 function settingGroup(id){
- const title=settingGroups.find(([,rule])=>rule.test(id))[0];
- if(!document.querySelector('.setting-group'))for(const [name] of settingGroups){
-  const g=document.createElement('section'),home=$(settingHomes[name]),inHome=home&&!home.closest('[hidden]');g.className='setting-group';g.hidden=true;g.dataset.group=name;
+ const title=(pages.find(p=>p.items.includes(id))||pages.find(p=>new RegExp(p.match).test(id))).title;
+ if(!document.querySelector('.setting-group'))for(const {title:name,home:homeId} of pages){
+  const g=document.createElement('section'),home=homeId&&$(homeId),inHome=home&&!home.closest('[hidden]');g.className='setting-group';g.hidden=true;g.dataset.group=name;
   if(!inHome)g.append(Object.assign(document.createElement('h3'),{textContent:name}));(inHome?home:$('settings-list')).append(g);
  }
  return document.querySelector(`.setting-group[data-group="${title}"]`);

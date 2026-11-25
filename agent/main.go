@@ -28,7 +28,7 @@ import (
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
 var version = "0.30.4"
 
-//go:embed ui/index.html ui/style.css ui/app.js ui/settings.js ui/voice.js ui/phrases.js
+//go:embed ui/index.html ui/style.css ui/app.js ui/settings.js ui/pages.js ui/actions.js ui/voice.js ui/phrases.js
 var webAssets embed.FS
 
 const maxMap = 8 << 20
@@ -456,7 +456,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		case "/style.css":
 			asset = "ui/style.css"
 			contentType = "text/css; charset=utf-8"
-		case "/settings.js", "/voice.js", "/phrases.js":
+		case "/settings.js", "/pages.js", "/actions.js", "/voice.js", "/phrases.js":
 			asset = "ui" + r.URL.Path
 			contentType = "text/javascript; charset=utf-8"
 		case "/app.js":

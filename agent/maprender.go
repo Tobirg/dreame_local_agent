@@ -50,6 +50,7 @@ type mapOpts struct {
 	base     bool
 	selected map[int]bool
 	floors   map[int]int
+	layers   map[string]bool // base only: saved overlays the agent draws too (the panel draws the ones it has drafts of)
 }
 
 // The panel asks for the base layer on every page load; the last one is kept (the robot's CPU is slow).
@@ -61,7 +62,10 @@ var baseCache struct {
 
 // mapOptsFromQuery reads ?base=1&selected=1,3&floors=1:2,3:0.
 func mapOptsFromQuery(q url.Values) mapOpts {
-	o := mapOpts{base: q.Get("base") == "1", selected: map[int]bool{}, floors: map[int]int{}}
+	o := mapOpts{base: q.Get("base") == "1", selected: map[int]bool{}, floors: map[int]int{}, layers: map[string]bool{}}
+	for _, v := range strings.Split(q.Get("layers"), ",") {
+		o.layers[v] = true
+	}
 	for _, v := range strings.Split(q.Get("selected"), ",") {
 		if id, err := strconv.Atoi(v); err == nil {
 			o.selected[id] = true
@@ -88,7 +92,7 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 	if view.Empty || len(view.Origin) != 2 {
 		return nil, errors.New("no saved map")
 	}
-	key := fmt.Sprintf("%s|%v|%v", view.Revision, o.selected, o.floors)
+	key := fmt.Sprintf("%s|%v|%v|%v", view.Revision, o.selected, o.floors, o.layers)
 	if o.base {
 		baseCache.Lock()
 		defer baseCache.Unlock()
@@ -170,12 +174,12 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 		disc(img, x, y, 6, obstacleRing)
 		digits(img, x, y, strconv.Itoa(r.Num))
 	}
+	drawOverlays(img, view, px, func(group string) bool { return !o.base || o.layers[group] })
 	if o.base {
 		baseCache.png, err = encodePNG(img)
 		baseCache.key = key
 		return baseCache.png, err
 	}
-	drawOverlays(img, view, px)
 	live := a.livePose()
 	if !live.Live || live.MapID != view.MapID {
 		live = livePose{}
