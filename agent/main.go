@@ -471,6 +471,8 @@ func (a *agent) frameAncestors() string {
 
 func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 
+	// The panel compares this between responses to notice an agent update and reload its pages.
+	w.Header().Set("X-Agent-Version", version)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors "+a.frameAncestors()+"; form-action 'none'; base-uri 'none'")

@@ -429,3 +429,6 @@ body[data-monitor]{overflow:hidden}
 .chips.icons button[aria-checked=true] .ic{background:var(--go-soft);color:var(--go);box-shadow:inset 0 0 0 1.5px var(--go)}
 #tune-settings .setting-row:has(input[type=range]) .setting-current::after{content:attr(data-unit);font-size:14px;font-weight:600}
 .chips.icons .cap{hyphens:auto;overflow-wrap:anywhere}
+.update-banner{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:12px;width:max-content;max-width:calc(100vw - 32px);padding:8px 8px 8px 16px;background:var(--ink);color:var(--paper);border-radius:999px;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+.update-banner[hidden]{display:none}
+.update-banner button{border-radius:999px;padding:6px 14px;background:var(--go);color:#fff;border:0;font-weight:600}

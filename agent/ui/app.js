@@ -38,6 +38,26 @@ const SUSPENDED='Чтение приостановлено';
 function toast(message,error=false){if(error&&message===SUSPENDED)return;clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
 function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.live_pose'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update'||method==='/api/v1/system/firmware'||method==='/api/v1/logs'||method==='/api/v1/pets/photos';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
+// After an agent update an open page keeps the old interface. Every response carries the agent's version: when it changes,
+// reload the page, or offer a banner while something would be lost (map editing, camera monitoring, a command, typing).
+let pageAgentVersion=null,newAgentVersion=null;
+function noteAgentVersion(response){
+ const v=response.headers.get('X-Agent-Version');if(!v)return;
+ if(!pageAgentVersion){pageAgentVersion=v;return;}
+ if(v===pageAgentVersion||v===newAgentVersion)return;
+ newAgentVersion=v;offerReload();
+}
+function pageInUse(){
+ const a=document.activeElement;
+ return busy||document.body.hasAttribute('data-map-editing')||!!document.body.dataset.monitor||!!a?.matches?.('textarea,input:not([type=range]):not([type=checkbox]):not([type=radio])');
+}
+function offerReload(){
+ // Guard against a reload loop (an agent flipping between versions): one automatic reload a minute at most.
+ let last=0;try{last=Number(sessionStorage.getItem('agent-reload-at'))||0;}catch{}
+ if(!pageInUse()&&Date.now()-last>60000){try{sessionStorage.setItem('agent-reload-at',String(Date.now()));}catch{}location.reload();return;}
+ $('update-banner').querySelector('span').textContent='Вышла новая версия агента '+newAgentVersion;$('update-banner').hidden=false;
+}
+$('update-reload').onclick=()=>location.reload();
 async function api(method,params=null){
  const read=isRead(method),requestID=read?null:Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
  for(let attempt=0;attempt<(read?2:1);attempt++){
@@ -46,7 +66,7 @@ async function api(method,params=null){
   try{
    // "/api/v1/..." methods are agent paths (GET without params); everything else is a /rpc method.
    const v1=method.startsWith('/api/v1/'),post=!v1||params!==null;
-   const response=await fetch(v1?method:'/rpc',{method:post?'POST':'GET',headers:{...(post?{'Content-Type':'application/json'}:{}),'Authorization':'Bearer '+token,...(requestID?{'X-Dreame-Request-ID':requestID}:{})},body:post?JSON.stringify(v1?params:{method,params}):undefined,credentials:'omit',cache:'no-store',signal:controller.signal});
+   const response=await fetch(v1?method:'/rpc',{method:post?'POST':'GET',headers:{...(post?{'Content-Type':'application/json'}:{}),'Authorization':'Bearer '+token,...(requestID?{'X-Dreame-Request-ID':requestID}:{})},body:post?JSON.stringify(v1?params:{method,params}):undefined,credentials:'omit',cache:'no-store',signal:controller.signal});noteAgentVersion(response);
    const body=await response.json();if(!response.ok){const error=Error(body.error||'Ошибка HTTP '+response.status);error.status=response.status;throw error;}return body.result;
   }catch(e){
    if(controller.signal.reason==='suspend'||controller.signal.reason==='logout'){const error=Error(SUSPENDED);error.suspended=true;throw error;}
@@ -575,7 +595,7 @@ async function streamEvents(){
  stopEvents();const controller=new AbortController();events=controller;
  while(events===controller&&token&&!document.hidden){
   try{
-   const response=await fetch('/api/v1/events',{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store',signal:controller.signal});
+   const response=await fetch('/api/v1/events',{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store',signal:controller.signal});noteAgentVersion(response);
    if(!response.ok||!response.body)throw Error('Ошибка HTTP '+response.status);
    const reader=response.body.pipeThrough(new TextDecoderStream()).getReader();let buffer='';
    for(;;){
@@ -1538,7 +1558,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openSheet)closeShee
 let swallowClick=false;
 document.addEventListener('pointerdown',e=>{
  swallowClick=false;
- if(!openSheet||openSheet.contains(e.target)||e.target.closest('[data-sheet],.photo-viewer,#toast'))return;
+ if(!openSheet||openSheet.contains(e.target)||e.target.closest('[data-sheet],.photo-viewer,#toast,#update-banner'))return;
  if(openSheet.id==='sheet-camera'&&mapStage.contains(e.target))return;
  closeSheet();swallowClick=true;e.stopPropagation();
 },true);
