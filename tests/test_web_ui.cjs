@@ -261,6 +261,7 @@ const server=http.createServer((req,res)=>{
    await page.keyboard.press('Escape');assert(await page.locator('#sheet-pets').isHidden());
   }
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));await page.screenshot({path:'/tmp/dreame-native-web-mobile.png',fullPage:true});
+  for(let k=0;k<3;k++){await page.reload();await page.locator('#map').waitFor();await page.waitForTimeout(1200);assert(!/приостановлено/.test(await page.locator('#toast').textContent()),'a page reload shows no «Чтение приостановлено»');}
   await sheet('menu');await page.locator('#logout').click();assert(await page.locator('#login').isVisible());assert.equal(await page.evaluate(()=>sessionStorage.getItem('dreame-token')),null);
   await page.goto(url+'/?setup=wifi');await page.locator('#wifi-ssid').waitFor({state:'visible',timeout:5000});assert(await page.locator('#wifi-ssid').isVisible());assert(await page.locator('#login').isVisible());await page.locator('#token').fill(token);await page.locator('#wifi-ssid').fill('Setup');await page.locator('#wifi-open').check();await page.locator('#save-wifi').click();await page.waitForFunction(()=>document.querySelector('#wifi-result').textContent.includes('Настройки приняты'));assert.deepEqual(commands.at(-1),{method:'local.wifi_setup',params:{ssid:'Setup',password:'',open:true}});
   { // Embedded view: signs in from the fragment, the same app screen with everything the token allows
