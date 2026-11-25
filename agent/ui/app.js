@@ -341,7 +341,9 @@ function drawRobot(x,y,angle,r){
  if(Number.isFinite(angle)){const a=-angle*Math.PI/180;ctx.strokeStyle='#17232d';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+Math.cos(a)*r*.55,y+Math.sin(a)*r*.55);ctx.lineTo(x+Math.cos(a)*r*.92,y+Math.sin(a)*r*.92);ctx.stroke();}
 }
 // One small DOM element over the robot animated by CSS: no canvas repaint per frame.
+let markerArgs=null;
 function placeMarker(pos,r){
+ markerArgs=[pos,r];
  const marker=$('map-marker'),s=robotState||{},mode=!pos?'':s.activity==='cleaning'?'pulse':s.activity==='returning'?'pulse':s.station===2?'heat':s.station===1?'wash':s.charging===1&&s.battery<100?'charge':s.activity==='docked'?'sleep':'';
  marker.hidden=!mode;if(!mode)return;
  marker.className='map-marker '+mode;marker.style.left=(pos[0]/canvas.width*100)+'%';marker.style.top=(pos[1]/canvas.height*100)+'%';
@@ -545,7 +547,19 @@ function baseLayer(){
   bc.stroke();}
  baseCache={key,canvas:out};return out;
 }
+// The whole map fits the window at 100%; the buttons zoom from there and only a zoomed map scrolls inside its frame.
+let zoom=1;
+function layoutMap(){
+ const stage=document.querySelector('.map-stage'),top=stage.getBoundingClientRect().top,avail=Math.max(260,innerHeight-Math.max(0,Math.min(top,innerHeight*.3))-24);
+ const fit=Math.min(stage.clientWidth,avail*canvas.width/canvas.height);
+ stage.style.maxHeight=avail+'px';stage.querySelector('.map-wrap').style.width=Math.round(fit*zoom)+'px';
+ $('zoom-fit').textContent=Math.round(zoom*100)+'%';if(markerArgs)placeMarker(...markerArgs);
+}
+const setZoom=z=>{zoom=Math.min(6,Math.max(.4,z));layoutMap();};
+$('zoom-in').onclick=()=>setZoom(zoom*1.25);$('zoom-out').onclick=()=>setZoom(zoom/1.25);$('zoom-fit').onclick=()=>setZoom(1);
+addEventListener('resize',layoutMap);
 function draw(){
+ layoutMap();
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
  ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;
  const scale=3;ctx.drawImage(baseLayer(),0,0);
