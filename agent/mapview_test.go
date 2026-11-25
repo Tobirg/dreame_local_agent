@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"bytes"
 	"compress/zlib"
 	"context"
@@ -136,5 +137,21 @@ func TestRealMapWhenProvided(t *testing.T) {
 		if room.ID != i+1 {
 			t.Fatal("room IDs mismatch")
 		}
+	}
+}
+
+// r2505 cells as the Dreame app reads them: id in the low 6 bits, 0x40 carpet (still floor), 0x80 border cell.
+func TestR2505CellFlags(t *testing.T) {
+	raw, err := decodeSavedFrame(syntheticFrame(t, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(raw[27:], []byte{0x41, 0x81, 0x43, 0x00, 0x03, 0x85, 0x00, 0x00, 0x00})
+	view, err := makeMapView(raw, "dreame.vacuum.r2505")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := view.Pixels[:6]; !reflect.DeepEqual(got, []byte{1, 255, 3, 0, 3, 255}) {
+		t.Fatal(got)
 	}
 }

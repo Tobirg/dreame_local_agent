@@ -522,29 +522,14 @@ function baseLayer(){
  const bc=out.getContext('2d'),img=bc.createImageData(W,H),d=img.data,fill=[],line=[],kind=[],box={};
  for(let i=0;i<grid.length;i++){const id=grid[i];if(!id||id===255)continue;const x=i%w,y=i/w|0,b=box[id]||(box[id]=[x,x,y,y]);if(x<b[0])b[0]=x;if(x>b[1])b[1]=x;if(y<b[2])b[2]=y;if(y>b[3])b[3]=y;}
  for(let id=1;id<255;id++){let rgb=palette[(id-1)%palette.length].slice(1).match(/../g).map(c=>parseInt(c,16));if(selected.size&&!selected.has(id))rgb=rgb.map(c=>Math.round(c*.42));fill[id]=rgb;line[id]=rgb.map(c=>Math.round(c*.84));}
- fill[255]=line[255]=[0xd1,0xd9,0xe2];
+ fill[255]=line[255]=[0xa6,0xba,0xd0]; // border cells: the room outline, as in the Dreame app
  for(const room of view.rooms){let f=floorOf(room);if(f===1){const b=box[room.id];f=b&&b[1]-b[0]>b[3]-b[2]?4:3;}kind[room.id]=f;}
  for(let Y=0;Y<H;Y++){const row=(h-1-(Y/s|0))*w;for(let X=0;X<W;X++){
   const id=grid[row+(X/s|0)];if(!id)continue;const f=kind[id];
   const edge=f===2?X%36===0||Y%36===0:f===4?Y%12===0||(X+(Y/12&1)*24)%48===0:f===3?X%12===0||(Y+(X/12&1)*24)%48===0:false;
   const c=edge?line[id]:fill[id],j=(Y*W+X)*4;d[j]=c[0];d[j+1]=c[1];d[j+2]=c[2];d[j+3]=255;
  }}
- // Without the app's floor plan in the map: border from the cells (#7F8B98), sides facing outside or a wall, 2 px inside the cell.
- const out_=(x,y)=>x<0||y<0||x>=w||y>=h||!grid[y*w+x]||grid[y*w+x]===255,paint=(X,Y)=>{const j=(Y*W+X)*4;d[j]=0x7f;d[j+1]=0x8b;d[j+2]=0x98;d[j+3]=255;};
- if(!view.plan_walls?.length)for(let y=0;y<h;y++)for(let x=0;x<w;x++){const id=grid[y*w+x];if(!id||id===255)continue;const X0=x*s,Y0=(h-1-y)*s;
-  for(let k=0;k<s;k++){
-   if(out_(x-1,y))for(let t=0;t<2;t++)paint(X0+t,Y0+k);
-   if(out_(x+1,y))for(let t=0;t<2;t++)paint(X0+s-1-t,Y0+k);
-   if(out_(x,y+1))for(let t=0;t<2;t++)paint(X0+k,Y0+t);
-   if(out_(x,y-1))for(let t=0;t<2;t++)paint(X0+k,Y0+s-1-t);
-  }}
  bc.putImageData(img,0,0);
- // The app's floor plan (walls_info): straight walls one cell wide, shifted by half a cell, gaps at doors; walls of unselected rooms fade.
- const half=view.grid_size/2,lit=wl=>!selected.size||wl.rooms.some(r=>selected.has(r));
- bc.lineWidth=s;bc.lineCap='square';
- for(const faded of [true,false]){bc.strokeStyle=faded?'rgba(127,139,152,.4)':'#7F8B98';bc.beginPath();
-  for(const wl of view.plan_walls||[]){if(lit(wl)===faded)continue;const [x0,y0]=robotToPixel(view,wl.seg[0]-half,wl.seg[1]-half),[x1,y1]=robotToPixel(view,wl.seg[2]-half,wl.seg[3]-half);bc.moveTo(x0*s,(h-y0)*s);bc.lineTo(x1*s,(h-y1)*s);}
-  bc.stroke();}
  baseCache={key,canvas:out};return out;
 }
 // The whole map fits the window at 100%; the buttons zoom from there and only a zoomed map scrolls inside its frame.

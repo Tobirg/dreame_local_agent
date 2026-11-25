@@ -210,7 +210,9 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 	if len(meta.Origin) == 2 {
 		view.Origin = meta.Origin
 	}
-	v3 := meta.Walls.Version == 3 || model == "dreame.vacuum.r2505"
+	// r2505's Dreame app plugin reads the cells as id in the low 6 bits, 0x40 = carpet, 0x80 = border cell (drawn as the
+	// room outline, #A6BAD0); the layout with the flags in bits 5-6 is for other models.
+	v3 := meta.Walls.Version == 3 && model != "dreame.vacuum.r2505"
 	view.Pixels = make([]byte, total)
 	type centroid struct{ X, Y, N int }
 	centers := map[int]centroid{}

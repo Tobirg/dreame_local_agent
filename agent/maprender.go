@@ -14,8 +14,7 @@ import (
 var (
 	roomPalette = []color.RGBA{{0x7f, 0xd9, 0xc2, 255}, {0xa3, 0xbc, 0xec, 255}, {0xe5, 0xbd, 0x8a, 255}, {0xbc, 0xac, 0xeb, 255},
 		{0xa7, 0xd3, 0x9a, 255}, {0xe3, 0xa5, 0xb4, 255}, {0x93, 0xcd, 0xd9, 255}, {0xd4, 0xd0, 0x93, 255}}
-	wallColour     = color.RGBA{0xd1, 0xd9, 0xe2, 255}
-	borderColour   = color.RGBA{0x7f, 0x8b, 0x98, 255} // room outline, as the Dreame app's floor plan
+	wallColour     = color.RGBA{0xa6, 0xba, 0xd0, 255} // border cells, the room outline of the Dreame app
 	pathColour     = color.RGBA{0xff, 0xff, 0xff, 200}
 	robotColour    = color.RGBA{0x4d, 0xa3, 0xff, 255}
 	chargerColour  = color.RGBA{0x55, 0xf2, 0xaa, 255}
@@ -65,46 +64,9 @@ func (a *agent) mapPNG() ([]byte, error) {
 			}
 		}
 	}
-	// Without the app's floor plan in the map: border from the cells, sides facing outside or a wall, 2 px inside the cell.
-	outside := func(x, y int) bool {
-		return x < 0 || y < 0 || x >= view.Width || y >= view.Height || view.Pixels[y*view.Width+x] == 0 || view.Pixels[y*view.Width+x] == 255
-	}
-	for i, id := range view.Pixels {
-		if id == 0 || id == 255 || len(view.PlanWalls) > 0 {
-			continue
-		}
-		x, y := i%view.Width, i/view.Width
-		x0, y0 := x*mapScale, (view.Height-1-y)*mapScale
-		for k := 0; k < mapScale; k++ {
-			for t := 0; t < 2; t++ {
-				if outside(x-1, y) {
-					img.SetRGBA(x0+t, y0+k, borderColour)
-				}
-				if outside(x+1, y) {
-					img.SetRGBA(x0+mapScale-1-t, y0+k, borderColour)
-				}
-				if outside(x, y+1) {
-					img.SetRGBA(x0+k, y0+t, borderColour)
-				}
-				if outside(x, y-1) {
-					img.SetRGBA(x0+k, y0+mapScale-1-t, borderColour)
-				}
-			}
-		}
-	}
 	// Robot millimetres to image pixels.
 	px := func(p []int) (int, int) {
 		return (p[0] - view.Origin[0]) * mapScale / view.GridSize, (view.Height*view.GridSize - (p[1] - view.Origin[1])) * mapScale / view.GridSize
-	}
-	// The app's floor plan: walls one cell wide, shifted by half a cell like the app does.
-	for _, w := range view.PlanWalls {
-		x0, y1 := px([]int{w.Seg[0] - view.GridSize/2, w.Seg[1] - view.GridSize/2})
-		x1, y0 := px([]int{w.Seg[2] - view.GridSize/2, w.Seg[3] - view.GridSize/2})
-		for y := max(y0-1, 0); y <= min(y1+1, img.Rect.Dy()-1); y++ {
-			for x := max(x0-1, 0); x <= min(x1+1, img.Rect.Dx()-1); x++ {
-				img.SetRGBA(x, y, borderColour)
-			}
-		}
 	}
 	live := a.livePose()
 	if !live.Live || live.MapID != view.MapID {
