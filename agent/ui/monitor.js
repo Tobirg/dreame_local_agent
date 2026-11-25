@@ -21,9 +21,18 @@ export function mountMonitor({api,command,rpc,token,toast,statusText,mapCanvas,o
  const showFlip=()=>{img.classList.toggle('flipped',flip);$('flip').setAttribute('aria-pressed',String(flip));};showFlip();
  const say=t=>{note.textContent=t;note.hidden=!t;};
  // The robot's monitoring session (needed for driving without the motor) makes the firmware encode
- // and send video to its cloud, so the screen does not open it for watching: the agent opens it on the
- // first drive or pet search, and the screen ends it on exit.
- const session=()=>rpc('video_monitor',{enabled:false}).catch(()=>{});
+ // and send video to its cloud. With the cloud protection on, the screen opens it at once, as the
+ // app does (voice, the firmware's light), and keeps it alive while open; without it, the agent opens
+ // it on the first drive or pet search only. The screen ends it on exit.
+ let alive=null;
+ const session=()=>{clearInterval(alive);alive=null;return rpc('video_monitor',{enabled:false}).catch(()=>{});};
+ async function watchSession(){
+  let guarded=false;
+  try{guarded=(await api('/api/v1/system/video_cloud')).enabled===true;}catch{} // control tokens cannot read it
+  if(!guarded||!open)return;
+  const ping=()=>rpc('video_monitor',{enabled:true}).catch(e=>{clearInterval(alive);alive=null;say(e.message);});
+  ping();alive=setInterval(ping,10000);
+ }
  // Frames: one long GET of /api/v1/camera/stream (multipart, each new JPEG as the module captures it).
  const enc=new TextEncoder(),dec=new TextDecoder(),gap=enc.encode('\r\n\r\n');
  function find(buf,pat,from=0){outer:for(let i=from;i<=buf.length-pat.length;i++){for(let j=0;j<pat.length;j++)if(buf[i+j]!==pat[j])continue outer;return i;}return -1;}
@@ -107,7 +116,7 @@ export function mountMonitor({api,command,rpc,token,toast,statusText,mapCanvas,o
    if(open)return;open=true;frame=null;img.hidden=true;say('Включаю камеру…');root.hidden=false;document.body.dataset.monitor='1';
    title();mini();miniTimer=setInterval(()=>{title();mini();},1000);
    api('/api/v1/m/camera/status',{}).then(s=>$('light').setAttribute('aria-pressed',String(!!s.light)),()=>{});
-   frames();
+   frames();watchSession();
   },
   close,
   get isOpen(){return open;}
