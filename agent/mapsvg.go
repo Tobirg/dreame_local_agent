@@ -183,7 +183,10 @@ func (a *agent) mapSVG(o mapOpts) ([]byte, error) {
 			fmt.Fprintf(&b, `<use href="#r%d" fill="url(#f%d)" fill-rule="evenodd"/>`, id, k)
 		}
 	}
-	for _, r := range view.Rooms { // room number badge and name, as the app
+	for _, r := range view.Rooms { // room number badge and name, as the app; the panel draws its own order badges and names
+		if o.base {
+			break
+		}
 		x, y := (r.X+.5)*mapScale, (float64(view.Height)-r.Y-.5)*mapScale
 		ring := roomPalette[(r.ID-1)%len(roomPalette)]
 		op := 1.0
@@ -193,9 +196,7 @@ func (a *agent) mapSVG(o mapOpts) ([]byte, error) {
 		fmt.Fprintf(&b, `<g opacity="%s" font-family="system-ui,sans-serif" text-anchor="middle" dominant-baseline="central" fill="#fff">`, num(op))
 		fmt.Fprintf(&b, `<circle cx="%s" cy="%s" r="7" fill="#17232d" stroke="%s" stroke-width="2"/>`, num(x), num(y-9), colourHex(ring))
 		fmt.Fprintf(&b, `<text x="%s" y="%s" font-size="10" font-weight="700">%d</text>`, num(x), num(y-8.5), r.Num)
-		if !o.base { // the panel writes the names itself, with room icons
-			fmt.Fprintf(&b, `<text x="%s" y="%s" font-size="11" font-weight="600" stroke="#17232d" stroke-opacity=".8" stroke-width="3" paint-order="stroke" stroke-linejoin="round">%s</text>`, num(x), num(y+8), html.EscapeString(r.Name))
-		}
+		fmt.Fprintf(&b, `<text x="%s" y="%s" font-size="11" font-weight="600" stroke="#17232d" stroke-opacity=".8" stroke-width="3" paint-order="stroke" stroke-linejoin="round">%s</text>`, num(x), num(y+8), html.EscapeString(r.Name))
 		b.WriteString(`</g>`)
 	}
 	px := func(p []int) (float64, float64) {
