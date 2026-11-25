@@ -66,6 +66,8 @@ func limitedRoute(scope string, r *http.Request) bool {
 		return true
 	case p == "/api/v1/command":
 		return scope == "control"
+	case p == "/api/v1/camera/stream":
+		return scope == "control" && r.Method == "GET" // live picture: like driving, not for read tokens
 	}
 	return false
 }

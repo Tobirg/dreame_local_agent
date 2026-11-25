@@ -514,9 +514,14 @@ func (a *agent) runCommand(ctx context.Context, raw json.RawMessage, info map[st
 	switch p.Name {
 	case "patrol":
 		return a.startPatrol(ctx, p, info["did"])
+	case "video_monitor":
+		return a.videoMonitor(ctx, p, info["did"])
 	case "locate", "set_volume", "set_suction", "set_setting", "reset_consumable", "set_dnd", "set_dnd_period", "delete_dnd_period", "save_quick_command", "delete_quick_command", "set_schedule", "delete_schedule":
 	default:
 		stopPatrol() // the owner took over
+	}
+	if p.Name == "find_pet" {
+		return a.findPet(ctx, p, info["did"])
 	}
 	if p.Name == "set_setting" {
 		result, err := a.setSetting(ctx, p.Setting, p.To, info["did"])

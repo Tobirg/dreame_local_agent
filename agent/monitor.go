@@ -220,3 +220,71 @@ func verifyCode(result any) int {
 	}
 	return *v.Code
 }
+
+// videoMonitor opens (enabled true, also the panel's heartbeat) or ends the monitoring session.
+func (a *agent) videoMonitor(ctx context.Context, p commandParams, did string) (any, error) {
+	if p.Enabled == nil || p.Value != nil || p.Points != nil || p.Rooms != nil {
+		return nil, errors.New("video_monitor takes enabled true or false")
+	}
+	if *p.Enabled {
+		if err := a.ensureMonitor(ctx, did); err != nil {
+			return nil, err
+		}
+		return map[string]any{"monitoring": true}, nil
+	}
+	return map[string]any{"monitoring": a.endMonitor(ctx, did)}, nil
+}
+
+// endMonitor ends the session now unless a patrol or pet search holds it; it reports whether it stays open.
+func (a *agent) endMonitor(ctx context.Context, did string) bool {
+	monitor.Lock()
+	defer monitor.Unlock()
+	if !monitor.open {
+		return false
+	}
+	if monitor.holds > 0 {
+		return true
+	}
+	if _, err := a.miot(ctx, "action", monitorAction(did, 1, 1, map[string]any{"operType": "monitor", "operation": "end"})); err != nil {
+		log.Printf("video monitoring: %v", err)
+	}
+	close(monitor.stop)
+	monitor.open, monitor.stop = false, nil
+	return false
+}
+
+// findPet runs the app's pet search (FindPet page): 4/1 mode 22 MonitorCruiseMode with {"findpet": ""}.
+// The robot looks around the home for the pet in status 22; the session stays open while it does.
+// Without the session mode 22 ends at once (checked 2026-11-24).
+func (a *agent) findPet(ctx context.Context, p commandParams, did string) (any, error) {
+	if p.Value != nil || p.Points != nil || p.Rooms != nil || p.Enabled != nil {
+		return nil, errors.New("find_pet takes no arguments")
+	}
+	if err := a.ensureMonitor(ctx, did); err != nil {
+		return nil, err
+	}
+	result, err := a.miot(ctx, "action", map[string]any{"did": did, "siid": 4, "aiid": 1, "in": []any{
+		map[string]any{"piid": 1, "value": 22}, map[string]any{"piid": 10, "value": `{"findpet":""}`}}})
+	if err != nil {
+		return nil, err
+	}
+	if err := rejected(result); err != nil {
+		return result, err
+	}
+	release := a.holdMonitor()
+	go func() {
+		defer release()
+		start, seen := time.Now(), false
+		for time.Since(start) < 30*time.Minute {
+			time.Sleep(5 * time.Second)
+			switch s := a.robotStatus(); {
+			case s == 22:
+				seen = true
+			case seen || time.Since(start) > 30*time.Second:
+				return
+			}
+		}
+	}()
+	a.refreshSoon()
+	return result, nil
+}

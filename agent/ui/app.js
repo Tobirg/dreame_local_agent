@@ -2,6 +2,7 @@ import {settings} from '/settings.js';
 import {pages} from '/pages.js';
 import {actions} from '/actions.js';
 import {mountVoice} from '/voice.js';
+import {mountMonitor} from '/monitor.js';
 const $=id=>document.getElementById(id);
 const captiveSetup=new URLSearchParams(location.search).get('setup')==='wifi';
 const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',13:'Ручное управление',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту',15:'Тестовый режим',1527:'Саморемонт станции',22:'Патрулирование',23:'Едет к точке камеры',1501:'Проверка воды'};
@@ -1529,3 +1530,7 @@ syncChips();
 for(const d of document.querySelectorAll('.hub>details'))d.addEventListener('toggle',()=>{if(d.open)d.parentElement.scrollTop=0;draw();});
 
 $('label-size').onchange=async e=>{const prev=labelSize;try{labelSize=Number(e.target.value);draw();labelSize=Number((await api('/api/v1/ui',{label_size:labelSize})).label_size)||0;toast('Размер подписей сохранён');}catch(err){labelSize=prev;e.target.value=String(prev);draw();toast(err.message,true);}};
+
+// ---- Camera monitoring screen (monitor.js): opened by the camera button on the map.
+const monitorScreen=mountMonitor({api,command,token:()=>token,rpc:(name,args={})=>api('/api/v1/command',{name,...args}),toast,statusText:()=>$('status').textContent,mapCanvas:canvas});
+$('open-monitor').onclick=()=>{closeSheet();monitorScreen.open();};

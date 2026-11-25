@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -129,5 +130,78 @@ func TestVideoCodeRoute(t *testing.T) {
 	}
 	if do(a.cfg.Token, `{"code":""}`) != 200 || a.videoCodeHash() != "" {
 		t.Fatal("not cleared")
+	}
+}
+
+func TestVideoMonitorOpenAndEnd(t *testing.T) {
+	a, calls := monitorAgent(t, 2)
+	run := func(body string) {
+		if _, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(body)}); err != nil {
+			t.Fatal(body, err)
+		}
+	}
+	run(`{"name":"video_monitor","enabled":true}`)
+	run(`{"name":"video_monitor","enabled":true}`) // heartbeat: no second start
+	run(`{"name":"video_monitor","enabled":false}`)
+	got := calls()
+	if len(got) != 3 || !strings.Contains(got[1], `\"operation\":\"start\"`) || !strings.Contains(got[2], `\"operation\":\"end\"`) || monitor.open {
+		t.Fatal(strings.Join(got, "\n"))
+	}
+}
+
+func TestFindPetInsideMonitoring(t *testing.T) {
+	a, calls := monitorAgent(t, 2)
+	if _, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(`{"name":"find_pet"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	got := calls()
+	if len(got) != 3 || !strings.Contains(got[2], `"value": 22`) || !strings.Contains(got[2], `findpet`) {
+		t.Fatal(strings.Join(got, "\n"))
+	}
+	monitor.Lock()
+	held := monitor.holds
+	monitor.Unlock()
+	if held != 1 {
+		t.Fatal("pet search does not hold the session", held)
+	}
+}
+
+func TestCameraStream(t *testing.T) {
+	a := testAgent(t)
+	server := httptest.NewServer(http.HandlerFunc(a.handler))
+	defer server.Close()
+	get := func() *http.Response {
+		req, _ := http.NewRequest("GET", server.URL+"/api/v1/camera/stream", nil)
+		req.Header.Set("Authorization", "Bearer "+a.cfg.Token)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := get(); res.StatusCode != 404 {
+		t.Fatal("stream without the camera module", res.StatusCode)
+	}
+	mod := a.path("/data/dreame-local/modules/camera")
+	if err := os.MkdirAll(mod, 0700); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(mod, "manifest.json"), []byte(`{"name":"camera","version":"1.6.0","title":"Камера","description":"test","handler":"handler"}`), 0600)
+	_ = os.WriteFile(filepath.Join(mod, "handler"), []byte("#!/bin/sh\n"), 0700)
+	if _, err := a.installedModule("camera"); err != nil {
+		t.Fatal(err)
+	}
+	dir := a.path(cameraLiveDir)
+	_ = os.MkdirAll(dir, 0700)
+	_ = os.WriteFile(filepath.Join(dir, "live.jpg"), []byte("\xff\xd8frame\xff\xd9"), 0600)
+	res := get()
+	defer res.Body.Close()
+	buf := make([]byte, 200)
+	n, _ := io.ReadAtLeast(res.Body, buf, 60)
+	if !strings.Contains(string(buf[:n]), "Content-Type: image/jpeg") || !strings.Contains(string(buf[:n]), "frame") {
+		t.Fatal(string(buf[:n]))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "want")); err != nil {
+		t.Fatal("stream does not ask the module to capture")
 	}
 }
