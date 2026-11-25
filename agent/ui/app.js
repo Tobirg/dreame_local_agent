@@ -77,10 +77,9 @@ function disableControls(disabled){
  document.querySelectorAll('[data-command],#stage-update,#apply-update,#rollback-update,#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-row input,.setting-row select,.setting-apply').forEach(b=>b.disabled=disabled);
  $('clean-rooms').disabled=disabled||selected.size===0;
  $('clean-zone').disabled=disabled||!zones.length;
- $('cancel-zone').disabled=!zones.length;$('draw-zone').disabled=disabled||zones.length>=5;
+ $('draw-zone').disabled=disabled||zones.length>=5;
  $('save-furniture').disabled=disabled||!furnitureDraft;$('cancel-furniture').disabled=!furnitureDraft;
  $('save-restrict').disabled=disabled||!restrictDraft||!view?.restrictions_editable;
- $('draw-restrict').disabled=disabled||!view?.restrictions_editable;
  $('apply-map-edit').disabled=disabled||!pending;
  $('save-threshold').disabled=disabled||!thresholdDraft||!view?.thresholds_editable;
  $('delete-threshold').disabled=disabled||!$('threshold-choice').value||!view?.thresholds_editable;
@@ -566,7 +565,7 @@ async function streamEvents(){
 }
 function invalidateEdit(){pending=null;$('map-preview').textContent='';$('apply-map-edit').disabled=true;}
 function selectRoom(id){
- if($('map-operation').value==='split')selected=new Set(selected.has(id)?[]:[id]);
+ if(editTool==='split'&&$('map-operation').value==='split')selected=new Set(selected.has(id)?[]:[id]);
  else if(selected.has(id))selected.delete(id);else{selected.add(id);if(!openSheet&&dock.dataset.mode==='all')setMode('room');}
  points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);
 }
@@ -724,22 +723,23 @@ const fitSize=v=>Math.min(mm(v),view.width*.4,view.height*.4);
 function newRect(w,h,offset=0){const c=visibleCenter(),d=mm(300)*offset;return {cx:c.x+d,cy:c.y-d,w:fitSize(w),h:fitSize(h),a:0};}
 function newLine(len){const c=visibleCenter(),l=fitSize(len)/2;return {x0:c.x-l,y0:c.y,x1:c.x+l,y1:c.y};}
 // Zones for cleaning: up to 5, kept until the map changes.
-const zoneStyle=['#ffae67','rgba(255,174,103,.28)'];
+const zoneStyle=['#3b82f6','rgba(59,130,246,.22)'];
 function zoneShapes(){return zones.map((z,i)=>({kind:'rect',geom:()=>z,set:g=>Object.assign(z,g),selected:i===zoneSel,select:()=>{zoneSel=i;},remove:()=>{zones.splice(i,1);zoneSel=zones.length-1;zoneStatus();},done:zoneStatus,min:mm(300),
  draw:u=>{const [x0,y0]=toCanvasXY(z.cx-z.w/2,z.cy+z.h/2);ctx.fillStyle=zoneStyle[1];ctx.strokeStyle=zoneStyle[0];ctx.lineWidth=2;ctx.fillRect(x0,y0,z.w*3,z.h*3);ctx.strokeRect(x0,y0,z.w*3,z.h*3);
   const [cx,cy]=toCanvasXY(z.cx,z.cy);ctx.fillStyle=zoneStyle[0];ctx.beginPath();ctx.arc(cx,cy,9*u,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.font=`600 ${11*u}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(i+1),cx,cy);}}));}
 const zoneRobot=z=>{const [x0,y0,x1,y1]=toRobotRect(z);return [x0,y1,x1,y0];};
 function zoneStatus(){
  const z=zones[zoneSel];
- $('zone-status').textContent=zones.length?'Зон: '+zones.length+' из 5. Двигай зону пальцем, размер меняется за уголок ↘.'+(z?' Зона '+(zoneSel+1)+' для HA: '+JSON.stringify(zoneRobot(z)):''):'Нажми «Добавить зону»: она появится в центре карты.';
+ $('zone-status').textContent=zones.length?'Зон: '+zones.length+' из 5. Двигай зону пальцем, размер меняется за уголок ↘.'+(z?' Зона '+(zoneSel+1)+' для HA: '+JSON.stringify(zoneRobot(z)):''):'Зон нет: нажми «Добавить» справа на карте.';
  disableControls(busy);
 }
 // Virtual walls, no-go and no-mop zones, carpets and ramps: every change goes to the draft saved by one button.
 const restrictEdit=()=>restrictDraft||(restrictDraft=structuredClone(restrictions()));
-function restrictChanged(text){$('restrict-status').textContent=text+' Нажми «Сохранить изменения».';renderRestrictions();disableControls(busy);}
-function restrictShapes(){
+function restrictChanged(text){$('restrict-status').textContent=text+' Сохранить — ✓ вверху.';renderRestrictions();disableControls(busy);}
+function restrictShapes(kinds){
+ if(!view.restrictions_editable)return [];
  const lists=restrictions(),shapes=[];
- for(const kind of Object.keys(restrictKinds))(lists[kind]||[]).forEach((r,i)=>{
+ for(const kind of kinds)(lists[kind]||[]).forEach((r,i)=>{
   if(!Array.isArray(r)||r.length!==4)return;
   const line=kind==='walls';
   shapes.push({kind:line?'line':'rect',geom:()=>line?fromRobotLine(r):fromRobotRect(r),set:g=>{restrictEdit()[kind][i]=line?toRobotLine(g):toRobotRect(g);},min:mm(200),
@@ -751,12 +751,12 @@ function restrictShapes(){
 // Thresholds: the chosen or new one is the draft line.
 function thresholdShapes(){
  const chosen=$('threshold-choice').value,shapes=[];
- if(thresholdDraft)shapes.push({kind:'line',geom:()=>fromRobotLine(thresholdDraft.line),set:g=>{thresholdDraft={line:toRobotLine(g)};},selected:true,select(){},
+ if(thresholdDraft)shapes.push({kind:'line',geom:()=>fromRobotLine(thresholdDraft.line),set:g=>{thresholdDraft={line:toRobotLine(g)};},selected:!restrictSel,select:()=>{restrictSel=null;},
   remove:()=>{if(chosen&&window.confirm('Удалить этот порог с карты робота?'))submitThreshold(true);else if(!chosen)$('cancel-threshold').click();},
-  done:()=>{$('threshold-status').textContent='Линия изменена. Нажми «Сохранить порог».';disableControls(busy);}});
+  done:()=>{$('threshold-status').textContent='Порог изменён. Сохранить — ✓ вверху.';disableControls(busy);}});
  for(const item of thresholdLines())if(!(thresholdDraft&&chosen===item.kind+':'+item.index))
-  shapes.push({kind:'line',geom:()=>fromRobotLine(item.line),set:g=>{thresholdDraft={line:toRobotLine(g)};},selected:false,select:()=>{$('threshold-choice').value=item.kind+':'+item.index;chooseThreshold();},
-   done:()=>{$('threshold-status').textContent='Линия изменена. Нажми «Сохранить порог».';disableControls(busy);}});
+  shapes.push({kind:'line',geom:()=>fromRobotLine(item.line),set:g=>{thresholdDraft={line:toRobotLine(g)};},selected:false,select:()=>{restrictSel=null;$('threshold-choice').value=item.kind+':'+item.index;chooseThreshold();},
+   done:()=>{$('threshold-status').textContent='Порог изменён. Сохранить — ✓ вверху.';disableControls(busy);}});
  return shapes;
 }
 // Furniture: the chosen or new item is a draft until «Сохранить»; an edit replaces the item.
@@ -787,16 +787,13 @@ function patrolShapes(){return patrolPoints.map((p,i)=>({kind:'point',geom:()=>{
 // The shapes the open screen edits: a block of the map editor, the camera sheet or the zone mode.
 function editorShapes(){
  if(!view||view.empty)return null;
- const sheet=openSheet?.id.slice(6),open=id=>$(id).open&&!$(id).hidden;
- if(sheet==='map-edit'){
-  if(open('restrict-details')&&view.restrictions_editable)return restrictShapes();
-  if(open('threshold-details')&&view.thresholds_editable)return thresholdShapes();
-  if(open('furniture-details')&&view.furniture_editable)return furnitureShapes();
-  if(open('split-details'))return splitShapes();
-  return null;
- }
- if(sheet==='camera')return patrolShapes();
- return dock.dataset.mode==='zone'?zoneShapes():null;
+ if(editTool==='restrict')return restrictShapes(['walls','no_go_zones','no_mop_zones']);
+ if(editTool==='carpet')return restrictShapes(carpetKinds);
+ if(editTool==='threshold')return [...(view.thresholds_editable?thresholdShapes():[]),...restrictShapes(['ramps'])];
+ if(editTool==='furniture')return view.furniture_editable?furnitureShapes():[];
+ if(editTool==='split')return splitShapes();
+ if(openSheet?.id==='sheet-camera')return patrolShapes();
+ return !openSheet&&dock.dataset.mode==='zone'?zoneShapes():null;
 }
 const toCanvasXY=(x,y)=>[x*3,(view.height-y)*3];
 function drawIcon(part,x,y,u){
@@ -820,12 +817,12 @@ function drawEditor(){
  else ctx.arc(...toCanvasXY(g.x,g.y),12*u,0,Math.PI*2);
  ctx.stroke();ctx.setLineDash([]);
  for(const [part,hx,hy] of handlesOf(s,k)){
-  const [x,y]=toCanvasXY(hx,hy);ctx.fillStyle='#fff';ctx.shadowColor='rgba(0,0,0,.35)';ctx.shadowBlur=4*u;ctx.beginPath();ctx.arc(x,y,11*u,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
-  ctx.strokeStyle=part==='delete'?'#e5484d':'#17232d';ctx.fillStyle='#17232d';ctx.lineWidth=1.7*u;ctx.lineCap='round';drawIcon(part,x,y,u);
+  const [x,y]=toCanvasXY(hx,hy);ctx.fillStyle='#17232d';ctx.shadowColor='rgba(0,0,0,.35)';ctx.shadowBlur=4*u;ctx.beginPath();ctx.arc(x,y,11*u,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+  ctx.strokeStyle='#fff';ctx.fillStyle='#fff';ctx.lineWidth=1.7*u;ctx.lineCap='round';drawIcon(part,x,y,u);
  }
  // Size in metres, as the app shows it under the shape.
  const m=v=>(v*view.grid_size/1000).toFixed(1).replace('.',',');let text='',lx=0,ly=0;
- if(s.kind==='rect'){const ys=[[-1,1],[1,1],[1,-1],[-1,-1]].map(([a,b])=>rectCorner(g,a,b)[1]);text=m(g.w)+' × '+m(g.h)+' м';[lx,ly]=toCanvasXY(g.cx,Math.min(...ys));ly+=20*u;}
+ if(s.kind==='rect'){const ys=[[-1,1],[1,1],[1,-1],[-1,-1]].map(([a,b])=>rectCorner(g,a,b)[1]);text=m(g.w)+' × '+m(g.h)+' м';[lx,ly]=toCanvasXY(g.cx,Math.max(...ys));ly-=22*u;}
  else if(s.kind==='line'){text=m(Math.hypot(g.x1-g.x0,g.y1-g.y0))+' м';const dx=g.x1-g.x0,dy=g.y1-g.y0,l=Math.hypot(dx,dy)||1;[lx,ly]=toCanvasXY((g.x0+g.x1)/2+dy/l*22*k,(g.y0+g.y1)/2-dx/l*22*k);}
  if(text){ctx.font=`600 ${11*u}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';const w=ctx.measureText(text).width+12*u;ctx.fillStyle='rgba(23,35,45,.78)';ctx.beginPath();ctx.roundRect?.(lx-w/2,ly-9*u,w,18*u,9*u);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(text,lx,ly);}
  ctx.restore();
@@ -852,7 +849,7 @@ canvas.onclick=e=>{
  const {x,y}=mapPoint(e);
  if(patrolDrawing){addPatrolPoint(x,y);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
- if(!openSheet&&dock.dataset.mode==='zone'){zoneSel=-1;zoneStatus();draw();return;} // in zone mode a tap does not pick rooms
+ if(!editTool&&!openSheet&&dock.dataset.mode==='zone'){zoneSel=-1;zoneStatus();draw();return;} // in zone mode a tap does not pick rooms
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
  const px=Math.min(view.width-1,Math.max(0,Math.floor(x))),py=Math.min(view.height-1,Math.max(0,Math.floor(y))),id=view.grid[py*view.width+px];
  if(view.rooms.some(r=>r.id===id))selectRoom(id);
@@ -893,7 +890,6 @@ $('clean-rooms').onclick=async()=>{try{const ids=[...selected],mapID=view?.map_i
 for(const id of ['room-fan','room-water','room-repeats'])$(id).onchange=()=>{roomOptionsDirty=true;};
 // ---- Zone cleaning: up to 5 rectangles, added in the middle of the map and edited with the handles.
 $('draw-zone').onclick=()=>{if(!view||view.empty||busy||zones.length>=5)return;zones.push(newRect(2000,2000,zones.length));zoneSel=zones.length-1;zoneStatus();draw();};
-$('cancel-zone').onclick=()=>{zones=[];zoneSel=-1;zoneStatus();draw();};
 $('clean-zone').onclick=async()=>{
  try{const rects=zones.map(zoneRobot),mapID=view.map_id;
   await control('/api/v1/command',{name:'clean_zone',zones:rects,repeats:Number($('room-repeats').value),suction:Number($('room-fan').value),water:Number($('room-water').value)},async()=>{const current=await api('local.map_view');if(current.map_id!==mapID)throw Error('Карта изменилась. Выбери зону заново.');});}
@@ -910,7 +906,7 @@ $('prepare-map-edit').onclick=()=>{
 };
 $('apply-map-edit').onclick=async()=>{
  if(!pending||busy)return;const change=pending;invalidateEdit();
- try{await control('action',{siid:6,aiid:2,in:[{piid:4,value:JSON.stringify(change.data)}]},async()=>{const current=await api('local.map_view');if(current.revision!==change.revision||current.map_id!==change.map_id)throw Error('Карта изменилась. Обнови её и выбери точки заново.');});setTimeout(()=>refreshMap(),1500);}catch(e){toast(e.message,true);}
+ try{await control('action',{siid:6,aiid:2,in:[{piid:4,value:JSON.stringify(change.data)}]},async()=>{const current=await api('local.map_view');if(current.revision!==change.revision||current.map_id!==change.map_id)throw Error('Карта изменилась. Обнови её и выбери точки заново.');});setTimeout(()=>refreshMap(),1500);return true;}catch(e){toast(e.message,true);return false;}
 };
 $('send-rpc').onclick=async()=>{try{const method=$('rpc-method').value,params=JSON.parse($('rpc-params').value),result=method==='get_properties'?await api(method,params):await control(method,params);$('rpc-result').textContent=JSON.stringify(result,null,2);}catch(e){toast(e.message,true);}};
 if(token)login().catch(e=>{if(e.status===401){token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');}else connectionLost(e.message);$('login-error').textContent=e.message;});
@@ -967,8 +963,8 @@ async function submitThreshold(remove=false){
  const [oldKind,rawIndex]=$('threshold-choice').value.split(':'),index=Number(rawIndex),newKind=$('threshold-kind').value;
  if(oldKind&&lists[oldKind]?.[index])lists[oldKind].splice(index,1);else if(remove)return;
  if(!remove){const line=thresholdDraft.line;if(line[0]===line[2]&&line[1]===line[3]){toast('Точки порога совпадают',true);return;}if(oldKind===newKind)lists[newKind].splice(index,0,line);else lists[newKind].push(line);}
- try{await control('local.thresholds',{map_id:view.map_id,revision:view.revision,passable,impassable});$('threshold-status').textContent='Команда принята. Ожидаю обновление сохранённой карты.';for(const delay of [1500,5000,12000])setTimeout(()=>refreshMap(),delay);}
- catch(e){toast(e.message,true);}
+ try{await control('local.thresholds',{map_id:view.map_id,revision:view.revision,passable,impassable});thresholdDraft=null;$('threshold-choice').value='';$('threshold-status').textContent='Команда принята. Ожидаю обновление сохранённой карты.';for(const delay of [1500,5000,12000])setTimeout(()=>refreshMap(),delay);return true;}
+ catch(e){toast(e.message,true);return false;}
 }
 $('save-threshold').onclick=()=>submitThreshold();$('delete-threshold').onclick=()=>submitThreshold(true);
 // ---- Per-room settings: robot row [suction, water, repeats, order, mode, extra]; only changed rooms are sent.
@@ -1036,15 +1032,15 @@ function renderFurniture(){
  $('furniture-list').replaceChildren(...rows);
 }
 async function saveFurniture(change){
- try{await control('local.furniture',{map_id:view.map_id,revision:view.revision,...change});$('furniture-status').textContent='Сохранено. Ожидаю обновление карты.';for(const delay of [1500,5000])setTimeout(()=>refreshMap(),delay);}
- catch(e){$('furniture-status').textContent=e.message;}
+ try{await control('local.furniture',{map_id:view.map_id,revision:view.revision,...change});$('furniture-status').textContent='Сохранено. Ожидаю обновление карты.';for(const delay of [1500,5000])setTimeout(()=>refreshMap(),delay);return true;}
+ catch(e){$('furniture-status').textContent=e.message;return false;}
 }
 $('place-furniture').onclick=()=>{
  if(busy||!view?.furniture_editable)return;const type=Number($('furniture-type').value),[,w,h]=furnitureTypes[type],g=newRect(w,h);
  furnitureDraft={index:null,type,x:0,y:0,width:w,height:h,rotation:0};setFurniture({...g,w:mm(w),h:mm(h)});furnitureStatus('Предмет поставлен в центр карты. Двигай его, поворачивай за ↻, размер — за ↘, затем «Сохранить».');draw();
 };
 $('furniture-type').onchange=()=>{if(!furnitureDraft)return;const type=Number($('furniture-type').value),[,w,h]=furnitureTypes[type];furnitureDraft={...furnitureDraft,type,...(furnitureDraft.index==null?{width:w,height:h}:{})};draw();};
-$('save-furniture').onclick=()=>{const d=furnitureDraft;if(!d)return;furnitureDraft=null;saveFurniture({remove:d.index==null?[]:[d.index],add:[{type:d.type,x:d.x,y:d.y,width:d.width,height:d.height,rotation:d.rotation}]});};
+$('save-furniture').onclick=async()=>{const d=furnitureDraft;if(!d)return;furnitureDraft=null;if(!await saveFurniture({remove:d.index==null?[]:[d.index],add:[{type:d.type,x:d.x,y:d.y,width:d.width,height:d.height,rotation:d.rotation}]})){furnitureDraft=d;draw();}};
 $('cancel-furniture').onclick=()=>{furnitureDraft=null;furnitureStatus('Изменение отменено.');draw();};
 // ---- Map backups (mapbackup.go): loaded when the block is opened.
 const restoreStates={0:'',1:'восстанавливается…',3:'восстановлена'};
@@ -1166,22 +1162,24 @@ function drawRestrictions(){
  }
  ctx.restore();
 }
-$('draw-restrict').onclick=()=>{
- if(busy||!view?.restrictions_editable)return;const kind=$('restrict-kind').value,list=restrictEdit()[kind];
- list.push(kind==='walls'?toRobotLine(newLine(1500)):toRobotRect(newRect(1000,1000)));restrictSel={kind,index:list.length-1};
- restrictChanged(restrictKinds[kind]+' добавлена в центр карты. Двигай её и тяни за уголок ↘ (у стены — за концы).');draw();
-};
+function addRestriction(kind){
+ if(busy||!view?.restrictions_editable)return;const list=restrictEdit()[kind];
+ list.push(kind==='walls'?toRobotLine(newLine(1500)):toRobotRect(newRect(1000,1000,list.length%4)));restrictSel={kind,index:list.length-1};
+ restrictChanged(restrictKinds[kind]+' добавлена в центр карты. Двигай её и тяни за уголок ↘'+(kind==='walls'?' (стену — за концы).':'.'));draw();
+}
+for(const b of document.querySelectorAll('[data-add]'))b.onclick=()=>addRestriction(b.dataset.add);
 $('cancel-restrict').onclick=()=>{restrictDraft=null;restrictSel=null;$('restrict-status').textContent='Изменения отменены.';renderRestrictions();draw();disableControls(busy);};
-$('save-restrict').onclick=async()=>{
- if(!restrictDraft)return;
+$('save-restrict').onclick=()=>saveRestrictions();
+async function saveRestrictions(){
+ if(!restrictDraft)return true;
  const d=restrictDraft,changed=k=>JSON.stringify(d[k])!==JSON.stringify(view[k]||[]);
  try{
   if(['walls','no_go_zones','no_mop_zones'].some(changed))await control('local.restrictions',{map_id:view.map_id,revision:view.revision,walls:d.walls,no_go_zones:d.no_go_zones,no_mop_zones:d.no_mop_zones});
   if(carpetKinds.some(changed)){const now=await api('local.map_view');await control('local.carpets',{map_id:now.map_id,revision:now.revision,carpets_added:d.carpets_added,carpets_ignored:d.carpets_ignored});}
   if(changed('ramps')){const now=await api('local.map_view');await control('local.thresholds',{map_id:now.map_id,revision:now.revision,passable:now.passable_thresholds||[],impassable:now.impassable_thresholds||[],ramps:d.ramps});}
-  $('restrict-status').textContent='Изменения сохранены. Ожидаю обновление сохранённой карты.';for(const delay of [1500,5000,12000])setTimeout(()=>refreshMap(),delay);}
- catch(e){$('restrict-status').textContent=e.message;}
-};
+  restrictDraft=null;restrictSel=null;$('restrict-status').textContent='Изменения сохранены. Ожидаю обновление сохранённой карты.';for(const delay of [1500,5000,12000])setTimeout(()=>refreshMap(),delay);return true;}
+ catch(e){$('restrict-status').textContent=e.message;toast(e.message,true);return false;}
+}
 
 // ---- Types of carpets the robot found (CarpetEditTypePage): 5 medium-to-high pile, 6 low pile, 7 other.
 const carpetTypeNames={5:'Средний и высокий ворс',6:'Низкий ворс',7:'Прочее'};
@@ -1396,9 +1394,65 @@ if('ResizeObserver' in window)new ResizeObserver(()=>{if(layoutPending)return;la
 // Bottom bar: Комната / Все / Зона pick which "Чистить" button is shown.
 const dock=$('dock');
 export function setMode(mode){
- dock.dataset.mode=mode;for(const b of dock.querySelectorAll('.segmented button'))b.setAttribute('aria-selected',String(b.dataset.mode===mode));
+ dock.dataset.mode=mode;document.body.dataset.mode=mode;for(const b of dock.querySelectorAll('.segmented button'))b.setAttribute('aria-selected',String(b.dataset.mode===mode));
+ if(mode==='zone'&&!zones.length&&view&&!view.empty&&!busy){zones.push(newRect(2000,2000));zoneSel=0;} // the app starts the zone mode with one zone
  if(mode==='zone')zoneStatus();draw();
 }
+document.body.dataset.mode=dock.dataset.mode;
+// «Циклы» (x1, x2, x3): the repeats of a room or zone cleaning, the same choice as in «Настроить».
+const repeats=$('room-repeats'),cycles=$('cycles');
+const syncCycles=()=>{cycles.textContent='x'+repeats.value;};
+cycles.onclick=()=>{const o=[...repeats.options],next=o[(o.findIndex(x=>x.value===repeats.value)+1)%o.length];repeats.value=next.value;repeats.dispatchEvent(new Event('change',{bubbles:true}));};
+repeats.addEventListener('change',syncCycles);syncCycles();
+// ---- Map editors as in the app: a block of «Карта» takes the screen; ← leaves without saving, ✓ saves.
+const editTools={'restrict-details':['restrict','Запретная зона / виртуальная стена','restrict-status','Нажми кнопку внизу: фигура появится в центре карты. Нажми на фигуру, чтобы двигать её.'],
+ 'carpet-details':['carpet','Ковры','restrict-status','Нажми «Добавить ковёр»: он появится в центре карты.'],
+ 'threshold-details':['threshold','Виртуальный порог / рампа','threshold-status','Нажми на порог, чтобы двигать его концы, или добавь новый.'],
+ 'furniture-details':['furniture','Мебель','furniture-status','Выбери предмет и нажми «Добавить», или нажми на предмет на карте.'],
+ 'split-details':['split','Разделение комнат','map-preview','']};
+let editTool=null,editDetails=null;
+const editStatus=text=>{$('edit-status').textContent=text;};
+for(const [id,[tool,,statusId]] of Object.entries(editTools)){
+ $(id).addEventListener('toggle',()=>{if($(id).open&&!editTool)enterEdit(id);});
+ new MutationObserver(()=>{if(editTool===tool&&statusId!=='map-preview')editStatus($(statusId).textContent);}).observe($(statusId),{childList:true,characterData:true,subtree:true});
+}
+function enterEdit(id){
+ const [tool,title,,hint]=editTools[id];editTool=tool;editDetails=id;document.body.dataset.edit=tool;$('edit-title').textContent=title;closeSheet();
+ if(tool==='split')splitOp($('map-operation').value);else editStatus(hint);
+ draw();disableControls(busy);
+}
+function leaveEdit(){
+ const id=editDetails;editTool=null;editDetails=null;delete document.body.dataset.edit;restrictSel=null;closeSheet();if(id)$(id).open=false;draw();disableControls(busy);
+}
+const editDirty=()=>({restrict:!!restrictDraft,carpet:!!restrictDraft,threshold:!!thresholdDraft||!!restrictDraft,furniture:!!furnitureDraft,split:false})[editTool];
+$('edit-back').onclick=()=>{
+ if(editDirty()&&window.confirm('Сохранить текущую операцию?'))return $('edit-save').onclick(); // as the app: Отмена discards
+ if(editTool==='furniture')furnitureDraft=null;
+ if(editTool==='threshold'){thresholdDraft=null;$('threshold-choice').value='';}
+ if(editTool==='split'){selected.clear();points=[];invalidateEdit();renderRoomButtons();}
+ if(['restrict','carpet','threshold'].includes(editTool)){restrictDraft=null;renderRestrictions();}
+ leaveEdit();
+};
+$('edit-save').onclick=async()=>{
+ if(busy)return;let ok=true;
+ if(editTool==='threshold'&&thresholdDraft)ok=await submitThreshold();
+ if(ok&&['restrict','carpet','threshold'].includes(editTool))ok=await saveRestrictions();
+ if(editTool==='furniture'&&furnitureDraft){const d=furnitureDraft;furnitureDraft=null;ok=await saveFurniture({remove:d.index==null?[]:[d.index],add:[{type:d.type,x:d.x,y:d.y,width:d.width,height:d.height,rotation:d.rotation}]});if(!ok)furnitureDraft=d;}
+ if(editTool==='split'&&selected.size){$('prepare-map-edit').click();if(!pending)return;ok=await $('apply-map-edit').onclick();}
+ if(ok)leaveEdit();
+};
+$('carpet-types-open').onclick=()=>{showSheet('map-edit');for(const d of document.querySelectorAll('#sheet-map-edit .sheet-body>details'))d.open=d.id==='carpet-details';};
+for(const b of document.querySelectorAll('[data-threshold]'))b.onclick=()=>{
+ if(busy||!view?.thresholds_editable)return;const kind=b.dataset.threshold,name=kind==='passable'?'проходимый':'непроходимый';$('threshold-kind').value=kind;restrictSel=null;
+ if(thresholdDraft){editStatus('Выбранный порог теперь '+name+'. Сохранить — ✓ вверху.');draw();return;}
+ $('draw-threshold').click();editStatus('Добавлен '+name+' порог. Перетащи его концы на место, сохранить — ✓ вверху.');
+};
+function splitOp(op){
+ if($('map-operation').value!==op){$('map-operation').value=op;$('map-operation').dispatchEvent(new Event('change'));}
+ for(const b of document.querySelectorAll('[data-op]'))b.setAttribute('aria-pressed',String(b.dataset.op===op));
+ editStatus(op==='merge'?'Нажми на карте две соседние комнаты, затем ✓.':'Нажми на комнату: на ней появится линия. Перетащи её концы и нажми ✓.');
+}
+for(const b of document.querySelectorAll('[data-op]'))b.onclick=()=>splitOp(b.dataset.op);
 for(const b of dock.querySelectorAll('.segmented button'))b.onclick=()=>setMode(b.dataset.mode);
 // Sheets: one open at a time, without a backdrop, so the map stays usable for map tools.
 let openSheet=null;
