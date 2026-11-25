@@ -884,7 +884,7 @@ canvas.onclick=e=>{
 export function applyCapabilities(caps){
  const id=caps.identity||{};hardware=caps.hardware||null;
  $('robot-name').textContent=robotName(id.model);
- $('model').textContent=(id.model||'Неизвестная модель')+' · '+(id.fw_ver||'?')+(caps.firmware?.verified?'':' · прошивка не проверена');
+ $('model').textContent=(id.model||'Неизвестная модель')+' · '+(id.fw_ver||'?')+(caps.agent?.version?' · агент '+caps.agent.version:'')+(caps.firmware?.verified?'':' · прошивка не проверена');
  for(const button of document.querySelectorAll('[data-command]')){const c=caps.commands?.[button.dataset.command];button.hidden=c?.available===false;if(c?.reason)button.title=c.reason;}
  for(const [prop,input,apply] of [['suction','room-fan',null],['volume','volume','save-volume']]){const hide=caps.properties?.[prop]?.readable===false;$(input).closest('label').hidden=hide;if(apply)$(apply).hidden=hide;}
 }
