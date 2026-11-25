@@ -1,4 +1,4 @@
-/* Appliance panel: matte mineral page like the dock's plastic, the map as the robot's dark display in both themes. */
+/* Appliance panel laid out like the Dreame app: matte mineral page, white cards, the map on a light stage (dark display in dark theme). */
 :root{
  --paper:#E7EBE7;--surface:#F6F8F5;--ink:#1C2528;--muted:#5D6A6C;--line:#CBD2CC;
  --go:#1D6E53;--go-ink:#FFFFFF;--go-soft:#D3E6DC;--warn:#A8402E;--warn-soft:#F3DCD5;--amber:#9A5B12;
@@ -115,8 +115,7 @@ canvas{display:block;max-width:100%;max-height:100%;touch-action:manipulation}
 .dock .go{display:none}
 .dock[data-mode=all] .for-all,.dock[data-mode=room] .for-room,.dock[data-mode=zone] .for-zone{display:flex}
 .run-only{display:none!important;font-size:16px!important}
-body[data-activity=cleaning] .dock .run-only,body[data-activity=paused] .dock .run-only,body[data-activity=returning] .dock .run-only{display:flex!important}
-.dock .run-only[hidden]{display:none!important}
+body[data-activity=cleaning] .dock .run-only:not([hidden]),body[data-activity=paused] .dock .run-only:not([hidden]),body[data-activity=returning] .dock .run-only:not([hidden]){display:flex!important}
 
 /* ---- Sheets: rise from the bottom on a phone, slide in at the right on a wide screen. No backdrop: the map stays usable. */
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;flex-direction:column;max-height:78vh;max-height:78dvh;background:var(--surface);border-radius:20px 20px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.22);animation:rise .18s ease-out}
