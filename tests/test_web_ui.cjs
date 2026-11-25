@@ -12,6 +12,8 @@ const capabilities={identity:{model:'dreame.vacuum.r2505',did:'123',fw_ver:'4.3.
 let passable=[[-700,-700,-400,-700]],impassable=[[100,-700,100,-400]];
 const grid=Buffer.alloc(40*30);
 for(let y=2;y<28;y++)for(let x=2;x<38;x++)grid[y*40+x]=(x===2||x===37||y===2||y===27)?255:x<20?1:2;
+let petPhotos=[{name:'pet-1795500000-1.gif',source:'gif',at:'2026-11-24T09:00:00Z',url:'/api/v1/pets/photo?name=pet-1795500000-1.gif'},{name:'100-1.jpg',source:'obstacle',at:'2026-11-23T18:07:00Z',confidence:81,url:'/api/v1/history/photo?name=100-1.jpg'}];
+const gif=Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==','base64');
 let voiceCurrent='ZH',livePolls=0,tokens=[],restrict={walls:[[-900,-900,-500,-900]],no_go_zones:[],no_mop_zones:[]};const eventClients=new Set();
 const snapshot=()=>{const v=k=>values[k],state={activity:v('4/1')===2?'cleaning':'docked',status:v('4/1'),error:v('2/2'),battery:v('3/1'),charging:1,suction:v('4/4'),water:v('4/5'),station:v('4/25'),volume:v('7/1'),region:regionCode===200?'matched':'mismatched',region_code:regionCode,consumables:{main_brush:{left:52,hours:158},filter:{left:6,hours:8}},stats:{minutes:308,cleanings:22,area:264},dnd:{enabled:false,start:'22:00',end:'08:00'},schedules:[{id:3,enabled:true,time:'09:30',days:'0111110',rooms:[4]},{id:4,enabled:true,time:'10:00',days:'1111111',quick_command:32}],dnd_periods:[{id:0,enabled:true,start:'22:00',end:'08:00',days:'1111111'}],quick_commands:[{id:32,name:'Кухня'}],tank_drain:1};return {seq:1,updated_at:new Date().toISOString(),stale:staleState,error:staleState?'avacmd timed out':undefined,state};};
 const pushEvent=()=>{for(const c of eventClients)c.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');};
@@ -37,6 +39,8 @@ const server=http.createServer((req,res)=>{
   if(req.url==='/api/v1/voice'){res.end(JSON.stringify({result:{current:voiceCurrent,voices:[{id:'EN',builtin:true,files:540},{id:'RU',builtin:false,files:3,bytes:2048},{id:'ZH',builtin:true,files:561}]}}));return;}
   if(req.url==='/api/v1/voice/phrases?id=EN'){res.end(JSON.stringify({result:[0,45,700]}));return;}
   if(req.url==='/api/v1/history'){res.end(JSON.stringify({result:[{start:'2026-11-22T08:00:00Z',end:'2026-11-22T08:25:00Z',mode:'room_cleaning',result:'docked',minutes:24,area:31},{start:'2026-11-21T08:00:00Z',end:'2026-11-21T08:05:00Z',mode:'cleaning',result:'error',error:'bin_full'}]}));return;}
+  if(req.url==='/api/v1/pets/photos'){res.end(JSON.stringify({result:petPhotos}));return;}
+  if(req.url.startsWith('/api/v1/pets/photo?')||req.url.startsWith('/api/v1/history/photo?')){res.setHeader('Content-Type','image/gif');res.end(gif);return;}
   if(req.url==='/api/v1/system/tokens'){res.end(JSON.stringify({result:tokens.map(({name,scope,created})=>({name,scope,created}))}));return;}
   if(req.url==='/api/v1/modules'){res.end(JSON.stringify({result:installedModules}));return;}
   if(req.url==='/api/v1/system/update'){res.end(JSON.stringify({result:{current:'0.7.0',staged:null,previous:updatePrevious,last:updateLast,applying:false}}));return;}
@@ -58,6 +62,7 @@ const server=http.createServer((req,res)=>{
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   const json=v=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result:v}));};
   if(req.url==='/api/v1/voice/use'){const p=JSON.parse(body);commands.push({method:req.url,params:p});voiceCurrent=p.id;json({current:voiceCurrent,voices:[{id:'EN',builtin:true,files:540},{id:'RU',builtin:false,files:3,bytes:2048}]});return;}
+  if(req.url==='/api/v1/pets/delete'){const p=JSON.parse(body);commands.push({method:req.url,params:p});petPhotos=petPhotos.filter(x=>x.name!==p.name);json({deleted:p.name});return;}
   if(req.url==='/api/v1/system/tokens'){const t=JSON.parse(body);tokens.push({...t,created:'2026-11-22T10:00:00Z'});json({...t,created:'2026-11-22T10:00:00Z',token:'f'.repeat(64)});return;}
   if(req.method==='DELETE'&&req.url.startsWith('/api/v1/system/tokens/')){tokens=tokens.filter(t=>t.name!==decodeURIComponent(req.url.split('/').pop()));json({revoked:true});return;}
   if(req.url==='/api/v1/system/update/stage'){stagedAgent=body;json({version:'0.8.0',current:'0.7.0',sha256:'b'.repeat(64),size:4096});return;}
@@ -230,6 +235,18 @@ const server=http.createServer((req,res)=>{
   staleState=true;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForFunction(()=>document.querySelector('#connection').textContent==='Восстанавливаю связь…');assert.equal(await page.locator('#battery').innerText(),'95%');staleState=false;
   const rebootCount=commands.filter(x=>x.method==='local.reboot').length;page.once('dialog',d=>d.dismiss());await page.locator('[data-command=reboot]').click();assert.equal(commands.filter(x=>x.method==='local.reboot').length,rebootCount);page.once('dialog',d=>d.accept());await page.locator('[data-command=reboot]').click();await page.waitForFunction(()=>!document.querySelector('[data-command=reboot]').disabled);assert.equal(commands.filter(x=>x.method==='local.reboot').length,rebootCount+1);
   await page.screenshot({path:'/tmp/dreame-native-web-desktop.png',fullPage:true});
+  { // Pet photos: grid in a sheet, full-screen viewer with paging, delete; Escape closes the viewer before the sheet
+   await sheet('pets');await page.waitForFunction(()=>document.querySelectorAll('#pet-photos img').length===2);
+   assert.match(await page.locator('#pet-photos').innerText(),/^[^·\n]+\n[^\n]+ · уборка · 81%$/);
+   await page.locator('#pet-photos button').first().click();await shown('pet-viewer');await page.waitForFunction(()=>document.querySelector('#pet-viewer-img').src.startsWith('blob:'));
+   assert.match(await page.locator('#pet-viewer-caption').innerText(),/1 из 2/);assert(await page.locator('#pet-prev').isDisabled());
+   await page.keyboard.press('ArrowRight');assert.match(await page.locator('#pet-viewer-caption').innerText(),/уборка · 81% · 2 из 2/);assert(await page.locator('#pet-next').isDisabled());
+   page.once('dialog',d=>d.accept());await page.locator('#pet-delete').click();await until(()=>commands.at(-1)?.method==='/api/v1/pets/delete');assert.deepEqual(commands.at(-1).params,{name:'100-1.jpg'});
+   await page.waitForFunction(()=>/1 из 1/.test(document.querySelector('#pet-viewer-caption').textContent));assert.equal(await page.locator('#pet-photos button').count(),1);
+   await page.keyboard.press('Escape');assert(await page.locator('#pet-viewer').isHidden());assert(await page.locator('#sheet-pets').isVisible());
+   const ai=values['4/22'];values['4/22']=JSON.stringify({...JSON.parse(ai),whether_have_pet:true});await page.locator('#pet-settings-details').evaluate(d=>d.open=true);await page.locator('#pet-settings [data-setting=ai_json_ai_pet_detection]').waitFor();values['4/22']=ai;
+   await page.keyboard.press('Escape');assert(await page.locator('#sheet-pets').isHidden());
+  }
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));await page.screenshot({path:'/tmp/dreame-native-web-mobile.png',fullPage:true});
   await sheet('menu');await page.locator('#logout').click();assert(await page.locator('#login').isVisible());assert.equal(await page.evaluate(()=>sessionStorage.getItem('dreame-token')),null);
   await page.goto(url+'/?setup=wifi');await page.locator('#wifi-ssid').waitFor({state:'visible',timeout:5000});assert(await page.locator('#wifi-ssid').isVisible());assert(await page.locator('#login').isVisible());await page.locator('#token').fill(token);await page.locator('#wifi-ssid').fill('Setup');await page.locator('#wifi-open').check();await page.locator('#save-wifi').click();await page.waitForFunction(()=>document.querySelector('#wifi-result').textContent.includes('Настройки приняты'));assert.deepEqual(commands.at(-1),{method:'local.wifi_setup',params:{ssid:'Setup',password:'',open:true}});
@@ -239,10 +256,10 @@ const server=http.createServer((req,res)=>{
    assert.equal(await emb.evaluate(()=>location.hash),'');assert(await emb.locator('header.site').isHidden());assert(await emb.locator('[data-command=start]').isVisible());assert(await emb.locator('[data-sheet=station]').isVisible());
    assert(await emb.evaluate(()=>document.documentElement.scrollHeight<=innerHeight),'the embedded view is one screen');
    await emb.locator('.segmented [data-mode=room]').click();assert(await emb.locator('#clean-rooms').isVisible());assert(await emb.locator('#history-panel').isHidden());
-   await emb.locator('[data-sheet=menu]').click();assert(await emb.locator('[data-sheet=history]').isVisible());for(const admin of ['[data-sheet=tokens]','[data-sheet=update]'])assert(await emb.locator(admin).isVisible(),admin);
+   await emb.locator('[data-sheet=menu]').click();assert(await emb.locator('[data-sheet=history]').isVisible());assert(await emb.locator('[data-sheet=pets]').isVisible());for(const admin of ['[data-sheet=tokens]','[data-sheet=update]'])assert(await emb.locator(admin).isVisible(),admin);
    await emb.close();
   }
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('Browser checks passed: reboot confirmation, collapsed final Wi-Fi panel and signal, repeated multi-room cleaning, threshold add/edit/delete, packed settings preservation, reconnection without repeating commands, stale snapshot warning, capability-hidden commands, consumables and reset, do-not-disturb and its periods, schedules with quick commands, quick commands, station jobs, error text, zones moved and resized on the map, virtual walls and zones, carpets, per-room settings, room order, furniture, messages, camera trips and patrol, saved maps and backups, cleaning history, live position, compatibility report,  login, status, coordinates, start, room cleaning, merge, split, stale-map blocking, settings, modules page navigation, module package review, install, panel state and actions, removal, agent update with rollback report, Wi-Fi submission without password storage, captive setup form before login, mobile layout, logout, no external requests');
+  console.log('Browser checks passed: reboot confirmation, collapsed final Wi-Fi panel and signal, repeated multi-room cleaning, threshold add/edit/delete, packed settings preservation, reconnection without repeating commands, stale snapshot warning, capability-hidden commands, consumables and reset, do-not-disturb and its periods, schedules with quick commands, quick commands, station jobs, error text, zones moved and resized on the map, virtual walls and zones, carpets, per-room settings, room order, furniture, messages, camera trips and patrol, saved maps and backups, cleaning history, pet photos, live position, compatibility report,  login, status, coordinates, start, room cleaning, merge, split, stale-map blocking, settings, modules page navigation, module package review, install, panel state and actions, removal, agent update with rollback report, Wi-Fi submission without password storage, captive setup form before login, mobile layout, logout, no external requests');
  }finally{await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

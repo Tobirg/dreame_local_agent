@@ -66,6 +66,10 @@ func TestScopedTokens(t *testing.T) {
 		{"GET", "/api/v1/modules", control, "", 403},
 		{"POST", "/api/v1/system/update/apply", control, `{}`, 403},
 		{"GET", "/api/v1/system/tokens", "wrong", "", 401},
+		{"GET", "/api/v1/pets/photos", read, "", 200},
+		{"GET", "/api/v1/pets/photos", "wrong", "", 401},
+		{"POST", "/api/v1/pets/delete", read, `{"name":"pet-1-x.gif"}`, 403},
+		{"POST", "/api/v1/pets/delete", control, `{"name":"pet-1-x.gif"}`, 404},
 	}
 	for _, c := range cases {
 		if code, v := do(c.method, c.path, c.token, c.body); code != c.want {
