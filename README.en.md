@@ -13,7 +13,7 @@ The agent is written in Go and runs **on the vacuum itself**. It calls the firmw
 - Consumables with remaining life and reset, totals, do-not-disturb, cleaning history, readable error texts, every setting the robot reports.
 - Detects the model and firmware by itself and shows only what the robot supports; on unknown firmware it only reads.
 - Event stream, tokens with read or control rights, agent updates from the browser with automatic rollback.
-- Modules installed from the web interface: [MQTT and Home Assistant](../dreame-module-mqtt), [region guard](../dreame-module-region).
+- Modules installed from the web interface: [MQTT and Home Assistant](https://github.com/Tobirg/dreame-module-mqtt), [region guard](https://github.com/Tobirg/dreame-module-region), [camera](https://github.com/Tobirg/dreame-module-camera).
 - Voices: switching the built-in ones (EN, JA, KO, ZH), uploading your own voice packs, listening to phrases by number — [preparing a pack](docs/voice-packs.md) (Russian).
 - Wi-Fi setup and a captive portal in access-point mode.
 
