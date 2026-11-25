@@ -158,3 +158,73 @@ func fillWhere(img *image.RGBA, poly [][2]float64, paint func(x, y int)) {
 		}
 	}
 }
+
+func (v mapView) rawPx(p []int) (int, int) {
+	return (p[0] - v.Origin[0]) * mapScale / v.GridSize, (v.Height*v.GridSize - (p[1] - v.Origin[1])) * mapScale / v.GridSize
+}
+
+// overlayPad is how far the saved overlays (zones, walls, thresholds, carpets, furniture, obstacles,
+// the station) reach past the map, in picture pixels; the picture grows by that on every side.
+// shortcut: capped at 150 pixels, a stray far-away point is cut instead of growing the picture.
+func (v mapView) overlayPad() int {
+	w, h := v.Width*mapScale, v.Height*mapScale
+	over := 0
+	note := func(x, y, r int) { over = max(over, r-x, x+r-w, r-y, y+r-h) }
+	pt := func(p []int) {
+		if len(p) >= 2 {
+			x, y := v.rawPx(p)
+			note(x, y, 0)
+		}
+	}
+	for _, list := range [][][]int{v.NoGo, v.NoMop, v.CarpetsAdded, v.CarpetsIgnored, v.Ramps, v.Walls, v.Passable, v.Impassable} {
+		for _, r := range list {
+			pt(r)
+			if len(r) >= 4 {
+				pt(r[2:])
+			}
+		}
+	}
+	for _, c := range v.Carpets {
+		for i := 0; i+1 < len(c.Points); i += 2 {
+			pt(c.Points[i : i+2])
+		}
+	}
+	for _, f := range v.Furniture {
+		x, y := v.rawPx([]int{f.X, f.Y})
+		note(x, y, int(math.Hypot(float64(f.Width*mapScale), float64(f.Height*mapScale))/float64(v.GridSize)/2)+2)
+	}
+	for _, o := range v.Obstacles {
+		pt(o)
+	}
+	pt(v.Charger)
+	if over <= 0 {
+		return 0
+	}
+	return min(over+8, 150)
+}
+
+// drawCharger is the app's dock_log: light green disc, green rim and bolt.
+func drawCharger(img *image.RGBA, x, y int, r float64) {
+	rim, fill := color.RGBA{0x5e, 0xdb, 0x72, 255}, color.RGBA{0x9e, 0xf0, 0xa8, 255}
+	disc(img, x, y, int(math.Round(r)), rim)
+	disc(img, x, y, int(math.Round(r*.76)), fill)
+	k := r / 10
+	bolt := [][2]float64{{1.5, -6}, {-3.5, .5}, {-.2, .5}, {-1.5, 6}, {3.5, -.5}, {.2, -.5}}
+	for i := range bolt {
+		bolt[i] = [2]float64{float64(x) + bolt[i][0]*k, float64(y) + bolt[i][1]*k}
+	}
+	fillWhere(img, bolt, func(px, py int) { img.SetRGBA(px, py, rim) })
+}
+
+// drawRobot is the round robot with the lidar turret; the notch points where it drives (angle in degrees, y up).
+func drawRobot(img *image.RGBA, x, y int, r float64, angle *int) {
+	disc(img, x, y, int(math.Round(r)), color.RGBA{0x6b, 0x77, 0x80, 255})
+	disc(img, x, y, int(math.Round(r-math.Max(1.5, r*.14))), color.RGBA{0xf4, 0xf7, 0xf9, 255})
+	disc(img, x, y, int(math.Round(r*.4)), color.RGBA{0x4d, 0xa3, 0xff, 255})
+	if angle != nil {
+		a := -float64(*angle) * math.Pi / 180
+		stroke(x+int(math.Cos(a)*r*.55), y+int(math.Sin(a)*r*.55), x+int(math.Cos(a)*r*.92), y+int(math.Sin(a)*r*.92), func(px, py int) {
+			img.SetRGBA(px, py, color.RGBA{0x17, 0x23, 0x2d, 255})
+		})
+	}
+}

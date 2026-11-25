@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Same colours as ui/app.js.
@@ -50,6 +52,13 @@ type mapOpts struct {
 	floors   map[int]int
 }
 
+// The panel asks for the base layer on every page load; the last one is kept (the robot's CPU is slow).
+var baseCache struct {
+	sync.Mutex
+	key string
+	png []byte
+}
+
 // mapOptsFromQuery reads ?base=1&selected=1,3&floors=1:2,3:0.
 func mapOptsFromQuery(q url.Values) mapOpts {
 	o := mapOpts{base: q.Get("base") == "1", selected: map[int]bool{}, floors: map[int]int{}}
@@ -79,7 +88,19 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 	if view.Empty || len(view.Origin) != 2 {
 		return nil, errors.New("no saved map")
 	}
-	img := image.NewRGBA(image.Rect(0, 0, view.Width*mapScale, view.Height*mapScale))
+	key := fmt.Sprintf("%s|%v|%v", view.Revision, o.selected, o.floors)
+	if o.base {
+		baseCache.Lock()
+		defer baseCache.Unlock()
+		if baseCache.key == key {
+			return baseCache.png, nil
+		}
+	}
+	pad := 0 // room around the map for overlays that reach past it; the panel's base layer has none
+	if !o.base {
+		pad = view.overlayPad()
+	}
+	img := image.NewRGBA(image.Rect(0, 0, view.Width*mapScale+2*pad, view.Height*mapScale+2*pad))
 	// Floor texture as in the web UI: 2 tiles, 3 planks along y, 4 along x; 1 picks by the room's longer side.
 	box := map[uint8][4]int{}
 	for i, id := range view.Pixels {
@@ -93,7 +114,7 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 		}
 		box[id] = [4]int{min(b[0], x), max(b[1], x), min(b[2], y), max(b[3], y)}
 	}
-	kind := map[uint8]int{}
+	var kind [256]int
 	for _, r := range view.Rooms {
 		f, b := r.Floor, box[uint8(r.ID)]
 		if v, ok := o.floors[r.ID]; ok {
@@ -105,7 +126,7 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 				f = 4
 			}
 		}
-		kind[uint8(r.ID)] = f
+		kind[uint8(r.ID)&255] = f
 	}
 	for i, id := range view.Pixels {
 		if id == 0 {
@@ -127,16 +148,17 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 				if edge && id != 255 {
 					cc = scale(c, 84)
 				}
-				img.SetRGBA(X, Y, cc)
+				img.SetRGBA(X+pad, Y+pad, cc)
 			}
 		}
 	}
 	// Robot millimetres to image pixels.
 	px := func(p []int) (int, int) {
-		return (p[0] - view.Origin[0]) * mapScale / view.GridSize, (view.Height*view.GridSize - (p[1] - view.Origin[1])) * mapScale / view.GridSize
+		x, y := view.rawPx(p)
+		return x + pad, y + pad
 	}
 	for _, r := range view.Rooms { // room number badge, as the web UI and the app
-		x, y := int((r.X+.5)*mapScale), int((float64(view.Height)-r.Y-.5)*mapScale)-9
+		x, y := int((r.X+.5)*mapScale)+pad, int((float64(view.Height)-r.Y-.5)*mapScale)-9+pad
 		if x < 8 || y < 8 || x+8 >= img.Rect.Dx() || y+8 >= img.Rect.Dy() {
 			continue // the badge would not fit (a tiny map)
 		}
@@ -149,7 +171,9 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 		digits(img, x, y, strconv.Itoa(r.Num))
 	}
 	if o.base {
-		return encodePNG(img)
+		baseCache.png, err = encodePNG(img)
+		baseCache.key = key
+		return baseCache.png, err
 	}
 	drawOverlays(img, view, px)
 	live := a.livePose()
@@ -207,17 +231,23 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 		disc(img, x, y, 6, obstacleRing)
 		disc(img, x, y, 4, c)
 	}
+	// Sizes as in the app: the robot is 320 mm wide, the station 1.2 times the robot.
+	r := math.Max(6, float64(160*mapScale)/float64(view.GridSize))
 	charger := view.Charger
 	if live.Charger != nil {
 		charger = live.Charger
 	}
 	if charger != nil {
 		x, y := px(charger)
-		disc(img, x, y, 5, chargerColour)
+		drawCharger(img, x, y, r*1.2)
 	}
-	if live.Robot != nil {
-		x, y := px(live.Robot)
-		disc(img, x, y, 7, robotColour)
+	robot, angle := live.Robot, live.Angle
+	if robot == nil && charger != nil {
+		robot = charger // off a run the robot sits on the station and covers it
+	}
+	if robot != nil {
+		x, y := px(robot)
+		drawRobot(img, x, y, r, angle)
 	}
 	return encodePNG(img)
 }
@@ -324,10 +354,11 @@ func (a *agent) mapCard() (map[string]any, error) {
 	if view.Empty || len(view.Origin) != 2 {
 		return nil, errors.New("no saved map")
 	}
+	pad := view.overlayPad() // the picture has room around the map for overlays that reach past it
 	points := []map[string]any{}
 	for _, p := range [][2]int{{0, 0}, {1000, 0}, {0, 1000}} {
-		x := float64(p[0]-view.Origin[0]) * mapScale / float64(view.GridSize)
-		y := float64(view.Height*view.GridSize-(p[1]-view.Origin[1])) * mapScale / float64(view.GridSize)
+		x := float64(p[0]-view.Origin[0])*mapScale/float64(view.GridSize) + float64(pad)
+		y := float64(view.Height*view.GridSize-(p[1]-view.Origin[1]))*mapScale/float64(view.GridSize) + float64(pad)
 		points = append(points, map[string]any{"vacuum": map[string]int{"x": p[0], "y": p[1]}, "map": map[string]float64{"x": x, "y": y}})
 	}
 	// id -> name, centre and outline in robot millimetres: the card's "Generate rooms config" reads these.

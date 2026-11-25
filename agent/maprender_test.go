@@ -24,7 +24,7 @@ func TestMapPNG(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 3x3 cells of 50 mm from (-100,-200); cells: row0 = 1,1,255  row1 = 1,2,2  row2 = 0,2,2.
-	raw = append(raw[:36], []byte(`{"origin":[-100,-200],"charger":[-75,-175]}`)...)
+	raw = append(raw[:36], []byte(`{"origin":[-100,-200]}`)...)
 	maps, _ := json.Marshal(map[string]any{"curr_id": 2, "mapstr": []any{map[string]any{"map": encodeTestFrame(t, raw)}}})
 	writeFile(t, a, "/data/log/map_info.bin", string(maps))
 	b, err := a.mapPNG(mapOpts{})
@@ -44,10 +44,6 @@ func TestMapPNG(t *testing.T) {
 	}
 	if _, _, _, alpha := img.At(1, 1).RGBA(); alpha != 0 {
 		t.Fatal("top-left cell must stay empty")
-	}
-	// The station at (-75,-175) is cell (0,0): bottom-left.
-	if got := color.RGBAModel.Convert(img.At(1, 7)).(color.RGBA); got != chargerColour {
-		t.Fatal("station", got)
 	}
 	// While mopping, the floor along the path is tinted blue.
 	room := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA)
@@ -85,6 +81,17 @@ func TestMapPNG(t *testing.T) {
 	if got := color.RGBAModel.Convert(img.At(1, 1)).(color.RGBA); got != newFloorColour || img.Bounds().Dy() != 9 {
 		t.Fatal("new floor cell", got, img.Bounds())
 	}
+	// The station at (-75,-175) is cell (0,0), bottom-left; off a run the robot sits on it (its blue core shows).
+	b2 := testAgent(t)
+	writeFile(t, b2, "/data/log/map_info.bin", string(maps))
+	raw2 := append(append([]byte{}, raw[:36]...), []byte(`{"origin":[-100,-200],"charger":[-75,-175]}`)...)
+	maps2, _ := json.Marshal(map[string]any{"curr_id": 2, "mapstr": []any{map[string]any{"map": encodeTestFrame(t, raw2)}}})
+	writeFile(t, b2, "/data/log/map_info.bin", string(maps2))
+	b, _ = b2.mapPNG(mapOpts{})
+	img, _ = png.Decode(bytes.NewReader(b))
+	if got := color.RGBAModel.Convert(img.At(1, 7)).(color.RGBA); got != robotColour {
+		t.Fatal("docked robot on the station", got)
+	}
 }
 
 func TestMapPNGOptionsAndOverlays(t *testing.T) {
@@ -98,5 +105,16 @@ func TestMapPNGOptionsAndOverlays(t *testing.T) {
 	drawOverlays(img, view, px)
 	if got := img.RGBAAt(12, 12); got.R == 0 {
 		t.Fatal("no-go zone fill missing", got)
+	}
+}
+
+func TestOverlayPad(t *testing.T) {
+	v := mapView{Width: 10, Height: 10, GridSize: 50, Origin: []int{0, 0}, NoGo: [][]int{{100, 100, 400, 400}}}
+	if v.overlayPad() != 0 {
+		t.Fatal("inside the map needs no room")
+	}
+	v.Furniture = []furnitureItem{{X: 500, Y: 500, Width: 1000, Height: 100}} // half of it hangs over the right edge
+	if v.overlayPad() < 10 {
+		t.Fatal("furniture past the edge must grow the picture", v.overlayPad())
 	}
 }
