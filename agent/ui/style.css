@@ -192,6 +192,21 @@ textarea{font-size:13px}
 .obstacle-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px}
 .obstacle-photos figure{margin:0;font-size:13px;color:var(--muted)}
 .obstacle-photos img{width:100%;border-radius:6px;display:block;margin-bottom:4px}
+.pets-head{display:flex;align-items:center;gap:8px;margin-top:8px}
+.pet-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin:10px 0 14px}
+.pet-photos button{position:relative;padding:0;border:0;border-radius:8px;overflow:hidden;aspect-ratio:4/3;background:var(--line);cursor:zoom-in}
+.pet-photos img{width:100%;height:100%;object-fit:cover;display:block}
+.pet-photos span{position:absolute;left:0;right:0;bottom:0;padding:14px 6px 4px;font-size:11px;font-weight:500;color:#fff;text-align:left;background:linear-gradient(transparent,rgba(0,0,0,.6))}
+.pet-photos .empty{grid-column:1/-1}
+.photo-viewer{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;background:rgba(8,12,14,.94);color:#fff}
+.photo-viewer[hidden]{display:none}
+.photo-viewer-top{display:flex;align-items:center;gap:8px;padding:10px 10px 10px 16px;font-size:14px}
+.photo-viewer-top span{flex:1;min-width:0;overflow-wrap:anywhere}
+.photo-viewer .icon-btn{color:#fff}
+.photo-viewer-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;gap:4px;padding:0 4px 16px;touch-action:pan-y pinch-zoom}
+.photo-viewer-stage img{max-width:calc(100% - 96px);max-height:100%;object-fit:contain;border-radius:6px}
+.photo-nav{flex:none;width:44px;height:64px;padding:0;font-size:30px;line-height:1;color:#fff;background:rgba(255,255,255,.08);border:0}
+.photo-nav:disabled{opacity:.25;cursor:default}
 
 .setting-row{display:grid;grid-template-columns:minmax(160px,1fr) minmax(150px,auto) auto;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
 .setting-row label{margin:0;color:var(--ink)}
