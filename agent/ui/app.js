@@ -275,6 +275,7 @@ function renderState(snap){
   if(!fanDirty&&document.activeElement!==$('fan')&&s.suction!==undefined)$('fan').value=String(s.suction);
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
   if(!roomOptionsDirty){if(Number.isInteger(s.suction))$('room-fan').value=s.suction;if(Number.isInteger(s.water)&&s.water>=1&&s.water<=3)$('room-water').value=s.water;}
+  syncChips();
   $('station').textContent=s.station===undefined?'Состояние станции недоступно':'Состояние станции: '+(stationNames[s.station]||s.station)+(s.tank_drain===1?' · сливается бак робота':'')+(s.water_drain===1?' · сливается вода станции':'');
   $('diagnostics').textContent='Регион: '+(s.region??'—')+' · код доступа: '+(s.region_code??'—')+' · ошибка робота: '+(s.error??'—')+(s.error_name?' ('+s.error_name+')':'');
   $('robot-error').hidden=!s.error;$('robot-error').textContent=s.error?'Ошибка '+s.error+': '+errorText(s):'';
@@ -1223,3 +1224,17 @@ export function closeSheet(){if(!openSheet)return;const opener=document.querySel
 document.addEventListener('click',e=>{const opener=e.target.closest('[data-sheet]');if(opener){e.preventDefault();showSheet(opener.dataset.sheet);return;}if(e.target.closest('.sheet-close'))closeSheet();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openSheet)closeSheet();});
 $('nav-modules').addEventListener('click',()=>closeSheet());
+// «Настроить»: choices as tap targets like the app; the select stays the source of truth (and what the code reads).
+function chipsFor(select){
+ const box=document.createElement('div');box.className='chips';box.setAttribute('role','radiogroup');
+ for(const o of select.options){const b=document.createElement('button');b.type='button';b.textContent=o.textContent;b.dataset.value=o.value;b.setAttribute('role','radio');
+  b.onclick=()=>{select.value=o.value;select.dispatchEvent(new Event('change',{bubbles:true}));syncChips();};box.append(b);}
+ select.classList.add('chip-source');select.closest('label').after(box);return box;
+}
+const chipSets=[...document.querySelectorAll('#sheet-tune select')].map(s=>[s,chipsFor(s)]);
+function syncChips(){for(const [s,box] of chipSets)for(const b of box.children)b.setAttribute('aria-checked',String(b.dataset.value===s.value));}
+for(const [s] of chipSets)s.addEventListener('change',syncChips);
+document.querySelector('[data-sheet="tune"]').addEventListener('click',()=>requestAnimationFrame(syncChips));
+syncChips();
+// Sub-pages (map editor, station settings): an opened block takes the sheet; its title is the way back.
+for(const d of document.querySelectorAll('.hub>details'))d.addEventListener('toggle',()=>{if(d.open)d.parentElement.scrollTop=0;});

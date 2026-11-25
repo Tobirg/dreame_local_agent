@@ -144,7 +144,6 @@ body[data-activity=cleaning] .dock .run-only:not([hidden]),body[data-activity=pa
 }
 .menu-actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 8px}
 .menu-actions button{flex:1 1 30%}
-.menu-list{display:flex;flex-direction:column;margin:8px -18px}
 .menu-list>*{display:flex;justify-content:space-between;align-items:center;text-align:left;border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;padding:14px 18px;color:var(--ink);font-size:16px;font-weight:500;text-decoration:none}
 .menu-list>*::after{content:"›";color:var(--muted);font-size:20px;line-height:1}
 .menu-list>*:hover{background:var(--paper)}
@@ -254,5 +253,66 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 @media (prefers-reduced-motion:reduce){.map-marker::before,.map-marker::after{animation:none}.map-marker.sleep::before{opacity:1}}
 .setting-group h3{margin:14px 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 
+
+/* ---- Sheets in the app's manner: white cards, tap-target choices, round jobs, tool tiles that open as sub-pages. */
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin:12px 0}
+.card>h3:first-child{margin:0 0 6px;font-size:15px}
+.card label{margin:12px 0 6px}
+.room-options{display:block}
+.chip-source{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px;margin-bottom:6px}
+.chips button{padding:9px 6px;border-radius:10px;background:var(--paper);border-color:transparent;font-size:13px}
+.chips button[aria-checked=true]{background:var(--go-soft);border-color:var(--go);color:var(--ink);font-weight:700}
+.card>button{margin-top:4px}
+.status-line{display:flex;align-items:center;gap:8px;margin:0;font-size:14px}
+.status-line::before{content:"";width:8px;height:8px;border-radius:50%;background:#3fbf6f;flex:none}
+.round-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 8px;margin:8px 0 14px}
+.round-actions button{display:flex;flex-direction:column;align-items:center;gap:6px;border:0;background:none;padding:4px;font-size:12.5px;font-weight:550;line-height:1.25;text-align:center}
+.round-actions button::before{content:"";width:52px;height:52px;border-radius:50%;background:var(--ink);opacity:.9;
+ -webkit-mask:var(--ico) center/24px no-repeat,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:var(--ico) center/24px no-repeat exclude,linear-gradient(#000 0 0)}
+.round-actions button::before{background:var(--go)}
+.round-actions button:hover{background:none}.round-actions button:hover::before{filter:brightness(1.1)}
+.round-actions [hidden]{display:none}
+/* Sub-pages: closed blocks are entries; an open one fills the sheet and its title (with ‹) leads back. */
+.hub:has(>details[open])>:not(details[open]){display:none!important}
+.hub>details{border:0;background:none;padding:0;margin:0}
+.hub>details[open]>summary{list-style:none;display:flex;align-items:center;gap:8px;margin:4px 0 8px;font-size:18px}
+.hub>details[open]>summary::before{content:"‹";font-size:26px;line-height:1;color:var(--muted)}
+.hub>details>summary::-webkit-details-marker{display:none}
+.hub:not(.tiles)>details:not([open])>summary{list-style:none;display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;font-size:16px}
+.hub:not(.tiles)>details:not([open])>summary::after{content:"›";color:var(--muted);font-size:22px;line-height:1}
+.sheet-body.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 6px;align-content:start}
+.tiles>:not(details),.tiles>details[open]{grid-column:1/-1}
+.tiles>details:not([open])>summary{list-style:none;hyphens:auto;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;font-family:var(--body);font-stretch:normal;font-size:12px;font-weight:550;line-height:1.25;padding:4px 2px}
+.tiles>details:not([open])>summary::before{content:"";width:48px;height:48px;border-radius:14px;background:var(--paper);border:1px solid var(--line)}
+.tiles>details:not([open])>summary{position:relative}
+.tiles>details:not([open])>summary::after{content:"";position:absolute;top:16px;left:50%;width:24px;height:24px;margin-left:-12px;background:var(--ink);-webkit-mask:var(--ico) center/contain no-repeat;mask:var(--ico) center/contain no-repeat}
+.map-card p{margin:2px 0}
+/* ⋮ menu: grouped cards like the app's settings list. */
+.menu-list{display:flex;flex-direction:column;margin:12px 0;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.menu-list>*{padding:14px 16px}
+.menu-list>:last-child{border-bottom:0}
+.menu-list[hidden],.menu-list:not(:has(>:not([hidden]))){display:none}
+.menu-actions{margin:12px 0}
+.menu-foot{margin:8px 2px}
+
+[data-command=dock]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 11l8-6.5 8 6.5%22/%3E%3Cpath d=%22M6.5 9.5V19h11V9.5%22/%3E%3Cpath d=%22M10 19v-5h4v5%22/%3E%3C/svg%3E")}
+[data-command=empty]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 7h14M9.5 7V5h5v2M7 7l1 12h8l1-12%22/%3E%3C/svg%3E")}
+[data-command=wash_mop]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M8 4c2 2.6 3.5 4.6 3.5 6.6a3.5 3.5 0 0 1-7 0C4.5 8.6 6 6.6 8 4z%22/%3E%3Cpath d=%22M16 9c1.6 2 2.8 3.6 2.8 5.2a2.8 2.8 0 0 1-5.6 0c0-1.6 1.2-3.2 2.8-5.2z%22/%3E%3C/svg%3E")}
+[data-command=dry_start]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M3 9h11a3 3 0 1 0-3-3%22/%3E%3Cpath d=%22M3 14h15a3 3 0 1 1-3 3%22/%3E%3C/svg%3E")}
+[data-command=dry_stop]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Crect x=%226%22 y=%226%22 width=%2212%22 height=%2212%22 rx=%222%22/%3E%3C/svg%3E")}
+[data-command=tank_drain]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 4v12M7 11l5 5 5-5M5 20h14%22/%3E%3C/svg%3E")}
+[data-command=station_drain]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 4v12M7 11l5 5 5-5M5 20h14%22/%3E%3C/svg%3E")}
+[data-command=station_clean]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z%22/%3E%3C/svg%3E")}
+[data-command=dock_self_repair]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M14.5 5.5a4 4 0 0 0-5 5L4 16l4 4 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-.5-.5-3z%22/%3E%3C/svg%3E")}
+[data-command=dust_bag_dry_start]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M3 9h11a3 3 0 1 0-3-3%22/%3E%3Cpath d=%22M3 14h15a3 3 0 1 1-3 3%22/%3E%3C/svg%3E")}
+[data-command=dust_bag_dry_stop]{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Crect x=%226%22 y=%226%22 width=%2212%22 height=%2212%22 rx=%222%22/%3E%3C/svg%3E")}
+#split-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Crect x=%224%22 y=%224%22 width=%2216%22 height=%2216%22 rx=%222%22/%3E%3Cpath d=%22M12 4v16%22/%3E%3C/svg%3E")}
+#threshold-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M3 17h18%22/%3E%3Cpath d=%22M7 17v-4h10v4%22/%3E%3C/svg%3E")}
+#restrict-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%228%22/%3E%3Cpath d=%22M6.5 6.5l11 11%22/%3E%3C/svg%3E")}
+#room-settings-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 7h9M18 7h1M5 17h3M12 17h7%22/%3E%3Ccircle cx=%2216%22 cy=%227%22 r=%222%22/%3E%3Ccircle cx=%2210%22 cy=%2217%22 r=%222%22/%3E%3C/svg%3E")}
+#room-types-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 12V5h7l9 9-7 7z%22/%3E%3Ccircle cx=%228%22 cy=%229%22 r=%221.3%22/%3E%3C/svg%3E")}
+#furniture-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 11V8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3%22/%3E%3Cpath d=%22M3 12a2 2 0 0 1 4 0v2h10v-2a2 2 0 0 1 4 0v5H3z%22/%3E%3Cpath d=%22M6 17v2M18 17v2%22/%3E%3C/svg%3E")}
+#map-backups-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4%22/%3E%3Cpath d=%22M12 8v4l3 2%22/%3E%3C/svg%3E")}
 /* Embedded view (?embed=1): the app screen for a dashboard; admin entries (access, updates, Wi-Fi, logs, modules, reboot) stay out. */
 .embed .admin{display:none!important}
