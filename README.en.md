@@ -16,6 +16,7 @@ The agent is written in Go and runs **on the vacuum itself**. It calls the firmw
 - Modules installed from the web interface: [MQTT and Home Assistant](../dreame-module-mqtt), [region guard](../dreame-module-region).
 - Voices: switching the built-in ones (EN, JA, KO, ZH), uploading your own voice packs, listening to phrases by number — [preparing a pack](docs/voice-packs.md) (Russian).
 - Wi-Fi setup and a captive portal in access-point mode.
+- A panel laid out like the Dreame app, made for phones and for embedding in Home Assistant: one screen with the map, "Room / All / Zone", "Clean" and "Base station" at the bottom; the map editor, camera and "Adjust" open as sheets, the rest is in the "⋮" menu.
 
 Map and station commands are verified on R2505; zone and spot cleaning, history and the robot path are so far covered by tests only.
 
@@ -58,7 +59,7 @@ The agent compares firmware files with checked profiles. On firmware without a p
 
 ### Tokens with rights
 
-The main `token` from the config has full access. For a smart home or other devices create a separate token in the web interface ("Access") or with `POST /api/v1/system/tokens` `{"name": "ha", "scope": "read|control"}`. The token is shown once; the config keeps only its SHA-256. List: `GET /api/v1/system/tokens`; revoke: `DELETE /api/v1/system/tokens/<name>`; only the main token manages tokens.
+The main `token` from the config has full access. For a smart home or other devices create a separate token in the web interface ("⋮" → "Access") or with `POST /api/v1/system/tokens` `{"name": "ha", "scope": "read|control"}`. The token is shown once; the config keeps only its SHA-256. List: `GET /api/v1/system/tokens`; revoke: `DELETE /api/v1/system/tokens/<name>`; only the main token manages tokens.
 
 | Scope | Allowed |
 |---|---|
@@ -68,7 +69,7 @@ The main `token` from the config has full access. For a smart home or other devi
 
 ## Modules
 
-A module is a `.tar.gz` package installed in the web interface: "Modules" → "Install module" → "Check package" → "Install". Before installing, the page shows the manifest, files, SHA-256 and the rights the module asks for. There are no signatures: a module runs on the robot as root, install only from a source you trust.
+A module is a `.tar.gz` package installed in the web interface: "⋮" → "Modules" → "Install module" → "Check package" → "Install". Before installing, the page shows the manifest, files, SHA-256 and the rights the module asks for. There are no signatures: a module runs on the robot as root, install only from a source you trust.
 
 The package is unpacked to `/data/dreame-local/modules/<name>/`:
 
@@ -82,7 +83,7 @@ The module token is derived from the main token: it survives agent restarts and 
 
 ## Agent updates
 
-A new version is installed in the web interface: "Agent update" → choose the file → "Check file" → "Update". The agent accepts only a Linux executable for the robot's architecture that answers `--version` with `dreame-local-agent <version>`. A helper process stops the agent, installs the new file, keeps the old one as `dreame-local-agent.previous` and waits up to 45 s for the new version to answer; otherwise it restores the old one. "Restore version …" installs `.previous` the same way. Only the binary and its built-in web interface are updated.
+A new version is installed in the web interface: "⋮" → "Agent update" → choose the file → "Check file" → "Update". The agent accepts only a Linux executable for the robot's architecture that answers `--version` with `dreame-local-agent <version>`. A helper process stops the agent, installs the new file, keeps the old one as `dreame-local-agent.previous` and waits up to 45 s for the new version to answer; otherwise it restores the old one. "Restore version …" installs `.previous` the same way. Only the binary and its built-in web interface are updated.
 
 ## Build and tests
 

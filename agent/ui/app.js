@@ -253,6 +253,7 @@ function renderState(snap){
   const s=snap.state;
   $('status').textContent=statusNames[s.status]||(s.status>1510&&s.status<1600?'Самопроверка: проверка '+(s.status-1510):'Статус '+(s.status??'недоступен'));
   $('battery').textContent=s.battery===undefined?'—':s.battery+'%';$('battery').style.setProperty('--charge',(s.battery??0)+'%');
+  $('stat-area').textContent=Number.isFinite(s.cleaned_area)?String(s.cleaned_area):'—';$('stat-time').textContent=Number.isFinite(s.cleaning_time)?String(s.cleaning_time):'—';document.body.dataset.activity=s.activity||'';
   $('updated').textContent='Обновлено '+new Date(snap.updated_at).toLocaleTimeString();
   if(!fanDirty&&document.activeElement!==$('fan')&&s.suction!==undefined)$('fan').value=String(s.suction);
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
@@ -474,7 +475,7 @@ async function streamEvents(){
 function invalidateEdit(){pending=null;$('map-preview').textContent='';$('apply-map-edit').disabled=true;}
 function selectRoom(id){
  if($('map-operation').value==='split')selected=new Set(selected.has(id)?[]:[id]);
- else if(selected.has(id))selected.delete(id);else selected.add(id);
+ else if(selected.has(id))selected.delete(id);else{selected.add(id);if(!openSheet&&dock.dataset.mode==='all')setMode('room');}
  points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);
 }
 function renderRoomButtons(){
@@ -484,16 +485,17 @@ function renderRoomButtons(){
 function draw(){
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
  ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;
+ const light=!matchMedia('(prefers-color-scheme:dark)').matches,wall=light?'#9aa9b8':'#d1d9e2';
  const grid=view.grid,scale=3,buffer=document.createElement('canvas');buffer.width=view.width;buffer.height=view.height;const bc=buffer.getContext('2d'),image=bc.createImageData(view.width,view.height);
  for(let i=0;i<grid.length;i++){
   const id=grid[i];if(!id)continue;const j=((view.height-1-Math.floor(i/view.width))*view.width+i%view.width)*4;
-  const color=id===255?'#d1d9e2':palette[(id-1)%palette.length];let rgb=color.slice(1).match(/../g).map(c=>parseInt(c,16));
-  if(id!==255&&selected.size&&!selected.has(id))rgb=rgb.map(c=>Math.round(c*.42));
+  const color=id===255?wall:palette[(id-1)%palette.length];let rgb=color.slice(1).match(/../g).map(c=>parseInt(c,16));
+  if(id!==255&&selected.size&&!selected.has(id))rgb=rgb.map(c=>light?Math.round(c+(255-c)*.62):Math.round(c*.42));
   image.data.set([...rgb,255],j);
  }
  bc.putImageData(image,0,0);ctx.imageSmoothingEnabled=false;ctx.drawImage(buffer,0,0,canvas.width,canvas.height);
  ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
- for(const room of view.rooms){const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale;ctx.lineWidth=4;ctx.strokeStyle='#17232d';ctx.strokeText(String(room.id),x,y);ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y);}
+ fitMap();drawRoomLabels(scale);
  drawThresholds();drawRestrictions();drawFurniture();drawPatrol();drawLive();
  if(zoneSpot&&zone.length){const [a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const h=750/view.grid_size*scale;ctx.fillRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);ctx.strokeRect(a.x*scale-h,(view.height-a.y)*scale-h,2*h,2*h);}
  else if(zone.length){const [a,b=zoneHover||a]=zone;ctx.strokeStyle='#ffae67';ctx.fillStyle='rgba(255,174,103,.25)';ctx.lineWidth=2;const x=Math.min(a.x,b.x)*scale,y=(view.height-Math.max(a.y,b.y))*scale,w=Math.abs(a.x-b.x)*scale,h=Math.abs(a.y-b.y)*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);}
@@ -542,6 +544,7 @@ canvas.onclick=e=>{
  if(patrolDrawing){addPatrolPoint(x,y);return;}
  if(zoneDrawing){zone.push({x,y});if(zoneSpot){zoneDrawing=false;$('zone-status').textContent='Будет убран квадрат 1,5 × 1,5 м вокруг точки. Повторы, мощность и влажность — как для комнат.';}else if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
+ if(!openSheet&&dock.dataset.mode==='zone')return; // in zone mode a tap marks the zone, it does not pick rooms
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
  if($('map-operation').value==='split'&&selected.size===1){if(points.length===2)points=[];points.push({x,y,robot:pixelToRobot(view,x,y)});invalidateEdit();draw();return;}
  const px=Math.min(view.width-1,Math.max(0,Math.floor(x))),py=Math.min(view.height-1,Math.max(0,Math.floor(y))),id=view.grid[py*view.width+px];
@@ -550,12 +553,13 @@ canvas.onclick=e=>{
 // Show only what this robot supports: commands the hardware table rules out and properties the robot never answers are hidden.
 export function applyCapabilities(caps){
  const id=caps.identity||{};hardware=caps.hardware||null;
+ $('robot-name').textContent=robotName(id.model);
  $('model').textContent=(id.model||'Неизвестная модель')+' · '+(id.fw_ver||'?')+(caps.firmware?.verified?'':' · прошивка не проверена');
  for(const button of document.querySelectorAll('[data-command]')){const c=caps.commands?.[button.dataset.command];button.hidden=c?.available===false;if(c?.reason)button.title=c.reason;}
  for(const [prop,input,apply] of [['suction','fan','save-fan'],['volume','volume','save-volume']]){const hide=caps.properties?.[prop]?.readable===false;$(input).closest('label').hidden=hide;$(apply).hidden=hide;}
 }
 async function login(){
- const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('main-page').append($('wifi-panel'));applyCapabilities(caps);
+ const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)document.querySelector('#sheet-wifi .sheet-body').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
  await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
@@ -1028,3 +1032,48 @@ $('add-patrol-schedule').onclick=()=>{
  const days=dayNames.map((_,i)=>$('patrol-days').querySelector('input[value="'+i+'"]').checked?'1':'0').join('');
  control('local.patrol_schedule',{enabled:true,time:$('patrol-time').value,days,points:patrolPoints}).then(()=>{$('patrol-status').textContent='Расписание патруля сохранено.';loadPatrolSchedules().catch(()=>{});},()=>{});
 };
+
+// ---- App-style layout: one screen with the map; everything else opens in sheets.
+const robotNames={'dreame.vacuum.r2505':'Dreame X50'};
+function robotName(model){return robotNames[model]||(model?'Dreame '+String(model).split('.').pop():'Робот-пылесос');}
+// Canvas pixels per CSS pixel, so labels keep their on-screen size whatever the map's scale.
+function mapRatio(){const w=canvas.getBoundingClientRect().width;return w>0?Math.max(.6,canvas.width/w):1;}
+function drawRoomLabels(scale){
+ const k=mapRatio(),r=9*k;ctx.save();ctx.textAlign='center';ctx.textBaseline='middle';
+ for(const room of view.rooms){
+  const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale,color=palette[(room.id-1)%palette.length];
+  ctx.fillStyle=color;ctx.strokeStyle='#fff';ctx.lineWidth=2*k;ctx.beginPath();ctx.arc(x,y-r,r,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.font='bold '+Math.round(11*k)+'px system-ui,sans-serif';ctx.fillStyle='#17232d';ctx.fillText(String(room.id),x,y-r+.5*k);
+  if(room.name){ctx.font='600 '+Math.round(12*k)+'px system-ui,sans-serif';ctx.lineWidth=3*k;ctx.strokeStyle='rgba(20,28,33,.85)';ctx.strokeText(room.name,x,y+9*k);ctx.fillStyle='#fff';ctx.fillText(room.name,x,y+9*k);}
+ }
+ ctx.restore();
+}
+// Fit the whole map into the stage, keeping its proportions.
+const mapStage=document.querySelector('.map-stage');
+function fitMap(){
+ if(!mapStage)return;const w=mapStage.clientWidth-16,h=mapStage.clientHeight-16;if(w<=0||h<=0||!canvas.width||!canvas.height)return;
+ const k=Math.min(w/canvas.width,h/canvas.height);canvas.style.width=Math.floor(canvas.width*k)+'px';canvas.style.height=Math.floor(canvas.height*k)+'px';
+}
+let fitPending=false;
+if(mapStage&&'ResizeObserver' in window)new ResizeObserver(()=>{if(fitPending)return;fitPending=true;requestAnimationFrame(()=>{fitPending=false;const before=canvas.style.width;fitMap();if(canvas.style.width!==before&&view&&!view.empty)draw();});}).observe(mapStage);
+// Bottom bar: Комната / Все / Зона pick which "Чистить" button is shown.
+const dock=$('dock');
+export function setMode(mode){
+ dock.dataset.mode=mode;for(const b of dock.querySelectorAll('.segmented button'))b.setAttribute('aria-selected',String(b.dataset.mode===mode));
+ if(mode!=='zone'&&(zoneDrawing||zone.length))$('cancel-zone').click();
+}
+for(const b of dock.querySelectorAll('.segmented button'))b.onclick=()=>setMode(b.dataset.mode);
+// Sheets: one open at a time, without a backdrop, so the map stays usable for map tools.
+let openSheet=null;
+export function showSheet(name){
+ const sheet=$('sheet-'+name);if(!sheet)return;
+ if(openSheet&&openSheet!==sheet)openSheet.hidden=true;
+ if(name==='menu')for(const item of sheet.querySelectorAll('[data-sheet]')){const target=$('sheet-'+item.dataset.sheet),panels=target?[...target.querySelectorAll('.sheet-body>.panel')]:[];item.hidden=panels.length>0&&panels.every(p=>p.hidden);}
+ // A sheet holding one folded block opens it: the sheet's title already names it.
+ const body=sheet.querySelector('.sheet-body'),only=body.querySelectorAll(':scope>.panel>details,:scope>details');if(only.length===1&&body.children.length===1&&!only[0].open)only[0].open=true;
+ sheet.hidden=false;openSheet=sheet;document.body.dataset.openSheet=name;sheet.querySelector('.sheet-close').focus({preventScroll:true});
+}
+export function closeSheet(){if(!openSheet)return;const opener=document.querySelector('[data-sheet="'+openSheet.id.slice(6)+'"]');openSheet.hidden=true;openSheet=null;delete document.body.dataset.openSheet;if(opener&&opener.offsetParent)opener.focus({preventScroll:true});}
+document.addEventListener('click',e=>{const opener=e.target.closest('[data-sheet]');if(opener){e.preventDefault();showSheet(opener.dataset.sheet);return;}if(e.target.closest('.sheet-close'))closeSheet();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openSheet)closeSheet();});
+$('nav-modules').addEventListener('click',()=>closeSheet());
