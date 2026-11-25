@@ -1379,8 +1379,7 @@ $('messages-details').ontoggle=()=>{if($('messages-details').open)loadMessages()
 $('clear-messages').onclick=async()=>{if(!window.confirm('Очистить сообщения?'))return;try{await api('local.messages_clear');await loadMessages();}catch(e){toast(e.message,true);}};
 // ---- Video access code (monitor.go): remote_move drives inside the video monitoring session, which needs it.
 const videoCodeText=on=>on?'Код задан: стрелки камеры ездят без мотора.':'Код не задан: ручное управление выключено.';
-async function loadVideoCode(){$('video-code-status').textContent=videoCodeText((await api('/api/v1/system/video_code')).configured);$('video-voice').checked=(await api('/api/v1/system/video_voice')).enabled;}
-$('video-voice').onchange=async()=>{try{$('video-voice').checked=(await api('/api/v1/system/video_voice',{enabled:$('video-voice').checked})).enabled;toast($('video-voice').checked?'Робот промолчит про мониторинг':'Робот снова говорит про мониторинг');}catch(e){toast(e.message,true);$('video-voice').checked=!$('video-voice').checked;}};
+async function loadVideoCode(){$('video-code-status').textContent=videoCodeText((await api('/api/v1/system/video_code')).configured);}
 async function saveVideoCode(code){
  try{const r=await api('/api/v1/system/video_code',{code});$('video-code').value='';$('video-code-status').textContent=videoCodeText(r.configured);}
  catch(e){$('video-code-status').textContent=e.message;}

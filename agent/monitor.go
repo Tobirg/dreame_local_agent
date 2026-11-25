@@ -40,9 +40,6 @@ const (
 // How long the firmware may take to confirm monitoring (ava "type=19, value=1"; 0.5-0.8 s seen).
 var monitorConfirm = 4 * time.Second
 
-// After a start or an end the firmware says its phrase within ~0.1 s; it lasts about 2 s.
-var monitorVoice = 3 * time.Second
-
 var errNoVideoCode = errors.New("set the video access code (panel: Camera) first: without the video monitoring session the robot runs the vacuum motor while driving")
 
 type monitorState struct {
@@ -52,7 +49,6 @@ type monitorState struct {
 	holds   int    // running patrols keep the session open
 	refused string // a code hash the robot refused: not sent again, so the firmware does not freeze the code
 	stop    chan struct{}
-	did     string
 }
 
 var monitor monitorState
@@ -121,8 +117,6 @@ func (a *agent) ensureMonitor(ctx context.Context, did string) error {
 	// video_monitor needs /dev/video0, which the camera module's live view may hold: without it the
 	// session fails quietly and the next step runs the motor (seen 2026-11-25 on 0.74.0).
 	a.holdCamera(true)
-	loud := a.quiet(ctx, did)
-	defer loud()
 	offsets := a.avaLogOffsets()
 	result, err = a.miot(ctx, "action", monitorAction(did, 1, 1, map[string]any{"token": "alify", "channelId": monitorSession, "area": "0", "operType": "monitor", "operation": "start"}))
 	if err == nil && rejected(result) != nil {
@@ -143,7 +137,7 @@ func (a *agent) ensureMonitor(ctx context.Context, did string) error {
 	if _, err := a.miot(ctx, "action", monitorAction(did, 3, 9, map[string]any{"value": "101"})); err != nil {
 		log.Printf("video monitoring: fill light auto: %v", err)
 	}
-	monitor.open, monitor.did = true, did
+	monitor.open = true
 	monitor.stop = make(chan struct{})
 	go a.keepMonitor(monitor.stop)
 	return nil
@@ -175,19 +169,13 @@ func (a *agent) keepMonitor(stop chan struct{}) {
 		idle := monitor.holds == 0 && time.Since(monitor.last) > monitorIdle
 		monitor.Unlock()
 		fields := map[string]any{"operType": "keep_alive", "videoStatus": "opened"}
-		monitor.Lock()
-		did := monitor.did
-		monitor.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		loud := func() {}
 		if idle {
 			fields = map[string]any{"operType": "monitor", "operation": "end"}
-			loud = a.quiet(ctx, did)
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		raw, _ := json.Marshal(monitorAction("", 1, idle2piid(idle), fields))
 		_, err := a.call(ctx, request{Method: "action", Params: raw})
 		cancel()
-		loud()
 		if err != nil {
 			log.Printf("video monitoring: %v", err)
 		}
@@ -296,11 +284,9 @@ func (a *agent) endMonitor(ctx context.Context, did string) bool {
 	if monitor.holds > 0 {
 		return true
 	}
-	loud := a.quiet(ctx, did)
 	if _, err := a.miot(ctx, "action", monitorAction(did, 1, 1, map[string]any{"operType": "monitor", "operation": "end"})); err != nil {
 		log.Printf("video monitoring: %v", err)
 	}
-	loud()
 	close(monitor.stop)
 	monitor.open, monitor.stop = false, nil
 	a.cloudBlock(false)
@@ -398,12 +384,6 @@ func (a *agent) videoCloudRoute(w http.ResponseWriter, r *http.Request, send fun
 	a.boolRoute(r, send, "video_cloud_block", &a.cfg.VideoCloudBlock)
 }
 
-// videoVoiceRoute: GET/POST {"enabled": bool} for video_voice_mute (main token only): the robot
-// says nothing when the agent opens or ends video monitoring.
-func (a *agent) videoVoiceRoute(w http.ResponseWriter, r *http.Request, send func(int, any)) {
-	a.boolRoute(r, send, "video_voice_mute", &a.cfg.VideoVoiceMute)
-}
-
 func (a *agent) boolRoute(r *http.Request, send func(int, any), field string, value *bool) {
 	switch r.Method {
 	case "GET":
@@ -433,81 +413,6 @@ func (a *agent) boolRoute(r *http.Request, send func(int, any), field string, va
 	default:
 		send(405, map[string]string{"error": "method not allowed"})
 	}
-}
-
-// quiet mutes the robot (7/1 volume 0) around a monitoring start or end when video_voice_mute is on,
-// so it does not say "camera monitoring" / "camera monitoring exited"; the volume comes back after the
-// phrase would have played.
-func (a *agent) quiet(ctx context.Context, did string) func() {
-	a.tokensMu.Lock()
-	mute := a.cfg.VideoVoiceMute
-	a.tokensMu.Unlock()
-	if !mute {
-		return func() {}
-	}
-	muted.Lock()
-	defer muted.Unlock()
-	if !muted.on { // an end soon after a start finds the robot still muted: keep the saved volume
-		result, err := a.miot(ctx, "get_properties", []any{map[string]any{"did": did, "siid": 7, "piid": 1}})
-		volume, ok := propertyInt(result)
-		if err != nil || !ok || volume == 0 {
-			return func() {}
-		}
-		if _, err := a.miot(ctx, "set_properties", []any{map[string]any{"did": did, "siid": 7, "piid": 1, "value": 0}}); err != nil {
-			return func() {}
-		}
-		muted.on, muted.volume = true, volume
-		go a.unmute(did)
-	}
-	muted.until = time.Time{} // held until the caller's phrase has started
-	return func() {
-		muted.Lock()
-		muted.until = time.Now().Add(monitorVoice)
-		muted.Unlock()
-	}
-}
-
-// muted is the volume the robot had before quiet set it to 0; unmute puts it back once the last
-// phrase is over.
-var muted struct {
-	sync.Mutex
-	on     bool
-	volume int
-	until  time.Time // zero while a start or end is in flight
-}
-
-func (a *agent) unmute(did string) {
-	for {
-		time.Sleep(monitorVoice / 4)
-		muted.Lock()
-		if muted.until.IsZero() || time.Now().Before(muted.until) {
-			muted.Unlock()
-			continue
-		}
-		volume := muted.volume
-		muted.on = false
-		muted.Unlock()
-		if _, err := a.miot(context.Background(), "set_properties", []any{map[string]any{"did": did, "siid": 7, "piid": 1, "value": volume}}); err != nil {
-			log.Printf("video monitoring: volume not restored: %v", err)
-		}
-		return
-	}
-}
-
-// propertyInt reads the value of a one-property get_properties answer.
-func propertyInt(result any) (int, bool) {
-	raw, err := json.Marshal(result)
-	if err != nil {
-		return 0, false
-	}
-	var list []struct {
-		Code  int      `json:"code"`
-		Value *float64 `json:"value"`
-	}
-	if json.Unmarshal(raw, &list) != nil || len(list) != 1 || list[0].Code != 0 || list[0].Value == nil {
-		return 0, false
-	}
-	return int(*list[0].Value), true
 }
 
 // avaLogOffsets notes the size of ava's logs, so monitoringConfirmed reads only what comes after.
