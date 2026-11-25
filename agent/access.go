@@ -58,6 +58,10 @@ func limitedRoute(scope string, r *http.Request) bool {
 		return true
 	case scope == "module":
 		return r.Method == "POST" && p == "/api/v1/firmware_message"
+	case p == "/api/v1/pets/photos" || p == "/api/v1/pets/photo":
+		return r.Method == "GET" // pet photos are private: read and control tokens, not modules
+	case p == "/api/v1/pets/delete":
+		return scope == "control"
 	case p == "/rpc":
 		return true
 	case p == "/api/v1/command":
