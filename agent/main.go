@@ -609,6 +609,42 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write(img)
 		return
+	case "/api/v1/pets/photos":
+		if r.Method != "GET" {
+			send(405, map[string]string{"error": "GET required"})
+			return
+		}
+		send(200, map[string]any{"result": a.petPhotos()})
+		return
+	case "/api/v1/pets/photo":
+		name := r.URL.Query().Get("name")
+		if r.Method != "GET" || !petPhotoName.MatchString(name) {
+			send(400, map[string]string{"error": "GET with a photo name required"})
+			return
+		}
+		img, err := a.petPhotoFile(name)
+		if err != nil {
+			send(404, map[string]string{"error": "photo not found"})
+			return
+		}
+		w.Header().Set("Content-Type", petContentType(name))
+		w.Header().Set("Cache-Control", "private, no-store")
+		_, _ = w.Write(img)
+		return
+	case "/api/v1/pets/delete":
+		var req struct {
+			Name string `json:"name"`
+		}
+		if r.Method != "POST" || json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req) != nil {
+			send(400, map[string]string{"error": "POST with a photo name required"})
+			return
+		}
+		if err := a.deletePetPhoto(req.Name); err != nil {
+			send(404, map[string]string{"error": err.Error()})
+			return
+		}
+		send(200, map[string]any{"result": map[string]string{"deleted": req.Name}})
+		return
 	case "/api/v1/events":
 		if r.Method != "GET" {
 			send(405, map[string]string{"error": "GET required"})
@@ -834,6 +870,7 @@ func main() {
 	a.applyFirmwareBlock()
 	go a.runPoller(portalContext, 5*time.Second)
 	go a.runPatrolSchedules(portalContext)
+	go a.runPetPhotos(portalContext)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan struct{})

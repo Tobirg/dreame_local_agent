@@ -32,7 +32,7 @@ export function roomCommand(ids,fan,water,repeats=1){
 }
 const command=(name,args={})=>control('/api/v1/command',{name,...args});
 function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
-function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.live_pose'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update'||method==='/api/v1/system/firmware'||method==='/api/v1/logs';}
+function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.live_pose'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update'||method==='/api/v1/system/firmware'||method==='/api/v1/logs'||method==='/api/v1/pets/photos';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
 async function api(method,params=null){
  const read=isRead(method),requestID=read?null:Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
@@ -394,6 +394,53 @@ async function loadHistory(){
  $('history').replaceChildren(...rows);
 }
 $('refresh-history').onclick=()=>loadHistory().catch(e=>toast(e.message,true));
+// ---- Pet photos: the robot's pet GIFs the agent keeps and pet obstacle photos of runs, newest first.
+// They need the token, so they come through fetch as blobs; tiles load when scrolled into view.
+let petList=[],petIndex=-1,petBlobs=new Map(),petSwipe=null;
+const petObserver=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){petObserver.unobserve(e.target);e.target.load();}},{rootMargin:'200px'});
+function petBlob(p){
+ if(!petBlobs.has(p.url))petBlobs.set(p.url,fetch(p.url,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'}).then(async r=>{if(!r.ok)throw Error('Фото не загрузилось');return URL.createObjectURL(await r.blob());}));
+ return petBlobs.get(p.url);
+}
+const petCaption=p=>new Date(p.at).toLocaleString([], {dateStyle:'short',timeStyle:'short'})+(p.source==='obstacle'?' · уборка'+(p.confidence?' · '+p.confidence+'%':''):'');
+async function loadPets(){
+ const list=await api('/api/v1/pets/photos'),old=petBlobs;
+ petList=list;petBlobs=new Map();for(const u of old.values())u.then(URL.revokeObjectURL,()=>{});
+ const tiles=petList.map((p,i)=>{
+  const b=document.createElement('button'),label=document.createElement('span');b.type='button';b.dataset.index=i;b.setAttribute('aria-label','Открыть фото: '+petCaption(p));label.textContent=petCaption(p);b.append(label);
+  b.load=()=>petBlob(p).then(src=>{const img=document.createElement('img');img.src=src;img.alt='';b.prepend(img);},()=>label.textContent+=' · не загрузилось');
+  b.onclick=()=>openPet(i);petObserver.observe(b);return b;
+ });
+ if(!tiles.length)tiles.push(Object.assign(document.createElement('p'),{className:'muted small empty',textContent:'Фото пока нет. Робот снимает питомцев во время уборки, когда включены «Распознавание животных» и «Фото домашних животных».'}));
+ $('pet-photos').replaceChildren(...tiles);$('pets-count').textContent=petList.length?'Всего: '+petList.length:'';
+}
+function showPet(){
+ const p=petList[petIndex];if(!p){closePet();return;}
+ $('pet-viewer-caption').textContent=petCaption(p)+' · '+(petIndex+1)+' из '+petList.length;$('pet-viewer-img').removeAttribute('src');$('pet-viewer-img').alt='Фото питомца, '+petCaption(p);
+ petBlob(p).then(src=>{if(petList[petIndex]===p)$('pet-viewer-img').src=src;},e=>toast(e.message,true));
+ $('pet-prev').disabled=petIndex<=0;$('pet-next').disabled=petIndex>=petList.length-1;
+}
+function openPet(i){petIndex=i;$('pet-viewer').hidden=false;showPet();$('pet-viewer-close').focus({preventScroll:true});}
+function closePet(){
+ if($('pet-viewer').hidden)return;$('pet-viewer').hidden=true;$('pet-viewer-img').removeAttribute('src');
+ const tile=$('pet-photos').querySelector('[data-index="'+petIndex+'"]');petIndex=-1;tile?.focus({preventScroll:true});
+}
+const stepPet=d=>{const i=petIndex+d;if(i>=0&&i<petList.length){petIndex=i;showPet();}};
+$('pet-prev').onclick=()=>stepPet(-1);$('pet-next').onclick=()=>stepPet(1);$('pet-viewer-close').onclick=closePet;
+$('pet-viewer').addEventListener('pointerdown',e=>{petSwipe=e.clientX;});
+$('pet-viewer').addEventListener('pointerup',e=>{if(petSwipe===null)return;const dx=e.clientX-petSwipe;petSwipe=null;if(Math.abs(dx)>60)stepPet(dx>0?-1:1);});
+document.addEventListener('keydown',e=>{
+ if($('pet-viewer').hidden)return;
+ if(e.key==='Escape'){e.stopImmediatePropagation();closePet();}else if(e.key==='ArrowLeft')stepPet(-1);else if(e.key==='ArrowRight')stepPet(1);
+},true);
+$('pet-delete').onclick=async()=>{
+ const p=petList[petIndex];if(!p||!window.confirm('Удалить это фото? Вернуть его не получится.'))return;
+ try{await api('/api/v1/pets/delete',{name:p.name});toast('Фото удалено');const at=petIndex;await loadPets();if(!petList.length)closePet();else{petIndex=Math.min(at,petList.length-1);showPet();}}
+ catch(e){toast(e.status===403?'Удалять фото может только токен с правом управления':e.message,true);}
+};
+// Signing out drops the photos from the page.
+function clearPets(){closePet();for(const u of petBlobs.values())u.then(URL.revokeObjectURL,()=>{});petBlobs=new Map();petList=[];$('pet-photos').replaceChildren();$('pets-count').textContent='';}
+$('refresh-pets').onclick=()=>loadPets().catch(e=>toast(e.message,true));
 $('refresh-logs').onclick=()=>loadLogs().catch(e=>toast(e.message,true));$('log-source').onchange=showLog;
 // ---- Maintenance: consumables, totals and do-not-disturb come with the state once a minute.
 const consumableNames={main_brush:'Основная щётка',side_brush:'Боковая щётка',filter:'Фильтр',sensor:'Датчики',tank_filter:'Фильтр бака',mop_pad:'Салфетки',silver_ion:'Ионы серебра',detergent:'Моющее средство',squeegee:'Скребок',dirty_water_channel:'Канал грязной воды',onboard_dirty_water_tank:'Бак грязной воды робота',deodorizer:'Дезодоратор',wheel:'Колёса',scale_inhibitor:'Антинакипин',fluffing_roller:'Взбивающий валик',roller_mop_filter:'Фильтр валика',water_outlet_filter:'Фильтр слива',track:'Направляющие',washboard:'Поддон мойки',filter_cleaning:'Очистка фильтра',roller_cover:'Кожух валика',main_brush_cover:'Кожух основной щётки'};
@@ -674,7 +721,7 @@ async function login(){
  await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
-$('logout').onclick=()=>{stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
+$('logout').onclick=()=>{clearPets();stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
 // Buttons of the actions catalog (actions.js) go to their page's container; data-command keeps them under
 // the capability hiding, the busy lock and the click handler below.
 for(const act of actions){
@@ -1118,7 +1165,7 @@ async function refreshSettings(){
   settingsSnapshot=snapshot;for(const [id,row]of settingsRows){const def=settings.find(x=>x.id===id);if(decodeSetting(def,snapshot)===undefined)row.hidden=true;}renderSettings();
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('settings-status').textContent=e.message;connectionLost(e.message);}}finally{if(epoch===viewEpoch)settingsLoading=false;}
 }
-for(const id of ['settings-details','station-settings-details','voice-settings-details','dnd-settings-details'])$(id).ontoggle=e=>{if(e.target.open)refreshSettings();};$('refresh-settings').onclick=()=>refreshSettings();$('settings-search').oninput=()=>renderSettings();
+for(const id of ['settings-details','station-settings-details','voice-settings-details','dnd-settings-details','pet-settings-details'])$(id).ontoggle=e=>{if(e.target.open)refreshSettings();};$('refresh-settings').onclick=()=>refreshSettings();$('settings-search').oninput=()=>renderSettings();
 
 async function rebootRobot(){
  if(busy||!window.confirm('Перезагрузить робот? Связь временно пропадёт.'))return;
@@ -1217,6 +1264,7 @@ export function showSheet(name){
  if(name==='menu')for(const item of sheet.querySelectorAll('[data-sheet]')){const target=$('sheet-'+item.dataset.sheet),panels=target?[...target.querySelectorAll('.sheet-body>.panel')]:[];item.hidden=panels.length>0&&panels.every(p=>p.hidden);}
  // A sheet holding one folded block opens it: the sheet's title already names it.
  const body=sheet.querySelector('.sheet-body'),only=body.querySelectorAll(':scope>.panel>details,:scope>details');if(only.length===1&&body.children.length===1&&!only[0].open)only[0].open=true;
+ if(name==='pets')loadPets().catch(e=>toast(e.message,true));
  sheet.hidden=false;openSheet=sheet;document.body.dataset.openSheet=name;sheet.querySelector('.sheet-close').focus({preventScroll:true});
 }
 export function closeSheet(){if(!openSheet)return;const opener=document.querySelector('[data-sheet="'+openSheet.id.slice(6)+'"]');openSheet.hidden=true;openSheet=null;delete document.body.dataset.openSheet;if(opener&&opener.offsetParent)opener.focus({preventScroll:true});}
