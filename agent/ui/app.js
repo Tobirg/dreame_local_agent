@@ -524,10 +524,10 @@ const draftOf={restrictions:()=>restrictDraft,thresholds:()=>thresholdDraft?.lin
 const agentDraws=g=>baseCache.layers?.has(g)&&!draftOf[g]?.();
 function baseLayer(){
  const floors=view.rooms.map(r=>r.id+':'+floorOf(r)).join(','),sel=[...selected].join(','),layers=['furniture','restrictions','thresholds'].filter(g=>!draftOf[g]?.()),
-  key=view.revision+'|'+sel+'|'+floors+'|'+layers+'|'+res;
+  key=view.revision+'|'+sel+'|'+floors+'|'+layers;
  if(baseCache.key!==key&&baseCache.pending!==key){
   baseCache.pending=key;
-  fetch('/api/v1/map.png?base=1&selected='+sel+'&floors='+floors+'&layers='+layers+'&f='+Math.max(res,1),{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
+  fetch('/api/v1/map.png?base=1&selected='+sel+'&floors='+floors+'&layers='+layers,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
    .then(r=>r.ok?r.blob():Promise.reject(Error('map.png '+r.status))).then(createImageBitmap)
    .then(bitmap=>{if(baseCache.pending===key){baseCache={key,canvas:bitmap,pending:'',layers:new Set(layers)};draw();}},()=>{if(baseCache.pending===key)baseCache.pending='';});
  }
@@ -583,7 +583,8 @@ function draw(){
  layoutMap();
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;ctx.setTransform(res,0,0,res,0,0);
- const scale=3;{const base=baseLayer();if(base)ctx.drawImage(base,0,0,view.width*3,view.height*3);}
+ const scale=3;{const base=baseLayer();if(base){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(base,0,0,view.width*3,view.height*3);}}
+ // (the same picture as in Home Assistant, smoothly enlarged)
  // Room labels like the app: type icon and name (the number badge is in the agent's picture).
  ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
  for(const room of view.rooms){
