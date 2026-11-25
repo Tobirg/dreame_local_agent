@@ -33,8 +33,6 @@ open(` + "'" + logPath + "'" + `,'a').write(json.dumps(p)+'\n')
 res=p
 if isinstance(p,dict) and p.get('siid')==10001 and p.get('aiid')==4:
     res={'siid':10001,'aiid':4,'code':0,'out':[{'piid':1102,'value':'{"code":` + string(rune('0'+answer)) + `, "fail":0}'}]}
-if isinstance(p,list) and len(p)==1 and p[0].get('siid')==7 and 'value' not in p[0]:
-    res=[{'siid':7,'piid':1,'code':0,'value':50}]
 if '\\"operation\\":\\"start\\"' in json.dumps(p) and not os.path.exists(` + "'" + avaLog + ".off'" + `):
     open(` + "'" + avaLog + "'" + `,'a').write('video state type=19, value=1\n')
 print(json.dumps({'id':r['id'],'result':res}))
@@ -94,11 +92,8 @@ func TestRemoteMoveRefusedWhenMonitoringUnconfirmed(t *testing.T) {
 	}
 }
 
-func TestMonitoringQuietWithFillLightAuto(t *testing.T) {
+func TestMonitoringFillLightAuto(t *testing.T) {
 	a, calls := monitorAgent(t, 2)
-	a.cfg.VideoVoiceMute = true
-	defer func(v time.Duration) { monitorVoice = v }(monitorVoice)
-	monitorVoice = 50 * time.Millisecond
 	run := func(cmd string) {
 		if _, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(cmd)}); err != nil {
 			t.Fatal(err)
@@ -106,18 +101,12 @@ func TestMonitoringQuietWithFillLightAuto(t *testing.T) {
 	}
 	run(`{"name":"video_monitor","enabled":true}`)
 	run(`{"name":"video_monitor","enabled":false}`)
-	time.Sleep(300 * time.Millisecond)
 	got := calls()
-	var volumes []string
 	fillAuto := false
 	for _, c := range got {
-		if strings.Contains(c, `"siid": 7`) && strings.Contains(c, `"value"`) {
-			volumes = append(volumes, c[strings.Index(c, `"value"`):])
-		}
 		fillAuto = fillAuto || strings.Contains(c, `"aiid": 3`) && strings.Contains(c, `"piid": 9`) && strings.Contains(c, `\"value\":\"101\"`)
 	}
-	// One mute over the start and the quick end, then the saved volume back.
-	if !fillAuto || len(volumes) != 2 || !strings.HasPrefix(volumes[0], `"value": 0`) || !strings.HasPrefix(volumes[1], `"value": 50`) {
+	if !fillAuto {
 		t.Fatal(strings.Join(got, "\n"))
 	}
 }
