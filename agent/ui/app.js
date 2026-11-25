@@ -607,7 +607,7 @@ function layoutMap(){
   if(want!==mine){res=want;canvas.width=view.width*3*res;canvas.height=view.height*3*res;if(mine)draw();}}
  $('zoom-fit').textContent=Math.round(zoom*100)+'%';if(markerArgs)placeMarker(...markerArgs);
 }
-const setZoom=z=>{zoom=Math.min(6,Math.max(.4,z));layoutMap();};
+const setZoom=z=>{zoom=Math.min(6,Math.max(.4,z));draw();}; // draw: room labels keep a readable size
 // A sheet or an editor changes the stage around the map; the map keeps its size and place on the screen.
 function keepMap(change){
  const before=view&&!view.empty?canvas.getBoundingClientRect():null;change();
@@ -657,15 +657,17 @@ function draw(){
  ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
  // Order badges as the app: the selection order in the room mode, the saved cleaning order in «Все».
  const order=dock.dataset.mode==='room'&&!editTool?[...selected]:dock.dataset.mode==='all'&&!editTool&&!openSheet?roomOrder.map(r=>r.id):[];
+ // Labels stay between 10 and 14 screen pixels whatever the zoom: L scales drawing units to that.
+ const cw=canvas.getBoundingClientRect().width,u=cw?3*view.width/cw:1,L=u*Math.min(14/11,Math.max(10/11,1/u));
  for(const room of view.rooms){
   const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale,dim=roomsShown()&&selected.size&&!selected.has(room.id);
   ctx.globalAlpha=dim?.55:1;
-  ctx.font='600 11px system-ui';const label=(roomIcons[room.type]?roomIcons[room.type]+' ':'')+room.name;ctx.lineWidth=3;ctx.strokeStyle='rgba(23,35,45,.8)';ctx.strokeText(label,x,y+8);ctx.fillStyle='#fff';ctx.fillText(label,x,y+8);
+  ctx.font=`600 ${11*L}px system-ui`;const label=(roomIcons[room.type]?roomIcons[room.type]+' ':'')+room.name;ctx.lineWidth=3*L;ctx.strokeStyle='rgba(23,35,45,.8)';ctx.strokeText(label,x,y+8*L);ctx.fillStyle='#fff';ctx.fillText(label,x,y+8*L);
  }
  ctx.globalAlpha=1;
- order.forEach((id,i)=>{const room=view.rooms.find(r=>r.id===id);if(!room)return;const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale-9;
-  ctx.fillStyle=palette[(id-1)%palette.length];ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();
-  ctx.fillStyle='#17232d';ctx.font='700 10px system-ui';ctx.fillText(String(i+1),x,y+.5);});
+ order.forEach((id,i)=>{const room=view.rooms.find(r=>r.id===id);if(!room)return;const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale-9*L;
+  ctx.fillStyle=palette[(id-1)%palette.length];ctx.beginPath();ctx.arc(x,y,8*L,0,Math.PI*2);ctx.fill();ctx.lineWidth=2*L;ctx.strokeStyle='#fff';ctx.stroke();
+  ctx.fillStyle='#17232d';ctx.font=`700 ${10*L}px system-ui`;ctx.fillText(String(i+1),x,y+.5*L);});
  drawThresholds();drawRestrictions();drawFurniture();drawPatrol();drawLive();
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
  drawEditor();
@@ -1253,15 +1255,17 @@ export function settingValue(def,value,raw){
  if(def.kind==='bool')return typeof raw==='boolean'?!!value:value&&Number(raw)>0?raw:Number(!!value);
  return value;
 }
+const isSlider=def=>def.kind==='number'&&def.max-def.min<=40; // a short range is a slider applied on release
 function settingControl(def,value){
  const input=document.createElement(def.kind==='select'?'select':'input');input.id='setting-'+def.id;input.setAttribute('aria-label',def.label);
  if(def.kind==='select'){
-  for(const option of def.options)input.add(new Option(option.label,String(option.value)));
+  // In «Настроить» the route offers what the app does for this robot: standard and fast.
+  for(const option of def.id==='cleaning_route'?def.options.filter(o=>o.value===1||o.value===4):def.options)input.add(new Option(option.label,String(option.value)));
   let normalized=value;if(def.auto&&Number(value)<0&&def.options.some(x=>x.value===0))normalized=0;
   if(![...input.options].some(x=>x.value===String(normalized)))input.add(new Option('Текущее: '+value,String(value)));
   input.value=String(normalized);
  }else if(def.kind==='bool'){input.type='checkbox';input.className='switch';input.setAttribute('role','switch');input.checked=!!value;}
- else{input.type=def.kind==='number'?'number':def.kind==='time'?'time':'text';input.value=String(value);if(def.kind==='number'){input.min=def.min;input.max=def.max;input.step=def.step||1;}else input.maxLength=128;}
+ else{input.type=def.kind==='number'?'number':def.kind==='time'?'time':'text';input.value=String(value);if(def.kind==='number'){input.min=def.min;input.max=def.max;input.step=def.step||1;if(isSlider(def))input.type='range';}else input.maxLength=128;}
  return input;
 }
 // Pages (pages.js) with their own panel show there, next to the matching controls; if that panel is hidden
@@ -1302,7 +1306,7 @@ function renderSettings(){
     finally{settingsDirty.delete(def.id);await refreshSettings();}
    };
    // Switches and lists apply on change; typed values (number, time, text) wait for «ОК», a schedule's switch applies at once.
-   const typed=['number','time','text','window'].includes(def.kind);let ok=null;
+   const typed=['number','time','text','window'].includes(def.kind)&&!isSlider(def);if(isSlider(def))input.addEventListener('input',()=>{current.textContent='Сейчас: '+input.value;});let ok=null;
    if(typed){ok=document.createElement('button');ok.textContent='ОК';ok.className='setting-apply';ok.onclick=apply;if(def.kind==='window')input.querySelector('.switch').addEventListener('change',apply);}
    else input.addEventListener('change',apply);
    row.append(label,input);if(ok)row.append(ok);settingsRows.set(def.id,row);settingGroup(def.id).append(row);
@@ -1311,6 +1315,7 @@ function renderSettings(){
   row.hidden=!def.label.toLocaleLowerCase().includes(query)&&!row.closest('#station-settings,#voice-settings,#dnd-settings');
  }
  for(const group of document.querySelectorAll('.setting-group'))group.hidden=![...group.querySelectorAll('.setting-row')].some(r=>!r.hidden);
+ {const wet=settings.find(d=>d.id==='wetness_level');$('room-water').closest('label').hidden=!!wet&&decodeSetting(wet,settingsSnapshot)!==undefined;} // 1–32 replaces the three steps
  $('settings-status').textContent='Доступно настроек: '+available;
  disableControls(busy);
 }
@@ -1487,6 +1492,7 @@ export function showSheet(name){
  // A sheet holding one folded block opens it: the sheet's title already names it.
  const body=sheet.querySelector('.sheet-body'),only=body.querySelectorAll(':scope>.panel>details,:scope>details');if(only.length===1&&body.children.length===1&&!only[0].open)only[0].open=true;
  if(name==='pets')loadPets().catch(e=>toast(e.message,true));
+ if(name==='tune')refreshSettings(); // mode, wetness, mop washing and route live with the robot's settings
  keepMap(()=>{sheet.hidden=false;openSheet=sheet;document.body.dataset.openSheet=name;});sheet.querySelector('.sheet-close').focus({preventScroll:true});draw();
 }
 export function closeSheet(){if(!openSheet)return;const opener=document.querySelector('[data-sheet="'+openSheet.id.slice(6)+'"]');keepMap(()=>{openSheet.hidden=true;openSheet=null;delete document.body.dataset.openSheet;});draw();if(opener&&opener.offsetParent)opener.focus({preventScroll:true});}
