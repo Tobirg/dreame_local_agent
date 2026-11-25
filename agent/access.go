@@ -66,6 +66,8 @@ func limitedRoute(scope string, r *http.Request) bool {
 		return true
 	case p == "/api/v1/command":
 		return scope == "control"
+	case p == "/api/v1/camera/stream":
+		return scope == "control" && r.Method == "GET" // live picture: like driving, not for read tokens
 	}
 	return false
 }
@@ -161,6 +163,10 @@ func (a *agent) tokenRoutes(w http.ResponseWriter, r *http.Request, send func(in
 	p := r.URL.Path
 	if p == "/api/v1/system/embed" {
 		a.embedRoute(w, r, send)
+		return true
+	}
+	if p == "/api/v1/system/video_code" {
+		a.videoCodeRoute(w, r, send)
 		return true
 	}
 	if p == "/api/v1/ui" {

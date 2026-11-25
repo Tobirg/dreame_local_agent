@@ -29,7 +29,7 @@ import (
 // Set at build time for test or release builds: -ldflags "-X main.version=..."
 var version = "0.30.4"
 
-//go:embed ui/index.html ui/style.css ui/app.js ui/settings.js ui/pages.js ui/actions.js ui/voice.js ui/phrases.js
+//go:embed ui/index.html ui/style.css ui/app.js ui/settings.js ui/pages.js ui/actions.js ui/voice.js ui/phrases.js ui/monitor.js
 var webAssets embed.FS
 
 const maxMap = 8 << 20
@@ -47,6 +47,8 @@ type config struct {
 	Tokens                  []apiToken `json:"tokens,omitempty"`
 	// Origins (scheme://host[:port]) that may show the panel in a frame, e.g. a Home Assistant dashboard card.
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
+	// sha256 (hex) of the owner's video access code; opens the video monitoring session (monitor.go).
+	VideoCodeSHA256 string `json:"video_code_sha256,omitempty"`
 	// Room label size on the panel map in screen pixels; 0 keeps the automatic 10–14 px.
 	LabelSize int `json:"label_size,omitempty"`
 }
@@ -479,7 +481,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		case "/style.css":
 			asset = "ui/style.css"
 			contentType = "text/css; charset=utf-8"
-		case "/settings.js", "/pages.js", "/actions.js", "/voice.js", "/phrases.js":
+		case "/settings.js", "/pages.js", "/actions.js", "/voice.js", "/phrases.js", "/monitor.js":
 			asset = "ui" + r.URL.Path
 			contentType = "text/javascript; charset=utf-8"
 		case "/app.js":
@@ -654,6 +656,9 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(200, map[string]any{"result": map[string]string{"deleted": req.Name}})
+		return
+	case "/api/v1/camera/stream":
+		a.cameraStream(w, r, send)
 		return
 	case "/api/v1/events":
 		if r.Method != "GET" {

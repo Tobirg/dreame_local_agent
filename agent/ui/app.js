@@ -2,6 +2,7 @@ import {settings} from '/settings.js';
 import {pages} from '/pages.js';
 import {actions} from '/actions.js';
 import {mountVoice} from '/voice.js';
+import {mountMonitor} from '/monitor.js';
 const $=id=>document.getElementById(id);
 const captiveSetup=new URLSearchParams(location.search).get('setup')==='wifi';
 const statusNames={0:'Ожидание',1:'Пауза',2:'Уборка',3:'Возвращается',4:'Локальная уборка',5:'Вдоль стен',6:'Заряжается',12:'Ошибка',13:'Ручное управление',14:'Спит',17:'Ожидание',18:'Уборка комнат',19:'Уборка зоны',20:'Точечная уборка',21:'Строит карту',15:'Тестовый режим',1527:'Саморемонт станции',22:'Патрулирование',23:'Едет к точке камеры',1501:'Проверка воды'};
@@ -31,7 +32,9 @@ export function roomCommand(ids,fan,water,repeats=1){
  return {name:'clean_rooms',rooms:ids,repeats,suction:fan,water};
 }
 const command=(name,args={})=>control('/api/v1/command',{name,...args});
-function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
+const SUSPENDED='Чтение приостановлено';
+// A read cut short on purpose (tab hidden, resume, logout) is not an error worth showing.
+function toast(message,error=false){if(error&&message===SUSPENDED)return;clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
 function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.live_pose'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update'||method==='/api/v1/system/firmware'||method==='/api/v1/logs'||method==='/api/v1/pets/photos';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
 async function api(method,params=null){
@@ -45,7 +48,7 @@ async function api(method,params=null){
    const response=await fetch(v1?method:'/rpc',{method:post?'POST':'GET',headers:{...(post?{'Content-Type':'application/json'}:{}),'Authorization':'Bearer '+token,...(requestID?{'X-Dreame-Request-ID':requestID}:{})},body:post?JSON.stringify(v1?params:{method,params}):undefined,credentials:'omit',cache:'no-store',signal:controller.signal});
    const body=await response.json();if(!response.ok){const error=Error(body.error||'Ошибка HTTP '+response.status);error.status=response.status;throw error;}return body.result;
   }catch(e){
-   if(controller.signal.reason==='suspend'||controller.signal.reason==='logout'){const error=Error('Чтение приостановлено');error.suspended=true;throw error;}
+   if(controller.signal.reason==='suspend'||controller.signal.reason==='logout'){const error=Error(SUSPENDED);error.suspended=true;throw error;}
    if(e.status)throw e;
    if(read&&attempt===0&&!document.hidden&&token){await new Promise(resolve=>setTimeout(resolve,150));continue;}
    throw Error(read?'Нет ответа от робота. Подключение будет восстановлено автоматически.':'Связь прервалась. Команда могла выполниться: проверь состояние перед повтором.');
@@ -884,11 +887,13 @@ export function applyCapabilities(caps){
  for(const button of document.querySelectorAll('[data-command]')){const c=caps.commands?.[button.dataset.command];button.hidden=c?.available===false;if(c?.reason)button.title=c.reason;}
  for(const [prop,input,apply] of [['suction','room-fan',null],['volume','volume','save-volume']]){const hide=caps.properties?.[prop]?.readable===false;$(input).closest('label').hidden=hide;if(apply)$(apply).hidden=hide;}
 }
-async function login(){
+let loggingIn=false; // a reload fires pageshow and focus while the first load still runs: no resume then
+async function login(){loggingIn=true;try{await loginNow();}finally{loggingIn=false;}}
+async function loginNow(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)document.querySelector('#sheet-wifi .sheet-body').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await loadLook();await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);$('look-panel').hidden=$('update-panel').hidden;await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
+ await loadLook();await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('video-code-panel',loadVideoCode);await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);$('look-panel').hidden=$('update-panel').hidden;await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{clearPets();stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
@@ -1342,7 +1347,7 @@ async function rebootRobot(){
 }
 function suspendReads(reason='suspend'){stopEvents();viewEpoch++;refreshing=false;settingsLoading=false;for(const controller of activeReads)controller.abort(reason);}
 function scheduleResume(){clearTimeout(resumeTimer);resumeTimer=setTimeout(async()=>{
- if(document.hidden||!token)return;if(busy){scheduleResume();return;}
+ if(document.hidden||!token||loggingIn)return;if(busy){scheduleResume();return;}
  suspendReads();
  if($('dashboard').hidden){try{await login();}catch(e){if(!e.suspended)connectionLost(e.message);}return;}
  await refresh();streamEvents();await refreshMap();if(document.querySelector('[id$=settings-details][open]'))await refreshSettings();
@@ -1371,6 +1376,15 @@ async function loadMessages(){
 }
 $('messages-details').ontoggle=()=>{if($('messages-details').open)loadMessages().catch(e=>toast(e.message,true));};
 $('clear-messages').onclick=async()=>{if(!window.confirm('Очистить сообщения?'))return;try{await api('local.messages_clear');await loadMessages();}catch(e){toast(e.message,true);}};
+// ---- Video access code (monitor.go): remote_move drives inside the video monitoring session, which needs it.
+const videoCodeText=on=>on?'Код задан: стрелки камеры ездят без мотора.':'Код не задан: ручное управление выключено.';
+async function loadVideoCode(){$('video-code-status').textContent=videoCodeText((await api('/api/v1/system/video_code')).configured);}
+async function saveVideoCode(code){
+ try{const r=await api('/api/v1/system/video_code',{code});$('video-code').value='';$('video-code-status').textContent=videoCodeText(r.configured);}
+ catch(e){$('video-code-status').textContent=e.message;}
+}
+$('save-video-code').onclick=()=>{const code=$('video-code').value.trim();if(!/^[0-9]{4,8}$/.test(code)){$('video-code-status').textContent='Код: 4–8 цифр.';return;}saveVideoCode(code);};
+$('clear-video-code').onclick=()=>saveVideoCode('');
 // ---- Camera trips (patrol.go): points in robot millimetres, numbered on the map.
 let patrolDrawing=false,patrolPoints=[];
 function drawPatrol(){
@@ -1520,3 +1534,7 @@ syncChips();
 for(const d of document.querySelectorAll('.hub>details'))d.addEventListener('toggle',()=>{if(d.open)d.parentElement.scrollTop=0;draw();});
 
 $('label-size').onchange=async e=>{const prev=labelSize;try{labelSize=Number(e.target.value);draw();labelSize=Number((await api('/api/v1/ui',{label_size:labelSize})).label_size)||0;toast('Размер подписей сохранён');}catch(err){labelSize=prev;e.target.value=String(prev);draw();toast(err.message,true);}};
+
+// ---- Camera monitoring screen (monitor.js): opened by the camera button on the map.
+const monitorScreen=mountMonitor({api,command,token:()=>token,rpc:(name,args={})=>api('/api/v1/command',{name,...args}),toast,statusText:()=>$('status').textContent,mapCanvas:canvas});
+$('open-monitor').onclick=()=>{closeSheet();monitorScreen.open();};

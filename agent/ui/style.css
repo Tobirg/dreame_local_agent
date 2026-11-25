@@ -105,17 +105,22 @@ canvas{display:block;width:100%;height:auto;touch-action:none}
 .room-list button.selected{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .mode-note{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0 0;min-height:32px}
 .mode-note .ghost{padding:4px 8px;font-size:13px;flex:none}
-.dock-actions{display:flex;align-items:center;gap:6px;margin-top:8px}
+.dock-actions{display:flex;align-items:stretch;gap:6px;margin-top:8px}
 .dock-actions>button{flex:1;min-width:0;white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:10px;border:0;background:transparent;padding:14px 8px;font-family:var(--display);font-stretch:condensed;font-size:18px;font-weight:600;border-radius:14px}
 .dock-actions>button:hover{background:var(--paper)}
-.dock-actions .go svg{color:#E3A653;width:26px;height:26px}
+.dock-actions>button svg{width:24px;height:24px;flex:none}
+.dock-actions .go svg,.dock-actions .resume-btn svg,.dock-actions .pause-btn svg{color:#E3A653}
+.dock-actions .stop-btn svg{color:#E06C6C}
 .dock-actions .go:disabled svg{color:var(--muted)}
-.dock-actions .station-btn{border-left:1px solid var(--line);border-radius:0 14px 14px 0}
+.dock-actions .station-btn{flex-grow:1.3;border-left:1px solid var(--line);border-radius:0 14px 14px 0}
+.dock-actions>button span{overflow:hidden;text-overflow:ellipsis}
 .dock-actions .station-btn svg{color:#6E9BE0}
 .dock .go{display:none}
 .dock[data-mode=all] .for-all,.dock[data-mode=room] .for-room,.dock[data-mode=zone] .for-zone{display:flex}
-.run-only{display:none!important;font-size:16px!important}
-body[data-activity=cleaning] .dock .run-only:not([hidden]),body[data-activity=paused] .dock .run-only:not([hidden]),body[data-activity=returning] .dock .run-only:not([hidden]){display:flex!important}
+/* One main button by state, as in the app: Чистить, then Пауза while running, Продолжить while paused; Стоп beside it. */
+.run-only{display:none!important}
+:is(body[data-activity=cleaning],body[data-activity=returning]) .dock :is(.pause-btn,.stop-btn):not([hidden]),body[data-activity=paused] .dock :is(.resume-btn,.stop-btn):not([hidden]){display:flex!important}
+:is(body[data-activity=cleaning],body[data-activity=returning],body[data-activity=paused]) .dock .go{display:none!important}
 
 /* ---- Sheets: rise from the bottom on a phone, slide in at the right on a wide screen. No backdrop: the map stays usable. */
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;flex-direction:column;max-height:78vh;max-height:78dvh;background:var(--surface);border-radius:20px 20px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.22);animation:rise .18s ease-out}
@@ -237,7 +242,8 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
  .stats b{font-size:21px}.stats span+span{padding-left:8px}
  .tool{width:46px;height:46px}
  .tune{font-size:16px;padding:10px 12px}
- .dock-actions>button{font-size:16px;gap:6px;padding:12px 4px}
+ /* Phone: icon over label, every button the same size, so three of them fit evenly. */
+ .dock-actions>button{flex-direction:column;font-size:14px;gap:3px;padding:8px 2px}.dock-actions .station-btn{flex-grow:1;padding-left:6px}
  .room-options{gap:6px}.room-options select{font-size:13px;padding:9px 6px}.room-options label{font-size:12px}
  .setting-row{grid-template-columns:1fr auto}.setting-row>label{grid-column:1/-1}
  .login{margin:20px auto;padding:20px}
@@ -365,3 +371,28 @@ body[data-mode=room][data-selected] .clear-sel{display:flex}
 .room-label{position:absolute;transform:translate(-50%,.15em);white-space:nowrap;color:#fff;font-weight:600;line-height:1.2;text-shadow:0 0 2px rgba(23,35,45,.95),0 0 4px rgba(23,35,45,.8)}
 .room-label.dim{opacity:.55}
 .room-badge{position:absolute;transform:translate(-50%,-110%);min-width:1.5em;height:1.5em;padding:0 .2em;box-sizing:border-box;border-radius:.75em;border:2px solid #fff;color:#17232d;font-weight:700;font-size:.9em;line-height:1;display:grid;place-items:center}
+/* Camera monitoring (monitor.js): the app's video page — picture over the whole screen, controls on top. */
+.monitor{position:fixed;inset:0;z-index:9;background:#000;color:#fff;overflow:hidden;touch-action:none;user-select:none}
+.monitor[hidden]{display:none}
+body[data-monitor]{overflow:hidden}
+.monitor>img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
+.monitor>img.flipped{transform:rotate(180deg)}
+.mon-head{z-index:1;position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:10px 12px;background:linear-gradient(rgba(0,0,0,.55),transparent)}
+.mon-head h2{flex:1;margin:0;text-align:center;font-size:19px;font-weight:500;color:#fff}
+.mon-note{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);max-width:min(420px,calc(100vw - 32px));margin:0;padding:10px 14px;border-radius:10px;background:rgba(0,0,0,.55);text-align:center;font-size:14px}
+.mon-note[hidden]{display:none}
+.mon-btn{display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:50%;background:rgba(40,40,40,.55);color:#fff;cursor:pointer}
+.mon-btn svg,.mon-pad svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.mon-btn.big{width:64px;height:64px}
+.mon-btn.big svg{width:30px;height:30px}
+.mon-btn[aria-pressed=true]{background:#B4935F}
+.mon-btn[data-m=rec][aria-pressed=true]{background:#C0392B}
+.mon-mini{position:absolute;left:12px;top:64px;width:150px;height:110px;border-radius:12px;background:rgba(40,40,40,.45)}
+.mon-left{position:absolute;left:174px;top:64px;display:flex;flex-direction:column;gap:12px}
+.mon-right{position:absolute;right:12px;bottom:max(16px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(2,64px);gap:12px}
+.mon-pad{position:absolute;left:12px;bottom:max(16px,env(safe-area-inset-bottom));width:168px;height:168px;border-radius:50%;background:rgba(40,40,40,.55);display:grid;grid-template:"a a a" 1fr "b . c" 1fr "d d d" 1fr/1fr 1fr 1fr}
+.mon-pad button{border:0;background:none;color:#fff;cursor:pointer;display:grid;place-items:center;touch-action:none}
+.mon-pad button:active{color:#B4935F}
+.mon-pad button:nth-child(1){grid-area:a}.mon-pad button:nth-child(2){grid-area:b}.mon-pad button:nth-child(3){grid-area:c}.mon-pad button:nth-child(4){grid-area:d}
+.mon-pad svg{width:30px;height:30px}
+@media (max-width:420px){.mon-mini{width:120px;height:90px}.mon-left{left:142px}.mon-right{grid-template-columns:64px}.mon-pad{width:150px;height:150px}}
