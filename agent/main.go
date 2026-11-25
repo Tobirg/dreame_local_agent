@@ -49,6 +49,8 @@ type config struct {
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
 	// sha256 (hex) of the owner's video access code; opens the video monitoring session (monitor.go).
 	VideoCodeSHA256 string `json:"video_code_sha256,omitempty"`
+	// Room label size on the panel map in screen pixels; 0 keeps the automatic 10–14 px.
+	LabelSize int `json:"label_size,omitempty"`
 }
 type request struct {
 	Method string          `json:"method"`

@@ -56,6 +56,10 @@ func TestScopedTokens(t *testing.T) {
 		want                      int
 	}{
 		{"GET", "/api/v1/state", read, "", 200},
+		{"GET", "/api/v1/ui", read, "", 200},
+		{"POST", "/api/v1/ui", control, `{"label_size":14}`, 403},
+		{"POST", "/api/v1/ui", a.cfg.Token, `{"label_size":7}`, 400},
+		{"POST", "/api/v1/ui", a.cfg.Token, `{"label_size":16}`, 200},
 		{"GET", "/api/v1/logs", control, "", 403},
 		{"POST", "/rpc", read, `{"method":"get_properties","params":[{"siid":3,"piid":1}]}`, 200},
 		{"POST", "/rpc", read, `{"method":"action","params":{"siid":7,"aiid":1}}`, 403},

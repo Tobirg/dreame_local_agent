@@ -54,7 +54,7 @@ func (a *agent) scopeOf(auth string) string {
 func limitedRoute(scope string, r *http.Request) bool {
 	p := r.URL.Path
 	switch {
-	case r.Method == "GET" && (p == "/api/v1/state" || p == "/api/v1/capabilities" || p == "/api/v1/events" || p == "/api/v1/history" || p == "/api/v1/history/photo" || p == "/api/v1/map.svg" || p == "/api/v1/settings" || p == "/api/v1/map"):
+	case r.Method == "GET" && (p == "/api/v1/state" || p == "/api/v1/capabilities" || p == "/api/v1/events" || p == "/api/v1/history" || p == "/api/v1/history/photo" || p == "/api/v1/map.svg" || p == "/api/v1/settings" || p == "/api/v1/map" || p == "/api/v1/ui"):
 		return true
 	case scope == "module":
 		return r.Method == "POST" && p == "/api/v1/firmware_message"
@@ -165,6 +165,10 @@ func (a *agent) tokenRoutes(w http.ResponseWriter, r *http.Request, send func(in
 	}
 	if p == "/api/v1/system/video_code" {
 		a.videoCodeRoute(w, r, send)
+		return true
+	}
+	if p == "/api/v1/ui" {
+		a.uiRoute(w, r, send)
 		return true
 	}
 	if p != "/api/v1/system/tokens" && !strings.HasPrefix(p, "/api/v1/system/tokens/") {
@@ -291,6 +295,36 @@ func (a *agent) embedRoute(w http.ResponseWriter, r *http.Request, send func(int
 		}
 		a.cfg.EmbedOrigins = req.Origins
 		send(200, map[string]any{"result": map[string]any{"origins": req.Origins}})
+	default:
+		send(405, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// uiRoute keeps the panel's look on the agent, so every device shows the map the same way: any token reads it,
+// only the main token changes it (POST is not a limited route).
+func (a *agent) uiRoute(w http.ResponseWriter, r *http.Request, send func(int, any)) {
+	switch r.Method {
+	case "GET":
+		a.tokensMu.RLock()
+		size := a.cfg.LabelSize
+		a.tokensMu.RUnlock()
+		send(200, map[string]any{"result": map[string]any{"label_size": size}})
+	case "POST":
+		var req struct {
+			LabelSize *int `json:"label_size"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req) != nil || req.LabelSize == nil || *req.LabelSize != 0 && (*req.LabelSize < 8 || *req.LabelSize > 32) {
+			send(400, map[string]string{"error": "label_size: 0 (automatic) or 8..32"})
+			return
+		}
+		a.tokensMu.Lock()
+		defer a.tokensMu.Unlock()
+		if err := a.saveConfigField("label_size", *req.LabelSize); err != nil {
+			send(500, map[string]string{"error": err.Error()})
+			return
+		}
+		a.cfg.LabelSize = *req.LabelSize
+		send(200, map[string]any{"result": map[string]any{"label_size": *req.LabelSize}})
 	default:
 		send(405, map[string]string{"error": "method not allowed"})
 	}
