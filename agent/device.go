@@ -28,7 +28,8 @@ type stateProp struct {
 }
 
 // IDs as used by ui/app.js. Observed on r2505 4.3.9_2021: charging (3/2) 1 on dock, 2 off dock,
-// 5 returning; station (4/25) 0 idle, 1 mop wash/wetting, 2 drying, 5 seen during post-clean wash.
+// 5 returning; station (4/25, plugin washStation) 0 idle, 1 washing, 2 drying, 3 going to wash, 4 wash paused,
+// 5 adding water, 6 back with dirty water full, 7 mop needs water.
 var stateProps = []stateProp{
 	{"status", 4, 1}, {"error", 2, 2}, {"battery", 3, 1}, {"charging", 3, 2},
 	{"suction", 4, 4}, {"water", 4, 5}, {"station", 4, 25}, {"volume", 7, 1},
@@ -40,6 +41,9 @@ var stateProps = []stateProp{
 	// Station jobs started by 4/4 (app VacuumExtend.startBackflush): robot tank draining
 	// (1 running, 2 done) and station water draining (1 running).
 	{"tank_drain", 4, 60}, {"water_drain", 27, 5},
+	// Station bubble on the map, as the app plugin draws it (renderWashAnim): dust emptying (15/5: 1 running),
+	// hot mop wash (27/15 = 1, or water temperature 28/8 > 0) and dust bag drying (27/18: 1 running).
+	{"dust_status", 15, 5}, {"hot_water", 27, 15}, {"water_temperature", 28, 8}, {"dust_bag_dry", 27, 18},
 }
 
 // deviceCapabilityBits names the 4/83 bits as the app plugin does.
