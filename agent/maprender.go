@@ -49,6 +49,30 @@ func (a *agent) mapPNG() ([]byte, error) {
 		return nil, errors.New("no saved map")
 	}
 	img := image.NewRGBA(image.Rect(0, 0, view.Width*mapScale, view.Height*mapScale))
+	// Floor texture as in the web UI: 2 tiles, 3 planks along y, 4 along x; 1 picks by the room's longer side.
+	box := map[uint8][4]int{}
+	for i, id := range view.Pixels {
+		if id == 0 || id == 255 {
+			continue
+		}
+		x, y := i%view.Width, i/view.Width
+		b, ok := box[id]
+		if !ok {
+			b = [4]int{x, x, y, y}
+		}
+		box[id] = [4]int{min(b[0], x), max(b[1], x), min(b[2], y), max(b[3], y)}
+	}
+	kind := map[uint8]int{}
+	for _, r := range view.Rooms {
+		f, b := r.Floor, box[uint8(r.ID)]
+		if f == 1 {
+			f = 3
+			if b[1]-b[0] > b[3]-b[2] {
+				f = 4
+			}
+		}
+		kind[uint8(r.ID)] = f
+	}
 	for i, id := range view.Pixels {
 		if id == 0 {
 			continue
@@ -60,7 +84,13 @@ func (a *agent) mapPNG() ([]byte, error) {
 		x, y := i%view.Width, view.Height-1-i/view.Width // map rows go up, image rows go down
 		for dy := 0; dy < mapScale; dy++ {
 			for dx := 0; dx < mapScale; dx++ {
-				img.SetRGBA(x*mapScale+dx, y*mapScale+dy, c)
+				X, Y, k := x*mapScale+dx, y*mapScale+dy, kind[id]
+				edge := k == 2 && (X%36 == 0 || Y%36 == 0) || k == 4 && (Y%12 == 0 || (X+(Y/12&1)*24)%48 == 0) || k == 3 && (X%12 == 0 || (Y+(X/12&1)*24)%48 == 0)
+				cc := c
+				if edge && id != 255 {
+					cc = color.RGBA{uint8(int(c.R) * 84 / 100), uint8(int(c.G) * 84 / 100), uint8(int(c.B) * 84 / 100), 255}
+				}
+				img.SetRGBA(X, Y, cc)
 			}
 		}
 	}
@@ -122,6 +152,15 @@ func (a *agent) mapPNG() ([]byte, error) {
 		}
 		disc(img, x, y, 6, obstacleRing)
 		disc(img, x, y, 4, c)
+	}
+	for _, r := range view.Rooms { // room number badge, as the web UI and the app
+		x, y := int((r.X+.5)*mapScale), int((float64(view.Height)-r.Y-.5)*mapScale)-9
+		if x < 8 || y < 8 || x+8 >= img.Rect.Dx() || y+8 >= img.Rect.Dy() {
+			continue // the badge would not fit (a tiny map)
+		}
+		disc(img, x, y, 8, roomPalette[(r.ID-1)%len(roomPalette)])
+		disc(img, x, y, 6, obstacleRing)
+		digits(img, x, y, strconv.Itoa(r.Num))
 	}
 	charger := view.Charger
 	if live.Charger != nil {
@@ -303,4 +342,24 @@ func roomOutline(view mapView, id int) [][2]int {
 		out = append(out, p)
 	}
 	return out
+}
+
+// 3x5 digits, 2x scaled, centred on (cx, cy): enough for room numbers without a font.
+var digitFont = [10][5]uint8{{7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7}, {5, 5, 7, 1, 1}, {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 1, 1}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}}
+
+func digits(img *image.RGBA, cx, cy int, s string) {
+	x0 := cx - (len(s)*8-2)/2
+	for n, ch := range s {
+		for row := 0; row < 5; row++ {
+			for col := 0; col < 3; col++ {
+				if digitFont[ch-'0'][row]>>(2-col)&1 == 1 {
+					for dy := 0; dy < 2; dy++ {
+						for dx := 0; dx < 2; dx++ {
+							img.SetRGBA(x0+n*8+col*2+dx, cy-5+row*2+dy, color.RGBA{255, 255, 255, 255})
+						}
+					}
+				}
+			}
+		}
+	}
 }
