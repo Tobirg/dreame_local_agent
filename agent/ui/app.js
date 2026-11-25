@@ -32,7 +32,9 @@ export function roomCommand(ids,fan,water,repeats=1){
  return {name:'clean_rooms',rooms:ids,repeats,suction:fan,water};
 }
 const command=(name,args={})=>control('/api/v1/command',{name,...args});
-function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
+const SUSPENDED='Чтение приостановлено';
+// A read cut short on purpose (tab hidden, resume, logout) is not an error worth showing.
+function toast(message,error=false){if(error&&message===SUSPENDED)return;clearTimeout(toastTimer);$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
 function isRead(method){return method==='get_properties'||method==='miIO.info'||method==='local.map_view'||method==='local.live_pose'||method==='local.maps'||method.endsWith('_status')||method==='/api/v1/state'||method==='/api/v1/capabilities'||method==='/api/v1/modules'||method==='/api/v1/system/update'||method==='/api/v1/system/firmware'||method==='/api/v1/logs'||method==='/api/v1/pets/photos';}
 function connectionLost(message){$('connection').textContent=rebootingUntil>Date.now()?'Перезагрузка…':'Восстанавливаю связь…';$('connection').classList.add('connection-offline');$('reconnect').hidden=!token;$('reconnect').title=message;}
 async function api(method,params=null){
@@ -46,7 +48,7 @@ async function api(method,params=null){
    const response=await fetch(v1?method:'/rpc',{method:post?'POST':'GET',headers:{...(post?{'Content-Type':'application/json'}:{}),'Authorization':'Bearer '+token,...(requestID?{'X-Dreame-Request-ID':requestID}:{})},body:post?JSON.stringify(v1?params:{method,params}):undefined,credentials:'omit',cache:'no-store',signal:controller.signal});
    const body=await response.json();if(!response.ok){const error=Error(body.error||'Ошибка HTTP '+response.status);error.status=response.status;throw error;}return body.result;
   }catch(e){
-   if(controller.signal.reason==='suspend'||controller.signal.reason==='logout'){const error=Error('Чтение приостановлено');error.suspended=true;throw error;}
+   if(controller.signal.reason==='suspend'||controller.signal.reason==='logout'){const error=Error(SUSPENDED);error.suspended=true;throw error;}
    if(e.status)throw e;
    if(read&&attempt===0&&!document.hidden&&token){await new Promise(resolve=>setTimeout(resolve,150));continue;}
    throw Error(read?'Нет ответа от робота. Подключение будет восстановлено автоматически.':'Связь прервалась. Команда могла выполниться: проверь состояние перед повтором.');
@@ -886,7 +888,9 @@ export function applyCapabilities(caps){
  for(const button of document.querySelectorAll('[data-command]')){const c=caps.commands?.[button.dataset.command];button.hidden=c?.available===false;if(c?.reason)button.title=c.reason;}
  for(const [prop,input,apply] of [['suction','room-fan',null],['volume','volume','save-volume']]){const hide=caps.properties?.[prop]?.readable===false;$(input).closest('label').hidden=hide;if(apply)$(apply).hidden=hide;}
 }
-async function login(){
+let loggingIn=false; // a reload fires pageshow and focus while the first load still runs: no resume then
+async function login(){loggingIn=true;try{await loginNow();}finally{loggingIn=false;}}
+async function loginNow(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)document.querySelector('#sheet-wifi .sheet-body').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
@@ -1344,7 +1348,7 @@ async function rebootRobot(){
 }
 function suspendReads(reason='suspend'){stopEvents();viewEpoch++;refreshing=false;settingsLoading=false;for(const controller of activeReads)controller.abort(reason);}
 function scheduleResume(){clearTimeout(resumeTimer);resumeTimer=setTimeout(async()=>{
- if(document.hidden||!token)return;if(busy){scheduleResume();return;}
+ if(document.hidden||!token||loggingIn)return;if(busy){scheduleResume();return;}
  suspendReads();
  if($('dashboard').hidden){try{await login();}catch(e){if(!e.suspended)connectionLost(e.message);}return;}
  await refresh();streamEvents();await refreshMap();if(document.querySelector('[id$=settings-details][open]'))await refreshSettings();
