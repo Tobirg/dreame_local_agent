@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"image/png"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -102,9 +103,9 @@ func TestMapPNGOptionsAndOverlays(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 30, 30))
 	view := mapView{GridSize: 50, Height: 10, Origin: []int{0, 0}, NoGo: [][]int{{100, 100, 500, 500}}, Furniture: []furnitureItem{{X: 1000, Y: 1000, Width: 500, Height: 500}}}
 	px := func(p []int) (int, int) { return p[0] * mapScale / 50, p[1] * mapScale / 50 }
-	drawOverlays(img, view, px, func(string) bool { return true })
+	drawOverlays(img, view, px, func(string) bool { return true }, mapScale)
 	none := image.NewRGBA(img.Rect)
-	drawOverlays(none, view, px, func(g string) bool { return g == "thresholds" })
+	drawOverlays(none, view, px, func(g string) bool { return g == "thresholds" }, mapScale)
 	if none.RGBAAt(12, 12).R != 0 {
 		t.Fatal("a group that is not asked for was drawn")
 	}
@@ -121,5 +122,26 @@ func TestOverlayPad(t *testing.T) {
 	v.Furniture = []furnitureItem{{X: 500, Y: 500, Width: 1000, Height: 100}} // half of it hangs over the right edge
 	if v.overlayPad() < 10 {
 		t.Fatal("furniture past the edge must grow the picture", v.overlayPad())
+	}
+}
+
+func TestMapPNGResolutionFactor(t *testing.T) {
+	a := testAgent(t)
+	raw, _ := decodeSavedFrame(syntheticFrame(t, 2))
+	raw = append(raw[:36], []byte(`{"origin":[-100,-200]}`)...)
+	maps, _ := json.Marshal(map[string]any{"curr_id": 2, "mapstr": []any{map[string]any{"map": encodeTestFrame(t, raw)}}})
+	writeFile(t, a, "/data/log/map_info.bin", string(maps))
+	for f, side := range map[int]int{1: 9, 2: 18, 4: 36} {
+		b, err := a.mapPNG(mapOptsFromQuery(url.Values{"base": {"1"}, "f": {strconv.Itoa(f)}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, _ := png.Decode(bytes.NewReader(b))
+		if img.Bounds().Dx() != side {
+			t.Fatal("factor", f, img.Bounds())
+		}
+	}
+	if mapOptsFromQuery(url.Values{"f": {"99"}}).f != 4 {
+		t.Fatal("factor must be capped")
 	}
 }

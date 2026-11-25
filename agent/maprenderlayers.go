@@ -9,7 +9,8 @@ import (
 // Saved overlays of the map picture, same colours as ui/app.js: thresholds, virtual walls and zones,
 // carpets, furniture. px turns robot millimetres into image pixels.
 // want says whether a group (restrictions, thresholds, furniture) is drawn.
-func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int), want func(string) bool) {
+func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int), want func(string) bool, ms int) {
+	f := ms / mapScale
 	rgb := func(r, g, b uint8) color.RGBA { return color.RGBA{r, g, b, 255} }
 	// Carpets the robot found: the app's texture, a checkerboard of darker half cells.
 	carpets := view.Carpets
@@ -22,7 +23,7 @@ func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int), want
 			x, y := px(c.Points[i : i+2])
 			poly = append(poly, [2]float64{float64(x), float64(y)})
 		}
-		fillWhere(img, poly, func(x, y int) { checker(img, x, y, 38) })
+		fillWhere(img, poly, func(x, y int) { checker(img, x, y, 38, f) })
 	}
 	rects := []struct {
 		list         [][]int
@@ -50,14 +51,14 @@ func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int), want
 			for y := y0; y <= y1; y++ {
 				for x := x0; x <= x1; x++ {
 					if k.mark {
-						checker(img, x, y, 76)
+						checker(img, x, y, 76, f)
 					} else {
 						blend(img, x, y, k.edge, k.alpha*255/100)
 					}
 				}
 			}
 			for _, e := range [][4]int{{x0, y0, x1, y0}, {x1, y0, x1, y1}, {x1, y1, x0, y1}, {x0, y1, x0, y0}} {
-				thick(img, e[0], e[1], e[2], e[3], k.edge, k.dashed)
+				thick(img, e[0], e[1], e[2], e[3], k.edge, k.dashed, f)
 			}
 		}
 	}
@@ -65,7 +66,7 @@ func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int), want
 		if len(w) == 4 && want("restrictions") {
 			x0, y0 := px(w[:2])
 			x1, y1 := px(w[2:4])
-			thick(img, x0, y0, x1, y1, rgb(0xff, 0x4d, 0x4d), false)
+			thick(img, x0, y0, x1, y1, rgb(0xff, 0x4d, 0x4d), false, f)
 		}
 	}
 	for kind, list := range map[string][][]int{"p": view.Passable, "i": view.Impassable} {
@@ -80,21 +81,21 @@ func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int), want
 			if len(t) == 4 {
 				x0, y0 := px(t[:2])
 				x1, y1 := px(t[2:4])
-				thick(img, x0, y0, x1, y1, c, false)
+				thick(img, x0, y0, x1, y1, c, false, f)
 			}
 		}
 	}
-	for _, f := range view.Furniture {
+	for _, fu := range view.Furniture {
 		if !want("furniture") {
 			break
 		}
-		cx, cy := px([]int{f.X, f.Y})
-		w, h := float64(f.Width*mapScale)/float64(view.GridSize), float64(f.Height*mapScale)/float64(view.GridSize)
-		rot := f.Rotation * math.Pi / 180
+		cx, cy := px([]int{fu.X, fu.Y})
+		w, h := float64(fu.Width*ms)/float64(view.GridSize), float64(fu.Height*ms)/float64(view.GridSize)
+		rot := fu.Rotation * math.Pi / 180
 		sin, cos := math.Sincos(rot)
 		reach := int(math.Hypot(w, h)/2) + 2
 		edge := rgb(0xc5, 0x8b, 0x2b)
-		if f.Type < 1 || f.Type > 25 {
+		if fu.Type < 1 || fu.Type > 25 {
 			edge = rgb(0x88, 0x88, 0x88) // a type the app does not name
 		}
 		for y := cy - reach; y <= cy+reach; y++ {
@@ -104,7 +105,7 @@ func drawOverlays(img *image.RGBA, view mapView, px func([]int) (int, int), want
 				if math.Abs(lx) > w/2 || math.Abs(ly) > h/2 {
 					continue
 				}
-				if math.Abs(lx) > w/2-1.5 || math.Abs(ly) > h/2-1.5 {
+				if math.Abs(lx) > w/2-1.5*float64(f) || math.Abs(ly) > h/2-1.5*float64(f) {
 					blend(img, x, y, edge, 255)
 				} else {
 					blend(img, x, y, edge, 64)
@@ -126,22 +127,24 @@ func blend(img *image.RGBA, x, y int, c color.RGBA, alpha int) {
 }
 
 // checker darkens half of the 2x2-pixel squares, the app's carpet texture.
-func checker(img *image.RGBA, x, y, alpha int) {
-	if (x/2+y/2)&1 == 1 {
+func checker(img *image.RGBA, x, y, alpha, f int) {
+	if (x/(2*f)+y/(2*f))&1 == 1 {
 		blend(img, x, y, color.RGBA{0, 0, 0, 255}, alpha)
 	}
 }
 
 // thick is a 2-pixel line, optionally dashed (6 on, 4 off).
-func thick(img *image.RGBA, x0, y0, x1, y1 int, c color.RGBA, dashed bool) {
+func thick(img *image.RGBA, x0, y0, x1, y1 int, c color.RGBA, dashed bool, f int) {
 	n := 0
 	stroke(x0, y0, x1, y1, func(x, y int) {
 		n++
-		if dashed && n%10 >= 6 {
+		if dashed && n%(10*f) >= 6*f {
 			return
 		}
-		for _, d := range [][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
-			blend(img, x+d[0], y+d[1], c, 255)
+		for dy := 0; dy < 2*f; dy++ {
+			for dx := 0; dx < 2*f; dx++ {
+				blend(img, x+dx, y+dy, c, 255)
+			}
 		}
 	})
 }
@@ -176,8 +179,8 @@ func fillWhere(img *image.RGBA, poly [][2]float64, paint func(x, y int)) {
 	}
 }
 
-func (v mapView) rawPx(p []int) (int, int) {
-	return (p[0] - v.Origin[0]) * mapScale / v.GridSize, (v.Height*v.GridSize - (p[1] - v.Origin[1])) * mapScale / v.GridSize
+func (v mapView) rawPx(p []int, ms int) (int, int) {
+	return (p[0] - v.Origin[0]) * ms / v.GridSize, (v.Height*v.GridSize - (p[1] - v.Origin[1])) * ms / v.GridSize
 }
 
 // overlayPad is how far the saved overlays (zones, walls, thresholds, carpets, furniture, obstacles,
@@ -189,7 +192,7 @@ func (v mapView) overlayPad() int {
 	note := func(x, y, r int) { over = max(over, r-x, x+r-w, r-y, y+r-h) }
 	pt := func(p []int) {
 		if len(p) >= 2 {
-			x, y := v.rawPx(p)
+			x, y := v.rawPx(p, mapScale)
 			note(x, y, 0)
 		}
 	}
@@ -207,7 +210,7 @@ func (v mapView) overlayPad() int {
 		}
 	}
 	for _, f := range v.Furniture {
-		x, y := v.rawPx([]int{f.X, f.Y})
+		x, y := v.rawPx([]int{f.X, f.Y}, mapScale)
 		note(x, y, int(math.Hypot(float64(f.Width*mapScale), float64(f.Height*mapScale))/float64(v.GridSize)/2)+2)
 	}
 	for _, o := range v.Obstacles {

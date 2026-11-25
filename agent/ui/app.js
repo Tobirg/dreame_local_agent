@@ -287,7 +287,7 @@ function followLive(active){
 }
 // Mopped floor, tinted deeper for each pass of the 300 mm mop pads; same rules as mopPasses in maprender.go.
 function drawMopped(path,px){
- const w=canvas.width,h=canvas.height,r=Math.round(150*3/view.grid_size),count=new Uint8Array(w*h),last=new Float64Array(w*h);let travelled=0;
+ const w=view.width*3,h=view.height*3,r=Math.round(150*3/view.grid_size),count=new Uint8Array(w*h),last=new Float64Array(w*h);let travelled=0;
  for(let i=1;i<path.length;i++){
   travelled+=Math.hypot(path[i][0]-path[i-1][0],path[i][1]-path[i-1][1]);if(path[i][2]!==1)continue;
   const [x0,y0]=px(path[i-1][0],path[i-1][1]),[x1,y1]=px(path[i][0],path[i][1]),n=Math.max(Math.abs(x1-x0),Math.abs(y1-y0),1);
@@ -348,8 +348,8 @@ function placeMarker(pos,r){
  markerArgs=[pos,r];
  const marker=$('map-marker'),s=robotState||{},mode=!pos?'':s.activity==='cleaning'?'pulse':s.activity==='returning'?'pulse':s.station===2?'heat':s.station===1?'wash':s.charging===1&&s.battery<100?'charge':s.activity==='docked'?'sleep':'';
  marker.hidden=!mode;if(!mode)return;
- marker.className='map-marker '+mode;marker.style.left=(pos[0]/canvas.width*100)+'%';marker.style.top=(pos[1]/canvas.height*100)+'%';
- marker.style.setProperty('--r',(r*canvas.clientWidth/canvas.width).toFixed(1)+'px'); // robot radius in page pixels
+ marker.className='map-marker '+mode;marker.style.left=(pos[0]/(view.width*3)*100)+'%';marker.style.top=(pos[1]/(view.height*3)*100)+'%';
+ marker.style.setProperty('--r',(r*canvas.clientWidth/(view.width*3)).toFixed(1)+'px'); // robot radius in page pixels
 }
 // ---- Compatibility report: capabilities without the robot's id, saved as a file to share.
 $('compat-report').onclick=async()=>{
@@ -524,22 +524,24 @@ const draftOf={restrictions:()=>restrictDraft,thresholds:()=>thresholdDraft?.lin
 const agentDraws=g=>baseCache.layers?.has(g)&&!draftOf[g]?.();
 function baseLayer(){
  const floors=view.rooms.map(r=>r.id+':'+floorOf(r)).join(','),sel=[...selected].join(','),layers=['furniture','restrictions','thresholds'].filter(g=>!draftOf[g]?.()),
-  key=view.revision+'|'+sel+'|'+floors+'|'+layers;
+  key=view.revision+'|'+sel+'|'+floors+'|'+layers+'|'+res;
  if(baseCache.key!==key&&baseCache.pending!==key){
   baseCache.pending=key;
-  fetch('/api/v1/map.png?base=1&selected='+sel+'&floors='+floors+'&layers='+layers,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
+  fetch('/api/v1/map.png?base=1&selected='+sel+'&floors='+floors+'&layers='+layers+'&f='+Math.max(res,1),{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
    .then(r=>r.ok?r.blob():Promise.reject(Error('map.png '+r.status))).then(createImageBitmap)
    .then(bitmap=>{if(baseCache.pending===key){baseCache={key,canvas:bitmap,pending:'',layers:new Set(layers)};draw();}},()=>{if(baseCache.pending===key)baseCache.pending='';});
  }
  return baseCache.canvas;
 }
 // The whole map fits the window at 100%; the buttons zoom from there and only a zoomed map scrolls inside its frame.
-let zoom=1;
+let zoom=1,res=0; // res: canvas pixels per 3 drawing units; the canvas gets sharper while zoomed in
 function layoutMap(){
  const stage=document.querySelector('.map-stage');stage.style.width='';
  const top=stage.getBoundingClientRect().top,avail=Math.max(260,innerHeight-Math.max(0,Math.min(top,innerHeight*.3))-24);
  const side=Math.round(Math.min(stage.clientWidth,avail)),fit=Math.min(side,side*canvas.width/canvas.height); // square frame, the same at every zoom
  stage.style.width=side+'px';stage.style.height=side+'px';stage.querySelector('.map-wrap').style.width=Math.round(fit*zoom)+'px';
+ if(view&&!view.empty){const want=Math.max(1,Math.min(4,Math.floor(4096/(view.width*3)),Math.ceil(fit*zoom*(devicePixelRatio||1)/(view.width*3)))),mine=res;
+  if(want!==mine){res=want;canvas.width=view.width*3*res;canvas.height=view.height*3*res;if(mine)draw();}}
  $('zoom-fit').textContent=Math.round(zoom*100)+'%';if(markerArgs)placeMarker(...markerArgs);
 }
 const setZoom=z=>{zoom=Math.min(6,Math.max(.4,z));layoutMap();};
@@ -580,8 +582,8 @@ mapStage.addEventListener('click',e=>{if(panMoved){e.stopPropagation();e.prevent
 function draw(){
  layoutMap();
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
- ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;
- const scale=3;{const base=baseLayer();if(base)ctx.drawImage(base,0,0,canvas.width,canvas.height);}
+ ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;ctx.setTransform(res,0,0,res,0,0);
+ const scale=3;{const base=baseLayer();if(base)ctx.drawImage(base,0,0,view.width*3,view.height*3);}
  // Room labels like the app: type icon and name (the number badge is in the agent's picture).
  ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
  for(const room of view.rooms){
@@ -604,7 +606,7 @@ async function refreshMap(){
   const bytes=atob(next.pixels);if(bytes.length!==next.width*next.height)throw Error('Некорректный размер карты');
   next.grid=Uint8Array.from(bytes,c=>c.charCodeAt(0));
   if(view?.revision!==next.revision){selected=view?.map_id===next.map_id?new Set([...selected].filter(id=>next.rooms.some(r=>r.id===id))):new Set();points=[];invalidateEdit();thresholdDraft=null;thresholdDrawing=false;zone=[];zoneDrawing=false;restrictDraft=null;restrictDrawing=false;}
-  view=next;canvas.width=view.width*3;canvas.height=view.height*3;
+  view=next;res=0;
   $('map-info').textContent='Карта '+view.map_id+' · комнат: '+view.rooms.length+' · '+view.width+' × '+view.height;
   renderRoomButtons();renderThresholdChoices();renderRestrictions();renderCarpetTypes();renderRoomSettings();renderRoomTypes();renderObstacles();draw();disableControls(busy);
  }catch(e){if(!e.suspended&&epoch===viewEpoch){$('map-info').textContent=e.message;connectionLost(e.message);}}

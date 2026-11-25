@@ -50,6 +50,7 @@ type mapOpts struct {
 	base     bool
 	selected map[int]bool
 	floors   map[int]int
+	f        int             // base only: resolution factor, the panel asks for more while zoomed in
 	layers   map[string]bool // base only: saved overlays the agent draws too (the panel draws the ones it has drafts of)
 }
 
@@ -62,7 +63,10 @@ var baseCache struct {
 
 // mapOptsFromQuery reads ?base=1&selected=1,3&floors=1:2,3:0.
 func mapOptsFromQuery(q url.Values) mapOpts {
-	o := mapOpts{base: q.Get("base") == "1", selected: map[int]bool{}, floors: map[int]int{}, layers: map[string]bool{}}
+	o := mapOpts{f: 1, base: q.Get("base") == "1", selected: map[int]bool{}, floors: map[int]int{}, layers: map[string]bool{}}
+	if f, err := strconv.Atoi(q.Get("f")); err == nil {
+		o.f = max(1, min(f, 4))
+	}
 	for _, v := range strings.Split(q.Get("layers"), ",") {
 		o.layers[v] = true
 	}
@@ -92,7 +96,9 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 	if view.Empty || len(view.Origin) != 2 {
 		return nil, errors.New("no saved map")
 	}
-	key := fmt.Sprintf("%s|%v|%v|%v", view.Revision, o.selected, o.floors, o.layers)
+	f := max(o.f, 1)
+	ms := mapScale * f
+	key := fmt.Sprintf("%s|%v|%v|%v|%d", view.Revision, o.selected, o.floors, o.layers, f)
 	if o.base {
 		baseCache.Lock()
 		defer baseCache.Unlock()
@@ -104,7 +110,7 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 	if !o.base {
 		pad = view.overlayPad()
 	}
-	img := image.NewRGBA(image.Rect(0, 0, view.Width*mapScale+2*pad, view.Height*mapScale+2*pad))
+	img := image.NewRGBA(image.Rect(0, 0, view.Width*ms+2*pad, view.Height*ms+2*pad))
 	// Floor texture as in the web UI: 2 tiles, 3 planks along y, 4 along x; 1 picks by the room's longer side.
 	box := map[uint8][4]int{}
 	for i, id := range view.Pixels {
@@ -144,10 +150,11 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 			}
 		}
 		x, y := i%view.Width, view.Height-1-i/view.Width // map rows go up, image rows go down
-		for dy := 0; dy < mapScale; dy++ {
-			for dx := 0; dx < mapScale; dx++ {
-				X, Y, k := x*mapScale+dx, y*mapScale+dy, kind[id]
-				edge := k == 2 && (X%36 == 0 || Y%36 == 0) || k == 4 && (Y%12 == 0 || (X+(Y/12&1)*24)%48 == 0) || k == 3 && (X%12 == 0 || (Y+(X/12&1)*24)%48 == 0)
+		for dy := 0; dy < ms; dy++ {
+			for dx := 0; dx < ms; dx++ {
+				X, Y, k := x*ms+dx, y*ms+dy, kind[id]
+				px3, py3 := X/f, Y/f // the pattern is laid out for 3 pixels per cell and stretched
+				edge := k == 2 && (px3%36 == 0 || py3%36 == 0) || k == 4 && (py3%12 == 0 || (px3+(py3/12&1)*24)%48 == 0) || k == 3 && (px3%12 == 0 || (py3+(px3/12&1)*24)%48 == 0)
 				cc := c
 				if edge && id != 255 {
 					cc = scale(c, 84)
@@ -158,23 +165,23 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 	}
 	// Robot millimetres to image pixels.
 	px := func(p []int) (int, int) {
-		x, y := view.rawPx(p)
+		x, y := view.rawPx(p, ms)
 		return x + pad, y + pad
 	}
 	for _, r := range view.Rooms { // room number badge, as the web UI and the app
-		x, y := int((r.X+.5)*mapScale)+pad, int((float64(view.Height)-r.Y-.5)*mapScale)-9+pad
-		if x < 8 || y < 8 || x+8 >= img.Rect.Dx() || y+8 >= img.Rect.Dy() {
+		x, y := int((r.X+.5)*float64(ms))+pad, int((float64(view.Height)-r.Y-.5)*float64(ms))-9*f+pad
+		if x < 8*f || y < 8*f || x+8*f >= img.Rect.Dx() || y+8*f >= img.Rect.Dy() {
 			continue // the badge would not fit (a tiny map)
 		}
 		ring := scale(roomPalette[(r.ID-1)%len(roomPalette)], 100)
 		if len(o.selected) > 0 && !o.selected[r.ID] {
 			ring = scale(ring, 55)
 		}
-		disc(img, x, y, 8, ring)
-		disc(img, x, y, 6, obstacleRing)
-		digits(img, x, y, strconv.Itoa(r.Num))
+		disc(img, x, y, 8*f, ring)
+		disc(img, x, y, 6*f, obstacleRing)
+		digits(img, x, y, strconv.Itoa(r.Num), f)
 	}
-	drawOverlays(img, view, px, func(group string) bool { return !o.base || o.layers[group] })
+	drawOverlays(img, view, px, func(group string) bool { return !o.base || o.layers[group] }, ms)
 	if o.base {
 		baseCache.png, err = encodePNG(img)
 		baseCache.key = key
@@ -199,7 +206,7 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 			}
 		}
 	}
-	passes := mopPasses(live.Path, img.Rect.Dx(), img.Rect.Dy(), mopWidth/2*mapScale/view.GridSize, px)
+	passes := mopPasses(live.Path, img.Rect.Dx(), img.Rect.Dy(), mopWidth/2*ms/view.GridSize, px)
 	for i, n := range passes {
 		if n == 0 || img.Pix[i*4+3] == 0 { // only the floor gets wet
 			continue
@@ -236,7 +243,7 @@ func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 		disc(img, x, y, 4, c)
 	}
 	// Sizes as in the app: the robot is 320 mm wide, the station 1.2 times the robot.
-	r := math.Max(6, float64(160*mapScale)/float64(view.GridSize))
+	r := math.Max(6, float64(160*ms)/float64(view.GridSize))
 	charger := view.Charger
 	if live.Charger != nil {
 		charger = live.Charger
@@ -435,15 +442,15 @@ func roomOutline(view mapView, id int) [][2]int {
 // 3x5 digits, 2x scaled, centred on (cx, cy): enough for room numbers without a font.
 var digitFont = [10][5]uint8{{7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7}, {5, 5, 7, 1, 1}, {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 1, 1}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}}
 
-func digits(img *image.RGBA, cx, cy int, s string) {
-	x0 := cx - (len(s)*8-2)/2
+func digits(img *image.RGBA, cx, cy int, s string, f int) {
+	x0 := cx - (len(s)*8-2)*f/2
 	for n, ch := range s {
 		for row := 0; row < 5; row++ {
 			for col := 0; col < 3; col++ {
 				if digitFont[ch-'0'][row]>>(2-col)&1 == 1 {
-					for dy := 0; dy < 2; dy++ {
-						for dx := 0; dx < 2; dx++ {
-							img.SetRGBA(x0+n*8+col*2+dx, cy-5+row*2+dy, color.RGBA{255, 255, 255, 255})
+					for dy := 0; dy < 2*f; dy++ {
+						for dx := 0; dx < 2*f; dx++ {
+							img.SetRGBA(x0+(n*8+col*2)*f+dx, cy+(-5+row*2)*f+dy, color.RGBA{255, 255, 255, 255})
 						}
 					}
 				}
