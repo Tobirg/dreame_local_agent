@@ -123,6 +123,8 @@ body[data-activity=cleaning] .dock .run-only:not([hidden]),body[data-activity=pa
 /* ---- Sheets: rise from the bottom on a phone, slide in at the right on a wide screen. No backdrop: the map stays usable. */
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;flex-direction:column;max-height:78vh;max-height:78dvh;background:var(--surface);border-radius:20px 20px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.22);animation:rise .18s ease-out}
 .sheet.compact{max-height:48vh;max-height:48dvh}
+/* While a shape is edited on the map, a bottom sheet leaves most of the screen to the map. */
+@media (max-width:899px){body[data-map-editing] .sheet{max-height:40vh;max-height:40dvh}}
 .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 8px 8px 18px;border-bottom:1px solid var(--line)}
 .sheet-head h2{margin:0;font-size:20px}
 .sheet-head::before{content:"";position:absolute;left:50%;top:6px;width:36px;height:4px;margin-left:-18px;border-radius:2px;background:var(--line)}
@@ -315,4 +317,3 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 #furniture-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 11V8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3%22/%3E%3Cpath d=%22M3 12a2 2 0 0 1 4 0v2h10v-2a2 2 0 0 1 4 0v5H3z%22/%3E%3Cpath d=%22M6 17v2M18 17v2%22/%3E%3C/svg%3E")}
 #map-backups-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4%22/%3E%3Cpath d=%22M12 8v4l3 2%22/%3E%3C/svg%3E")}
 /* Embedded view (?embed=1): the app screen for a dashboard; admin entries (access, updates, Wi-Fi, logs, modules, reboot) stay out. */
-.embed .admin{display:none!important}
