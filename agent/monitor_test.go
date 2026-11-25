@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // monitorAgent answers 10001/4 1102 with verify code `answer` and logs every msg_cvt call.
@@ -20,14 +21,20 @@ func monitorAgent(t *testing.T, answer int) (*agent, func() []string) {
 	a := testAgent(t)
 	a.cfg.VideoCodeSHA256 = strings.Repeat("ab", 32)
 	logPath := filepath.Join(a.root, "calls.log")
+	avaLog := a.path("/tmp/log/log_0")
+	if err := os.MkdirAll(filepath.Dir(avaLog), 0755); err != nil {
+		t.Fatal(err)
+	}
 	script := `#!/usr/bin/env python3
-import json,sys
+import json,os,sys
 r=json.loads(sys.argv[1][len('msg_cvt'):])
 p=r['params']
 open(` + "'" + logPath + "'" + `,'a').write(json.dumps(p)+'\n')
 res=p
 if isinstance(p,dict) and p.get('siid')==10001 and p.get('aiid')==4:
     res={'siid':10001,'aiid':4,'code':0,'out':[{'piid':1102,'value':'{"code":` + string(rune('0'+answer)) + `, "fail":0}'}]}
+if '\\"operation\\":\\"start\\"' in json.dumps(p) and not os.path.exists(` + "'" + avaLog + ".off'" + `):
+    open(` + "'" + avaLog + "'" + `,'a').write('video state type=19, value=1\n')
 print(json.dumps({'id':r['id'],'result':res}))
 `
 	if err := os.WriteFile(a.avacmd, []byte(script), 0700); err != nil {
@@ -58,6 +65,28 @@ func TestRemoteMoveOpensMonitoringFirst(t *testing.T) {
 	if len(got) != 4 || !strings.Contains(got[0], `\"oldcode\":\"abab`) || !strings.Contains(got[0], `"piid": 1102`) ||
 		!strings.Contains(got[1], `\"operType\":\"monitor\"`) || !strings.Contains(got[1], `\"operation\":\"start\"`) ||
 		!strings.Contains(got[2], `"piid": 15`) || !strings.Contains(got[3], `"piid": 15`) || !strings.Contains(got[3], `timestamp`) {
+		t.Fatal(strings.Join(got, "\n"))
+	}
+}
+
+func TestRemoteMoveRefusedWhenMonitoringUnconfirmed(t *testing.T) {
+	a, calls := monitorAgent(t, 2)
+	if err := os.WriteFile(a.path("/tmp/log/log_0.off"), nil, 0600); err != nil { // the firmware never confirms
+		t.Fatal(err)
+	}
+	defer func(d time.Duration) { monitorConfirm = d }(monitorConfirm)
+	monitorConfirm = 300 * time.Millisecond
+	_, err := a.call(context.Background(), request{Method: "local.command", Params: json.RawMessage(`{"name":"remote_move","velocity":200,"rotation":0}`)})
+	if err == nil || !strings.Contains(err.Error(), "motor stays off") {
+		t.Fatal(err)
+	}
+	got := calls()
+	for _, c := range got {
+		if strings.Contains(c, `"piid": 15`) {
+			t.Fatal("drove without monitoring:\n" + strings.Join(got, "\n"))
+		}
+	}
+	if !strings.Contains(got[len(got)-1], `\"operation\":\"end\"`) || monitor.open {
 		t.Fatal(strings.Join(got, "\n"))
 	}
 }
