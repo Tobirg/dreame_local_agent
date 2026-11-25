@@ -21,6 +21,7 @@ import (
 
 type mapRoom struct {
 	ID   int     `json:"id"`
+	Num  int     `json:"num"` // consecutive 1..n by id, as the app numbers rooms; ID stays the robot's segment id
 	Name string  `json:"name"`
 	X    float64 `json:"x"`
 	Y    float64 `json:"y"`
@@ -245,6 +246,13 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		view.Rooms = append(view.Rooms, mapRoom{ID: id, Name: roomName(id, info.Type, info.Index, info.Name), Type: info.Type, kind: info.Type, index: info.Index, rawName: info.Name, material: info.Material, Floor: floorKind(info.Material, info.Direction), X: float64(c.X) / float64(c.N), Y: float64(c.Y) / float64(c.N)})
 	}
 	sort.Slice(view.Rooms, func(i, j int) bool { return view.Rooms[i].ID < view.Rooms[j].ID })
+	for i := range view.Rooms {
+		r := &view.Rooms[i]
+		r.Num = i + 1
+		if r.Name == "Комната "+strconv.Itoa(r.ID) {
+			r.Name = "Комната " + strconv.Itoa(r.Num)
+		}
+	}
 	sum := sha256.Sum256(raw)
 	view.Revision = hex.EncodeToString(sum[:])
 	return view, nil

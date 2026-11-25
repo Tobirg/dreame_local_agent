@@ -508,7 +508,7 @@ function selectRoom(id){
 }
 function renderRoomButtons(){
  $('rooms').replaceChildren();$('room-selection').textContent=selected.size?'Выбрано: '+(view?.rooms||[]).filter(r=>selected.has(r.id)).map(r=>r.name).join(', '):'Выбери комнаты на карте или кнопками ниже.';
- for(const room of view?.rooms||[]){const b=document.createElement('button');b.textContent=room.name+' · '+room.id;b.style.setProperty('--room',palette[(room.id-1)%palette.length]);b.classList.toggle('selected',selected.has(room.id));b.setAttribute('aria-pressed',String(selected.has(room.id)));b.onclick=()=>selectRoom(room.id);$('rooms').append(b);}
+ for(const room of view?.rooms||[]){const b=document.createElement('button');b.textContent=room.name+' · '+room.num;b.style.setProperty('--room',palette[(room.id-1)%palette.length]);b.classList.toggle('selected',selected.has(room.id));b.setAttribute('aria-pressed',String(selected.has(room.id)));b.onclick=()=>selectRoom(room.id);$('rooms').append(b);}
 }
 // Rooms with their floor pattern at canvas size, rebuilt only when the map, the selection or a floor draft changes.
 // Pattern sizes in map cells as the app's buildFloorMap: tiles 12, planks 4 × 16 laid in a half-board offset.
@@ -553,7 +553,7 @@ function draw(){
  for(const room of view.rooms){
   const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale,color=palette[(room.id-1)%palette.length],dim=selected.size&&!selected.has(room.id);
   ctx.globalAlpha=dim?.55:1;ctx.fillStyle='#17232d';ctx.beginPath();ctx.arc(x,y-9,8,0,Math.PI*2);ctx.fill();ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
-  ctx.font='bold 10px system-ui';ctx.fillStyle='#fff';ctx.fillText(String(room.id),x,y-8.5);
+  ctx.font='bold 10px system-ui';ctx.fillStyle='#fff';ctx.fillText(String(room.num),x,y-8.5);
   ctx.font='600 11px system-ui';const label=(roomIcons[room.type]?roomIcons[room.type]+' ':'')+room.name;ctx.lineWidth=3;ctx.strokeStyle='rgba(23,35,45,.8)';ctx.strokeText(label,x,y+8);ctx.fillStyle='#fff';ctx.fillText(label,x,y+8);
  }
  ctx.globalAlpha=1;
