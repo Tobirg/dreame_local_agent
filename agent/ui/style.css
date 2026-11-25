@@ -97,8 +97,8 @@ canvas{display:block;width:100%;height:auto;touch-action:none}
 .segmented{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;border-radius:12px;background:var(--paper)}
 .segmented button{border:0;background:transparent;padding:9px 6px;color:var(--muted);border-radius:9px;font-size:15px}
 .segmented button[aria-selected=true]{background:var(--card);color:var(--ink);font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.12)}
-.mode-room,.mode-zone{display:none;padding:8px 2px 0}
-.dock[data-mode=room] .mode-room,.dock[data-mode=zone] .mode-zone{display:block}
+.mode-room{display:none;padding:8px 2px 0}
+.dock[data-mode=room] .mode-room{display:block}
 .room-list{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:thin}
 .room-list button{flex:none;display:inline-flex;align-items:center;gap:8px;padding:7px 12px 7px 9px;border-radius:999px;font-size:13px}
 .room-list button::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--room,var(--line))}
@@ -332,3 +332,23 @@ footer{color:var(--muted);text-align:center;font-size:12px;padding:18px}
 #furniture-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 11V8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3%22/%3E%3Cpath d=%22M3 12a2 2 0 0 1 4 0v2h10v-2a2 2 0 0 1 4 0v5H3z%22/%3E%3Cpath d=%22M6 17v2M18 17v2%22/%3E%3C/svg%3E")}
 #map-backups-details{--ico:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22black%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4%22/%3E%3Cpath d=%22M12 8v4l3 2%22/%3E%3C/svg%3E")}
 /* Embedded view (?embed=1): the app screen for a dashboard; admin entries (access, updates, Wi-Fi, logs, modules, reboot) stay out. */
+/* Zone «Добавить» and «Циклы» on the map's right side, as in the app; «Циклы» in the room and zone modes. */
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.map-side{position:absolute;right:8px;bottom:60px;display:flex;flex-direction:column;gap:8px;align-items:center}
+.side-btn{display:none;flex-direction:column;align-items:center;gap:4px;border:0;background:none;padding:0;font-size:12px;color:var(--ink)}
+.side-btn .tool b{font-size:22px;font-weight:500}
+body[data-mode=zone] .add-zone,body[data-mode=zone] .cycles,body[data-mode=room] .cycles{display:flex}
+/* A map edit tool takes the bottom bar in place of the cleaning buttons; the map's own buttons step aside. */
+body[data-edit] :is(.map-tools,.map-side,.tune){display:none}
+.edit-bar{display:none}
+.dock[data-edit] .edit-bar{display:block}
+.dock[data-edit]>:not(.edit-bar){display:none!important}
+.dock[data-edit=split-details]>.mode-room{display:block!important}
+.edit-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 2px 6px}
+#edit-title{font-family:var(--display);font-stretch:condensed;font-size:18px}
+#edit-back,#edit-done{font-size:24px}
+#edit-done:disabled{opacity:.35}
+.edit-body{max-height:38vh;max-height:38dvh;overflow:auto;padding:0 4px}
+.edit-body>p.muted.small:not([role]),.edit-body :is(#save-restrict,#cancel-restrict,#save-threshold,#cancel-threshold,#save-furniture,#cancel-furniture,#apply-map-edit){display:none}
+.add-row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:4px 0 8px}
+.add-row button{padding:12px 6px;border-radius:12px;background:var(--paper);border-color:transparent;font-size:13px;font-weight:600}

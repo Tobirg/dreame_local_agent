@@ -17,7 +17,7 @@ let token=sessionStorage.getItem('dreame-token')||(embed?'':localStorage.getItem
 let timer=null,busy=false,refreshing=false,view=null,selected=new Set(),points=[],pending=null,toastTimer=null,fanDirty=false,volumeDirty=false;
 let viewEpoch=0,resumeTimer=null,roomOptionsDirty=false,thresholdDrawing=false,thresholdDraft=null,settingsLoading=false,settingsSnapshot=new Map(),settingsRows=new Map(),rebootingUntil=0;
 const activeReads=new Set(),settingsDirty=new Set();
-let dndDirty=false,careShown='',restrictDraft=null,restrictSel=null,zones=[],zoneSel=-1,furnitureDraft=null,patrolSel=-1;
+let dndDirty=false,careShown='',restrictDraft=null,restrictSel=null,zones=[],zoneSel=-1,furnitureDraft=null,patrolSel=-1,editTool=null; // editTool: the map edit block shown in the bottom bar
 const canvas=$('map'),ctx=canvas.getContext('2d');
 
 export function pixelToRobot(v,x,y){
@@ -77,7 +77,7 @@ function disableControls(disabled){
  document.querySelectorAll('[data-command],#stage-update,#apply-update,#rollback-update,#stage-module,#install-module,#save-fan,#save-volume,#save-wifi,#send-rpc,.setting-row input,.setting-row select,.setting-apply').forEach(b=>b.disabled=disabled);
  $('clean-rooms').disabled=disabled||selected.size===0;
  $('clean-zone').disabled=disabled||!zones.length;
- $('cancel-zone').disabled=!zones.length;$('draw-zone').disabled=disabled||zones.length>=5;
+ $('draw-zone').disabled=disabled||zones.length>=5;
  $('save-furniture').disabled=disabled||!furnitureDraft;$('cancel-furniture').disabled=!furnitureDraft;
  $('save-restrict').disabled=disabled||!restrictDraft||!view?.restrictions_editable;
  $('draw-restrict').disabled=disabled||!view?.restrictions_editable;
@@ -567,7 +567,7 @@ async function streamEvents(){
 function invalidateEdit(){pending=null;$('map-preview').textContent='';$('apply-map-edit').disabled=true;}
 function selectRoom(id){
  if($('map-operation').value==='split')selected=new Set(selected.has(id)?[]:[id]);
- else if(selected.has(id))selected.delete(id);else{selected.add(id);if(!openSheet&&dock.dataset.mode==='all')setMode('room');}
+ else if(selected.has(id))selected.delete(id);else{selected.add(id);if(!openSheet&&!editTool&&dock.dataset.mode==='all')setMode('room');}
  points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);
 }
 function renderRoomButtons(){
@@ -724,14 +724,14 @@ const fitSize=v=>Math.min(mm(v),view.width*.4,view.height*.4);
 function newRect(w,h,offset=0){const c=visibleCenter(),d=mm(300)*offset;return {cx:c.x+d,cy:c.y-d,w:fitSize(w),h:fitSize(h),a:0};}
 function newLine(len){const c=visibleCenter(),l=fitSize(len)/2;return {x0:c.x-l,y0:c.y,x1:c.x+l,y1:c.y};}
 // Zones for cleaning: up to 5, kept until the map changes.
-const zoneStyle=['#ffae67','rgba(255,174,103,.28)'];
+const zoneStyle=['#2f6fed','rgba(47,111,237,.22)']; // the app's blue
 function zoneShapes(){return zones.map((z,i)=>({kind:'rect',geom:()=>z,set:g=>Object.assign(z,g),selected:i===zoneSel,select:()=>{zoneSel=i;},remove:()=>{zones.splice(i,1);zoneSel=zones.length-1;zoneStatus();},done:zoneStatus,min:mm(300),
  draw:u=>{const [x0,y0]=toCanvasXY(z.cx-z.w/2,z.cy+z.h/2);ctx.fillStyle=zoneStyle[1];ctx.strokeStyle=zoneStyle[0];ctx.lineWidth=2;ctx.fillRect(x0,y0,z.w*3,z.h*3);ctx.strokeRect(x0,y0,z.w*3,z.h*3);
   const [cx,cy]=toCanvasXY(z.cx,z.cy);ctx.fillStyle=zoneStyle[0];ctx.beginPath();ctx.arc(cx,cy,9*u,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.font=`600 ${11*u}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(i+1),cx,cy);}}));}
 const zoneRobot=z=>{const [x0,y0,x1,y1]=toRobotRect(z);return [x0,y1,x1,y0];};
 function zoneStatus(){
  const z=zones[zoneSel];
- $('zone-status').textContent=zones.length?'Зон: '+zones.length+' из 5. Двигай зону пальцем, размер меняется за уголок ↘.'+(z?' Зона '+(zoneSel+1)+' для HA: '+JSON.stringify(zoneRobot(z)):''):'Нажми «Добавить зону»: она появится в центре карты.';
+ $('zone-status').textContent=zones.length?'Зон: '+zones.length+' из 5. Двигай зону пальцем, размер меняется за уголок ↘.'+(z?' Зона '+(zoneSel+1)+' для HA: '+JSON.stringify(zoneRobot(z)):''):'Нажми «Добавить»: зона появится в центре карты.';
  disableControls(busy);
 }
 // Virtual walls, no-go and no-mop zones, carpets and ramps: every change goes to the draft saved by one button.
@@ -787,8 +787,8 @@ function patrolShapes(){return patrolPoints.map((p,i)=>({kind:'point',geom:()=>{
 // The shapes the open screen edits: a block of the map editor, the camera sheet or the zone mode.
 function editorShapes(){
  if(!view||view.empty)return null;
- const sheet=openSheet?.id.slice(6),open=id=>$(id).open&&!$(id).hidden;
- if(sheet==='map-edit'){
+ const sheet=openSheet?.id.slice(6),open=id=>editTool?.id===id;
+ if(editTool){
   if(open('restrict-details')&&view.restrictions_editable)return restrictShapes();
   if(open('threshold-details')&&view.thresholds_editable)return thresholdShapes();
   if(open('furniture-details')&&view.furniture_editable)return furnitureShapes();
@@ -796,7 +796,7 @@ function editorShapes(){
   return null;
  }
  if(sheet==='camera')return patrolShapes();
- return dock.dataset.mode==='zone'?zoneShapes():null;
+ return !openSheet&&dock.dataset.mode==='zone'?zoneShapes():null;
 }
 const toCanvasXY=(x,y)=>[x*3,(view.height-y)*3];
 function drawIcon(part,x,y,u){
@@ -852,7 +852,7 @@ canvas.onclick=e=>{
  const {x,y}=mapPoint(e);
  if(patrolDrawing){addPatrolPoint(x,y);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
- if(!openSheet&&dock.dataset.mode==='zone'){zoneSel=-1;zoneStatus();draw();return;} // in zone mode a tap does not pick rooms
+ if(!openSheet&&!editTool&&dock.dataset.mode==='zone'){zoneSel=-1;zoneStatus();draw();return;} // in zone mode a tap does not pick rooms
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
  const px=Math.min(view.width-1,Math.max(0,Math.floor(x))),py=Math.min(view.height-1,Math.max(0,Math.floor(y))),id=view.grid[py*view.width+px];
  if(view.rooms.some(r=>r.id===id))selectRoom(id);
@@ -893,7 +893,10 @@ $('clean-rooms').onclick=async()=>{try{const ids=[...selected],mapID=view?.map_i
 for(const id of ['room-fan','room-water','room-repeats'])$(id).onchange=()=>{roomOptionsDirty=true;};
 // ---- Zone cleaning: up to 5 rectangles, added in the middle of the map and edited with the handles.
 $('draw-zone').onclick=()=>{if(!view||view.empty||busy||zones.length>=5)return;zones.push(newRect(2000,2000,zones.length));zoneSel=zones.length-1;zoneStatus();draw();};
-$('cancel-zone').onclick=()=>{zones=[];zoneSel=-1;zoneStatus();draw();};
+// «Циклы» steps the repeats 1 → 2 → 3 → 1 like the app; the select in «Настроить» stays the value the commands read.
+const syncCycles=()=>{$('cycles-n').textContent='x'+$('room-repeats').value;};
+$('room-repeats').addEventListener('change',syncCycles);
+$('cycles').onclick=()=>{const r=$('room-repeats');r.value=String(Number(r.value)%3+1);r.dispatchEvent(new Event('change',{bubbles:true}));};
 $('clean-zone').onclick=async()=>{
  try{const rects=zones.map(zoneRobot),mapID=view.map_id;
   await control('/api/v1/command',{name:'clean_zone',zones:rects,repeats:Number($('room-repeats').value),suction:Number($('room-fan').value),water:Number($('room-water').value)},async()=>{const current=await api('local.map_view');if(current.map_id!==mapID)throw Error('Карта изменилась. Выбери зону заново.');});}
@@ -1396,10 +1399,11 @@ if('ResizeObserver' in window)new ResizeObserver(()=>{if(layoutPending)return;la
 // Bottom bar: Комната / Все / Зона pick which "Чистить" button is shown.
 const dock=$('dock');
 export function setMode(mode){
- dock.dataset.mode=mode;for(const b of dock.querySelectorAll('.segmented button'))b.setAttribute('aria-selected',String(b.dataset.mode===mode));
+ dock.dataset.mode=mode;document.body.dataset.mode=mode;for(const b of dock.querySelectorAll('.segmented button'))b.setAttribute('aria-selected',String(b.dataset.mode===mode));
  if(mode==='zone')zoneStatus();draw();
 }
 for(const b of dock.querySelectorAll('.segmented button'))b.onclick=()=>setMode(b.dataset.mode);
+document.body.dataset.mode=dock.dataset.mode;
 // Sheets: one open at a time, without a backdrop, so the map stays usable for map tools.
 let openSheet=null;
 export function showSheet(name){
@@ -1429,3 +1433,35 @@ document.querySelector('[data-sheet="tune"]').addEventListener('click',()=>reque
 syncChips();
 // Sub-pages (map editor, station settings): an opened block takes the sheet; its title is the way back.
 for(const d of document.querySelectorAll('.hub>details'))d.addEventListener('toggle',()=>{if(d.open)d.parentElement.scrollTop=0;draw();});
+// ---- Map edit tools that work on the map open as an edit screen, as in the app: the sheet closes, the tool's
+// controls take the bottom bar in place of the cleaning buttons, ‹ leaves (asking to save) and ✓ saves.
+const editTools={'split-details':{done:'apply-map-edit'},'threshold-details':{done:'save-threshold',cancel:'cancel-threshold'},
+ 'restrict-details':{done:'save-restrict',cancel:'cancel-restrict'},'furniture-details':{done:'save-furniture',cancel:'cancel-furniture'}};
+const editDone=()=>editTool&&$(editTools[editTool.id].done);
+const syncEditDone=()=>{if(editTool)$('edit-done').disabled=editDone().disabled;};
+for(const [id,c] of Object.entries(editTools)){
+ new MutationObserver(syncEditDone).observe($(c.done),{attributes:true,attributeFilter:['disabled']});
+ $(id).addEventListener('toggle',()=>{if($(id).open&&editTool!==$(id))enterEdit($(id));});
+}
+function enterEdit(d){
+ if(editTool)leaveEdit();
+ editTool=d;$('edit-title').textContent=d.querySelector('summary').textContent;
+ $('edit-body').replaceChildren(...[...d.children].filter(c=>c.tagName!=='SUMMARY'));
+ dock.dataset.edit=document.body.dataset.edit=d.id;closeSheet();syncEditDone();draw();
+}
+function leaveEdit(){
+ const d=editTool;if(!d)return;editTool=null;d.append(...$('edit-body').children);d.open=false;
+ delete dock.dataset.edit;delete document.body.dataset.edit;draw();
+}
+$('edit-done').onclick=()=>{const b=editDone();if(b&&!b.disabled)b.click();leaveEdit();};
+$('edit-back').onclick=()=>{
+ const b=editDone(),cancel=editTools[editTool.id].cancel;
+ if(b&&!b.disabled){if(window.confirm('Сохранить текущую операцию?'))b.click();else if(cancel)$(cancel).click();}
+ leaveEdit();
+};
+// «Что добавить» as one button per kind: a tap adds that shape in the middle of the map, like the app's tools.
+{const kind=$('restrict-kind'),box=document.createElement('div');box.className='add-row';
+ for(const o of kind.options){const b=document.createElement('button');b.type='button';b.textContent=o.textContent;b.dataset.kind=o.value;
+  b.onclick=()=>{kind.value=o.value;kind.dispatchEvent(new Event('change',{bubbles:true}));$('draw-restrict').click();};box.append(b);}
+ kind.closest('label').replaceWith(box);box.append(kind);kind.hidden=true;$('draw-restrict').hidden=true;}
+chipSets.push([$('map-operation'),chipsFor($('map-operation'))]);syncChips();

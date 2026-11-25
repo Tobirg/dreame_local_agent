@@ -16,7 +16,7 @@ The agent is written in Go and runs **on the vacuum itself**. It calls the firmw
 - Modules installed from the web interface: [MQTT and Home Assistant](https://github.com/Tobirg/dreame-module-mqtt), [region guard](https://github.com/Tobirg/dreame-module-region), [camera](https://github.com/Tobirg/dreame-module-camera).
 - Voices: switching the built-in ones (EN, JA, KO, ZH), uploading your own voice packs, listening to phrases by number — [preparing a pack](docs/voice-packs.md) (Russian).
 - Wi-Fi setup and a captive portal in access-point mode.
-- A panel laid out like the Dreame app, phone first: one screen with the map, "Room / All / Zone", "Clean" and "Base station" at the bottom; the map editor, camera and "Adjust" open as sheets, the rest is in the "⋮" menu.
+- A panel laid out like the Dreame app, phone first: one screen with the map, "Room / All / Zone", "Clean" and "Base station" at the bottom; "Add" (zone) and "Cycles" (x1 → x2 → x3) on the map's right side; the map editor, camera and "Adjust" open as sheets, the rest is in the "⋮" menu. Editor tools that work on the map (room split, thresholds, no-go areas and carpets, furniture) take the bottom bar in place of "Clean", as in the app: ‹ leaves (asking whether to save), ✓ saves.
 
 Map and station commands are verified on R2505; zone and spot cleaning, history and the robot path are so far covered by tests only.
 
