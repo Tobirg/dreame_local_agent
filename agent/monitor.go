@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,7 +11,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -30,7 +33,12 @@ const (
 	monitorKeepAlive = 8 * time.Second
 	// The robot leaves remote control ~15 s after the last step; the session ends a while after that.
 	monitorIdle = 30 * time.Second
+	avaLogGlob  = "/tmp/log/log_*"
+	cameraHold  = "/tmp/dreame-camera/hold" // the camera module's live view leaves /dev/video0 while fresh
 )
+
+// How long the firmware may take to confirm monitoring (ava "type=19, value=1"; 0.5-0.8 s seen).
+var monitorConfirm = 4 * time.Second
 
 var errNoVideoCode = errors.New("set the video access code (panel: Camera) first: without the video monitoring session the robot runs the vacuum motor while driving")
 
@@ -106,15 +114,23 @@ func (a *agent) ensureMonitor(ctx context.Context, did string) error {
 			return errors.New("cannot keep the robot's video off the cloud: " + err.Error())
 		}
 	}
+	// video_monitor needs /dev/video0, which the camera module's live view may hold: without it the
+	// session fails quietly and the next step runs the motor (seen 2026-11-25 on 0.74.0).
+	a.holdCamera(true)
+	offsets := a.avaLogOffsets()
 	result, err = a.miot(ctx, "action", monitorAction(did, 1, 1, map[string]any{"token": "alify", "channelId": monitorSession, "area": "0", "operType": "monitor", "operation": "start"}))
+	if err == nil && rejected(result) != nil {
+		err = errors.New("the robot did not open video monitoring")
+	}
+	// Drive only once ava raises its monitoring flag (about 0.5 s after start), never on a hope.
+	if err == nil && !a.monitoringConfirmed(ctx, offsets, monitorConfirm) {
+		_, _ = a.miot(ctx, "action", monitorAction(did, 1, 1, map[string]any{"operType": "monitor", "operation": "end"}))
+		err = errors.New("video monitoring did not start (is the camera busy?); not driving, so the vacuum motor stays off")
+	}
 	if err != nil {
 		a.cloudBlock(false)
+		a.holdCamera(false)
 		return err
-	}
-	if rejected(result) != nil {
-		a.cloudBlock(false)
-		monitor.refused = hash
-		return errors.New("the robot did not open video monitoring: wrong video access code?")
 	}
 	monitor.open = true
 	monitor.stop = make(chan struct{})
@@ -158,12 +174,16 @@ func (a *agent) keepMonitor(stop chan struct{}) {
 		if err != nil {
 			log.Printf("video monitoring: %v", err)
 		}
+		if !idle && err == nil {
+			a.holdCamera(true) // keep the hold fresh
+		}
 		if idle || err != nil {
 			monitor.Lock()
 			if monitor.stop == stop {
 				monitor.open = false
 				monitor.stop = nil
 				a.cloudBlock(false)
+				a.holdCamera(false)
 			}
 			monitor.Unlock()
 			return
@@ -265,6 +285,7 @@ func (a *agent) endMonitor(ctx context.Context, did string) bool {
 	close(monitor.stop)
 	monitor.open, monitor.stop = false, nil
 	a.cloudBlock(false)
+	a.holdCamera(false)
 	return false
 }
 
@@ -379,5 +400,70 @@ func (a *agent) videoCloudRoute(w http.ResponseWriter, r *http.Request, send fun
 		send(200, map[string]any{"result": map[string]any{"enabled": *req.Enabled}})
 	default:
 		send(405, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// avaLogOffsets notes the size of ava's logs, so monitoringConfirmed reads only what comes after.
+func (a *agent) avaLogOffsets() map[string]int64 {
+	out := map[string]int64{}
+	paths, _ := filepath.Glob(a.path(avaLogGlob))
+	for _, p := range paths {
+		if st, err := os.Stat(p); err == nil {
+			out[p] = st.Size()
+		}
+	}
+	return out
+}
+
+// monitoringConfirmed waits for ava's "type=19, value=1" (video_monitor raised the monitoring flag)
+// in what its logs gained since offsets; a log that shrank was rotated and is read from the start.
+func (a *agent) monitoringConfirmed(ctx context.Context, offsets map[string]int64, limit time.Duration) bool {
+	deadline := time.Now().Add(limit)
+	for {
+		paths, _ := filepath.Glob(a.path(avaLogGlob))
+		for _, p := range paths {
+			f, err := os.Open(p)
+			if err != nil {
+				continue
+			}
+			st, _ := f.Stat()
+			from := offsets[p]
+			if st == nil || st.Size() < from {
+				from = 0
+			}
+			b, _ := io.ReadAll(io.LimitReader(io.NewSectionReader(f, from, 1<<30), 4<<20))
+			f.Close()
+			if bytes.Contains(b, []byte("type=19, value=1")) {
+				return true
+			}
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// holdCamera asks the camera module's live view to leave /dev/video0 to the firmware (hold file,
+// fresh for 20 s) and waits up to 2 s until it reports it did; false removes the hold.
+func (a *agent) holdCamera(on bool) {
+	if _, err := a.installedModule("camera"); err != nil {
+		return
+	}
+	hold := a.path(cameraHold)
+	if !on {
+		_ = os.Remove(hold)
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(hold), 0700)
+	if os.WriteFile(hold, []byte("agent\n"), 0600) != nil {
+		return
+	}
+	status := filepath.Join(filepath.Dir(hold), "status.json")
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		b, _ := readLimited(status, 4096)
+		if !bytes.Contains(b, []byte(`"/dev/video0"`)) {
+			return
+		}
 	}
 }
