@@ -513,24 +513,19 @@ function renderRoomButtons(){
 // Rooms with their floor pattern at canvas size, rebuilt only when the map, the selection or a floor draft changes.
 // Pattern sizes in map cells as the app's buildFloorMap: tiles 12, planks 4 × 16 laid in a half-board offset.
 const roomIcons={1:'🛋',2:'🛏',15:'🛏',3:'📚',4:'🍲',5:'🍽',6:'🛁',7:'🌿',8:'👣',9:'📦',10:'👔',11:'🚪',12:'💼',13:'🏋',14:'☕'};
-let baseCache={key:'',canvas:null};
+let baseCache={key:'',canvas:null,pending:''};
 function floorOf(room){const draft=$('room-floors').querySelector(`[data-room="${room.id}"]`)?.value;return draft===undefined?room.floor||0:Number(draft);}
+// The base layer (floors, walls, room badges) is drawn by the agent, the same code as the picture for Home Assistant.
+// The previous picture stays until the new one arrives.
 function baseLayer(){
- const floors=view.rooms.map(r=>r.id+':'+floorOf(r)).join(','),key=view.revision+'|'+[...selected].join(',')+'|'+floors;
- if(baseCache.key===key)return baseCache.canvas;
- const s=3,w=view.width,h=view.height,W=w*s,H=h*s,grid=view.grid,out=document.createElement('canvas');out.width=W;out.height=H;
- const bc=out.getContext('2d'),img=bc.createImageData(W,H),d=img.data,fill=[],line=[],kind=[],box={};
- for(let i=0;i<grid.length;i++){const id=grid[i];if(!id||id===255)continue;const x=i%w,y=i/w|0,b=box[id]||(box[id]=[x,x,y,y]);if(x<b[0])b[0]=x;if(x>b[1])b[1]=x;if(y<b[2])b[2]=y;if(y>b[3])b[3]=y;}
- for(let id=1;id<255;id++){let rgb=palette[(id-1)%palette.length].slice(1).match(/../g).map(c=>parseInt(c,16));if(selected.size&&!selected.has(id))rgb=rgb.map(c=>Math.round(c*.42));fill[id]=rgb;line[id]=rgb.map(c=>Math.round(c*.84));}
- fill[255]=line[255]=[0xa6,0xba,0xd0]; // border cells: the room outline, as in the Dreame app
- for(const room of view.rooms){let f=floorOf(room);if(f===1){const b=box[room.id];f=b&&b[1]-b[0]>b[3]-b[2]?4:3;}kind[room.id]=f;}
- for(let Y=0;Y<H;Y++){const row=(h-1-(Y/s|0))*w;for(let X=0;X<W;X++){
-  const id=grid[row+(X/s|0)];if(!id)continue;const f=kind[id];
-  const edge=f===2?X%36===0||Y%36===0:f===4?Y%12===0||(X+(Y/12&1)*24)%48===0:f===3?X%12===0||(Y+(X/12&1)*24)%48===0:false;
-  const c=edge?line[id]:fill[id],j=(Y*W+X)*4;d[j]=c[0];d[j+1]=c[1];d[j+2]=c[2];d[j+3]=255;
- }}
- bc.putImageData(img,0,0);
- baseCache={key,canvas:out};return out;
+ const floors=view.rooms.map(r=>r.id+':'+floorOf(r)).join(','),sel=[...selected].join(','),key=view.revision+'|'+sel+'|'+floors;
+ if(baseCache.key!==key&&baseCache.pending!==key){
+  baseCache.pending=key;
+  fetch('/api/v1/map.png?base=1&selected='+sel+'&floors='+floors,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'})
+   .then(r=>r.ok?r.blob():Promise.reject(Error('map.png '+r.status))).then(createImageBitmap)
+   .then(bitmap=>{if(baseCache.pending===key){baseCache={key,canvas:bitmap,pending:''};draw();}},()=>{if(baseCache.pending===key)baseCache.pending='';});
+ }
+ return baseCache.canvas;
 }
 // The whole map fits the window at 100%; the buttons zoom from there and only a zoomed map scrolls inside its frame.
 let zoom=1;
@@ -580,13 +575,12 @@ function draw(){
  layoutMap();
  canvas.style.touchAction=zoneDrawing&&!zoneSpot?'none':''; // a finger drags the zone corner instead of scrolling
  ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;
- const scale=3;ctx.drawImage(baseLayer(),0,0);
- // Room labels like the app: number badge, type icon and name.
+ const scale=3;{const base=baseLayer();if(base)ctx.drawImage(base,0,0,canvas.width,canvas.height);}
+ // Room labels like the app: type icon and name (the number badge is in the agent's picture).
  ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
  for(const room of view.rooms){
-  const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale,color=palette[(room.id-1)%palette.length],dim=selected.size&&!selected.has(room.id);
-  ctx.globalAlpha=dim?.55:1;ctx.fillStyle='#17232d';ctx.beginPath();ctx.arc(x,y-9,8,0,Math.PI*2);ctx.fill();ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
-  ctx.font='bold 10px system-ui';ctx.fillStyle='#fff';ctx.fillText(String(room.num),x,y-8.5);
+  const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale,dim=selected.size&&!selected.has(room.id);
+  ctx.globalAlpha=dim?.55:1;
   ctx.font='600 11px system-ui';const label=(roomIcons[room.type]?roomIcons[room.type]+' ':'')+room.name;ctx.lineWidth=3;ctx.strokeStyle='rgba(23,35,45,.8)';ctx.strokeText(label,x,y+8);ctx.fillStyle='#fff';ctx.fillText(label,x,y+8);
  }
  ctx.globalAlpha=1;

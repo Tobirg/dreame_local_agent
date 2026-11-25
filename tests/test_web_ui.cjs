@@ -15,11 +15,20 @@ for(let y=2;y<28;y++)for(let x=2;x<38;x++)grid[y*40+x]=(x===2||x===37||y===2||y=
 let voiceCurrent='ZH',livePolls=0,tokens=[],restrict={walls:[[-900,-900,-500,-900]],no_go_zones:[],no_mop_zones:[]};const eventClients=new Set();
 const snapshot=()=>{const v=k=>values[k],state={activity:v('4/1')===2?'cleaning':'docked',status:v('4/1'),error:v('2/2'),battery:v('3/1'),charging:1,suction:v('4/4'),water:v('4/5'),station:v('4/25'),volume:v('7/1'),region:regionCode===200?'matched':'mismatched',region_code:regionCode,consumables:{main_brush:{left:52,hours:158},filter:{left:6,hours:8}},stats:{minutes:308,cleanings:22,area:264},dnd:{enabled:false,start:'22:00',end:'08:00'},schedules:[{id:3,enabled:true,time:'09:30',days:'0111110',rooms:[4]},{id:4,enabled:true,time:'10:00',days:'1111111',quick_command:32}],dnd_periods:[{id:0,enabled:true,start:'22:00',end:'08:00',days:'1111111'}],quick_commands:[{id:32,name:'Кухня'}],tank_drain:1};return {seq:1,updated_at:new Date().toISOString(),stale:staleState,error:staleState?'avacmd timed out':undefined,state};};
 const pushEvent=()=>{for(const c of eventClients)c.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');};
+function stubPng(w,h){ // the agent's map picture, as a flat grey PNG
+ const crcT=[...Array(256)].map((_,n)=>{let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0;});
+ const crc=b=>{let c=0xffffffff;for(const x of b)c=crcT[(c^x)&255]^(c>>>8);return(c^0xffffffff)>>>0;};
+ const chunk=(t,d)=>{const l=Buffer.alloc(4);l.writeUInt32BE(d.length);const td=Buffer.concat([Buffer.from(t),d]),c=Buffer.alloc(4);c.writeUInt32BE(crc(td));return Buffer.concat([l,td,c]);};
+ const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(w,0);ihdr.writeUInt32BE(h,4);ihdr[8]=8;ihdr[9]=2;
+ const raw=Buffer.alloc((w*3+1)*h,0x80);for(let y=0;y<h;y++)raw[y*(w*3+1)]=0;
+ return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',require('zlib').deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]);
+}
 const server=http.createServer((req,res)=>{
  if(req.method==='GET'&&req.url.startsWith('/m/demo/panel.js')){
   res.setHeader('Content-Type','text/javascript; charset=utf-8');
   res.end("export default function mount(el,ctx){el.innerHTML='<p data-t=state></p><button data-t=ping>Ping</button>';ctx.onState(s=>{el.querySelector('[data-t=state]').textContent='battery '+s.battery;});el.querySelector('[data-t=ping]').onclick=async()=>{const r=await ctx.call('ping',{n:1});el.querySelector('[data-t=state]').dataset.reply=r.action;};}");return;
  }
+ if(req.method==='GET'&&req.url.startsWith('/api/v1/map.png')){res.setHeader('Content-Type','image/png');res.end(stubPng(120,84));return;}
  if(req.method==='GET'&&req.url.startsWith('/api/v1/')){
   res.setHeader('Content-Type','application/json');
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}

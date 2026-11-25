@@ -131,9 +131,9 @@ func makeMapView(raw []byte, model string) (mapView, error) {
 		Furniture     []json.RawMessage            `json:"funiture_info"`
 		Charger       []int                        `json:"charger"`
 		Segments      map[string]struct {
-			Name     string `json:"name"`
-			Type     int    `json:"type"`
-			Index    int    `json:"index"`
+			Name      string `json:"name"`
+			Type      int    `json:"type"`
+			Index     int    `json:"index"`
 			Material  *int   `json:"material"`
 			Direction *int   `json:"direction"`
 		} `json:"seg_inf"`

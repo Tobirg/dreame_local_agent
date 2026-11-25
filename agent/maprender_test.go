@@ -5,8 +5,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/color"
 	"image/png"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +16,7 @@ import (
 
 func TestMapPNG(t *testing.T) {
 	a := testAgent(t)
-	if _, err := a.mapPNG(); err == nil {
+	if _, err := a.mapPNG(mapOpts{}); err == nil {
 		t.Fatal("rendered without a saved map")
 	}
 	raw, err := decodeSavedFrame(syntheticFrame(t, 2))
@@ -25,7 +27,7 @@ func TestMapPNG(t *testing.T) {
 	raw = append(raw[:36], []byte(`{"origin":[-100,-200],"charger":[-75,-175]}`)...)
 	maps, _ := json.Marshal(map[string]any{"curr_id": 2, "mapstr": []any{map[string]any{"map": encodeTestFrame(t, raw)}}})
 	writeFile(t, a, "/data/log/map_info.bin", string(maps))
-	b, err := a.mapPNG()
+	b, err := a.mapPNG(mapOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +53,7 @@ func TestMapPNG(t *testing.T) {
 	room := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA)
 	frame := testLiveFrame(t, 'P', fmt.Sprintf(`{"robot":[5000,5000],"curid":"2","tr":"W-75,-125L50,0","mtid":"r","timestamp_ms":%d}`, time.Now().UnixMilli()))
 	writeFile(t, a, iotLogFile, `"siid":6,"piid":1,"value":"`+frame+`"`+"\n")
-	if b, err = a.mapPNG(); err != nil {
+	if b, err = a.mapPNG(mapOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	img, _ = png.Decode(bytes.NewReader(b))
@@ -62,7 +64,7 @@ func TestMapPNG(t *testing.T) {
 	once := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA)
 	frame = testLiveFrame(t, 'P', fmt.Sprintf(`{"robot":[5000,5000],"curid":"2","tr":"W-75,-125L50,0L1000,0L-1000,0","mtid":"r","timestamp_ms":%d}`, time.Now().UnixMilli()))
 	writeFile(t, a, iotLogFile, `"siid":6,"piid":1,"value":"`+frame+`"`+"\n")
-	b, _ = a.mapPNG()
+	b, _ = a.mapPNG(mapOpts{})
 	img, _ = png.Decode(bytes.NewReader(b))
 	if got := color.RGBAModel.Convert(img.At(7, 1)).(color.RGBA); got.B <= once.B {
 		t.Fatal("second pass not deeper", once, got)
@@ -76,11 +78,25 @@ func TestMapPNG(t *testing.T) {
 	meta := fmt.Sprintf(`{"robot":[5000,5000],"curid":"2","tr":"","mtid":"r","timestamp_ms":%d}`, time.Now().UnixMilli())
 	writeFile(t, a, liveFrameFiles[0], strings.TrimRight(encodeTestFrame(t, append(run[:36], []byte(meta)...)), "="))
 	writeFile(t, a, iotLogFile, "")
-	if b, err = a.mapPNG(); err != nil {
+	if b, err = a.mapPNG(mapOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	img, _ = png.Decode(bytes.NewReader(b))
 	if got := color.RGBAModel.Convert(img.At(1, 1)).(color.RGBA); got != newFloorColour || img.Bounds().Dy() != 9 {
 		t.Fatal("new floor cell", got, img.Bounds())
+	}
+}
+
+func TestMapPNGOptionsAndOverlays(t *testing.T) {
+	o := mapOptsFromQuery(url.Values{"base": {"1"}, "selected": {"2"}, "floors": {"1:2,x:y"}})
+	if !o.base || !o.selected[2] || o.floors[1] != 2 || len(o.floors) != 1 {
+		t.Fatal(o)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 30, 30))
+	view := mapView{GridSize: 50, Height: 10, Origin: []int{0, 0}, NoGo: [][]int{{100, 100, 500, 500}}, Furniture: []furnitureItem{{X: 1000, Y: 1000, Width: 500, Height: 500}}}
+	px := func(p []int) (int, int) { return p[0] * mapScale / 50, p[1] * mapScale / 50 }
+	drawOverlays(img, view, px)
+	if got := img.RGBAAt(12, 12); got.R == 0 {
+		t.Fatal("no-go zone fill missing", got)
 	}
 }

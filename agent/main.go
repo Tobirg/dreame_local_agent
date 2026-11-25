@@ -535,7 +535,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 			send(405, map[string]string{"error": "GET required"})
 			return
 		}
-		img, err := a.mapPNG()
+		img, err := a.mapPNG(mapOptsFromQuery(r.URL.Query()))
 		if err != nil {
 			send(404, map[string]string{"error": err.Error()})
 			return

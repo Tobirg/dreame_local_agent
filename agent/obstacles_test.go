@@ -66,7 +66,7 @@ func TestObstaclesOnMapPNG(t *testing.T) {
 	writeFile(t, a, "/data/log/map_info.bin", string(maps))
 	// A sock (hazard) at the centre of the 3x3 map of 50 mm cells: image pixel (4, 4).
 	writeFile(t, a, obstaclesFile, `{"map_id":2,"at":"2026-11-22T15:00:00Z","obstacles":[[-25,-125,134,90]]}`)
-	b, err := a.mapPNG()
+	b, err := a.mapPNG(mapOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

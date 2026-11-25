@@ -1,7 +1,6 @@
 package main
 
 import (
-	"reflect"
 	"bytes"
 	"compress/zlib"
 	"context"
@@ -10,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )

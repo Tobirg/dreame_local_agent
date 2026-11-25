@@ -7,7 +7,9 @@ import (
 	"image/color"
 	"image/png"
 	"math"
+	"net/url"
 	"strconv"
+	"strings"
 )
 
 // Same colours as ui/app.js.
@@ -39,8 +41,37 @@ var (
 	mopAlpha  = []int{70, 120, 165}               // 1, 2 and 3+ passes
 )
 
+// mapOpts: base draws only what the web panel takes as its map layer (floors, walls, room badges);
+// the panel draws the rest itself, editable. selected dims the other rooms, floors replaces a room's floor
+// kind (the panel's unsaved choice).
+type mapOpts struct {
+	base     bool
+	selected map[int]bool
+	floors   map[int]int
+}
+
+// mapOptsFromQuery reads ?base=1&selected=1,3&floors=1:2,3:0.
+func mapOptsFromQuery(q url.Values) mapOpts {
+	o := mapOpts{base: q.Get("base") == "1", selected: map[int]bool{}, floors: map[int]int{}}
+	for _, v := range strings.Split(q.Get("selected"), ",") {
+		if id, err := strconv.Atoi(v); err == nil {
+			o.selected[id] = true
+		}
+	}
+	for _, v := range strings.Split(q.Get("floors"), ",") {
+		if id, kind, ok := strings.Cut(v, ":"); ok {
+			i, e1 := strconv.Atoi(id)
+			k, e2 := strconv.Atoi(kind)
+			if e1 == nil && e2 == nil {
+				o.floors[i] = k
+			}
+		}
+	}
+	return o
+}
+
 // mapPNG renders the saved map with the station and, while cleaning, the robot and its path.
-func (a *agent) mapPNG() ([]byte, error) {
+func (a *agent) mapPNG(o mapOpts) ([]byte, error) {
 	view, err := a.mapView()
 	if err != nil {
 		return nil, err
@@ -65,6 +96,9 @@ func (a *agent) mapPNG() ([]byte, error) {
 	kind := map[uint8]int{}
 	for _, r := range view.Rooms {
 		f, b := r.Floor, box[uint8(r.ID)]
+		if v, ok := o.floors[r.ID]; ok {
+			f = v
+		}
 		if f == 1 {
 			f = 3
 			if b[1]-b[0] > b[3]-b[2] {
@@ -80,6 +114,9 @@ func (a *agent) mapPNG() ([]byte, error) {
 		c := wallColour
 		if id != 255 {
 			c = roomPalette[(int(id)-1)%len(roomPalette)]
+			if len(o.selected) > 0 && !o.selected[int(id)] {
+				c = scale(c, 42)
+			}
 		}
 		x, y := i%view.Width, view.Height-1-i/view.Width // map rows go up, image rows go down
 		for dy := 0; dy < mapScale; dy++ {
@@ -88,7 +125,7 @@ func (a *agent) mapPNG() ([]byte, error) {
 				edge := k == 2 && (X%36 == 0 || Y%36 == 0) || k == 4 && (Y%12 == 0 || (X+(Y/12&1)*24)%48 == 0) || k == 3 && (X%12 == 0 || (Y+(X/12&1)*24)%48 == 0)
 				cc := c
 				if edge && id != 255 {
-					cc = color.RGBA{uint8(int(c.R) * 84 / 100), uint8(int(c.G) * 84 / 100), uint8(int(c.B) * 84 / 100), 255}
+					cc = scale(c, 84)
 				}
 				img.SetRGBA(X, Y, cc)
 			}
@@ -98,6 +135,23 @@ func (a *agent) mapPNG() ([]byte, error) {
 	px := func(p []int) (int, int) {
 		return (p[0] - view.Origin[0]) * mapScale / view.GridSize, (view.Height*view.GridSize - (p[1] - view.Origin[1])) * mapScale / view.GridSize
 	}
+	for _, r := range view.Rooms { // room number badge, as the web UI and the app
+		x, y := int((r.X+.5)*mapScale), int((float64(view.Height)-r.Y-.5)*mapScale)-9
+		if x < 8 || y < 8 || x+8 >= img.Rect.Dx() || y+8 >= img.Rect.Dy() {
+			continue // the badge would not fit (a tiny map)
+		}
+		ring := scale(roomPalette[(r.ID-1)%len(roomPalette)], 100)
+		if len(o.selected) > 0 && !o.selected[r.ID] {
+			ring = scale(ring, 55)
+		}
+		disc(img, x, y, 8, ring)
+		disc(img, x, y, 6, obstacleRing)
+		digits(img, x, y, strconv.Itoa(r.Num))
+	}
+	if o.base {
+		return encodePNG(img)
+	}
+	drawOverlays(img, view, px)
 	live := a.livePose()
 	if !live.Live || live.MapID != view.MapID {
 		live = livePose{}
@@ -153,15 +207,6 @@ func (a *agent) mapPNG() ([]byte, error) {
 		disc(img, x, y, 6, obstacleRing)
 		disc(img, x, y, 4, c)
 	}
-	for _, r := range view.Rooms { // room number badge, as the web UI and the app
-		x, y := int((r.X+.5)*mapScale), int((float64(view.Height)-r.Y-.5)*mapScale)-9
-		if x < 8 || y < 8 || x+8 >= img.Rect.Dx() || y+8 >= img.Rect.Dy() {
-			continue // the badge would not fit (a tiny map)
-		}
-		disc(img, x, y, 8, roomPalette[(r.ID-1)%len(roomPalette)])
-		disc(img, x, y, 6, obstacleRing)
-		digits(img, x, y, strconv.Itoa(r.Num))
-	}
 	charger := view.Charger
 	if live.Charger != nil {
 		charger = live.Charger
@@ -174,11 +219,19 @@ func (a *agent) mapPNG() ([]byte, error) {
 		x, y := px(live.Robot)
 		disc(img, x, y, 7, robotColour)
 	}
+	return encodePNG(img)
+}
+
+func encodePNG(img image.Image) ([]byte, error) {
 	var out bytes.Buffer
 	if err := png.Encode(&out, img); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+func scale(c color.RGBA, percent int) color.RGBA {
+	return color.RGBA{uint8(int(c.R) * percent / 100), uint8(int(c.G) * percent / 100), uint8(int(c.B) * percent / 100), 255}
 }
 
 func disc(img *image.RGBA, cx, cy, r int, c color.RGBA) {
