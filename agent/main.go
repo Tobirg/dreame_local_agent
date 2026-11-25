@@ -47,6 +47,8 @@ type config struct {
 	Tokens                  []apiToken `json:"tokens,omitempty"`
 	// Origins (scheme://host[:port]) that may show the panel in a frame, e.g. a Home Assistant dashboard card.
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
+	// Room label size on the panel map in screen pixels; 0 keeps the automatic 10–14 px.
+	LabelSize int `json:"label_size,omitempty"`
 }
 type request struct {
 	Method string          `json:"method"`

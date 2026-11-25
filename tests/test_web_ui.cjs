@@ -12,7 +12,7 @@ const capabilities={identity:{model:'dreame.vacuum.r2505',did:'123',fw_ver:'4.3.
 let passable=[[-700,-700,-400,-700]],impassable=[[100,-700,100,-400]];
 const grid=Buffer.alloc(40*30);
 for(let y=2;y<28;y++)for(let x=2;x<38;x++)grid[y*40+x]=(x===2||x===37||y===2||y===27)?255:x<20?1:2;
-let petPhotos=[{name:'pet-1795500000-1.gif',source:'gif',at:'2026-11-24T09:00:00Z',url:'/api/v1/pets/photo?name=pet-1795500000-1.gif'},{name:'100-1.jpg',source:'obstacle',at:'2026-11-23T18:07:00Z',confidence:81,url:'/api/v1/history/photo?name=100-1.jpg'}];
+let labelSize=0;let petPhotos=[{name:'pet-1795500000-1.gif',source:'gif',at:'2026-11-24T09:00:00Z',url:'/api/v1/pets/photo?name=pet-1795500000-1.gif'},{name:'100-1.jpg',source:'obstacle',at:'2026-11-23T18:07:00Z',confidence:81,url:'/api/v1/history/photo?name=100-1.jpg'}];
 const gif=Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==','base64');
 let voiceCurrent='ZH',livePolls=0,tokens=[],restrict={walls:[[-900,-900,-500,-900]],no_go_zones:[],no_mop_zones:[]};const eventClients=new Set();
 const snapshot=()=>{const v=k=>values[k],state={activity:v('4/1')===2?'cleaning':'docked',status:v('4/1'),error:v('2/2'),battery:v('3/1'),charging:1,suction:v('4/4'),water:v('4/5'),station:v('4/25'),volume:v('7/1'),region:regionCode===200?'matched':'mismatched',region_code:regionCode,consumables:{main_brush:{left:52,hours:158},filter:{left:6,hours:8}},stats:{minutes:308,cleanings:22,area:264},dnd:{enabled:false,start:'22:00',end:'08:00'},schedules:[{id:3,enabled:true,time:'09:30',days:'0111110',rooms:[4]},{id:4,enabled:true,time:'10:00',days:'1111111',quick_command:32}],dnd_periods:[{id:0,enabled:true,start:'22:00',end:'08:00',days:'1111111'}],quick_commands:[{id:32,name:'Кухня'}],tank_drain:1};return {seq:1,updated_at:new Date().toISOString(),stale:staleState,error:staleState?'avacmd timed out':undefined,state};};
@@ -35,6 +35,7 @@ const server=http.createServer((req,res)=>{
   res.setHeader('Content-Type','application/json');
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   if(req.url==='/api/v1/events'){res.setHeader('Content-Type','text/event-stream');res.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');eventClients.add(res);req.on('close',()=>eventClients.delete(res));return;}
+  if(req.url==='/api/v1/ui'){res.end(JSON.stringify({result:{label_size:labelSize}}));return;}
   if(req.url==='/api/v1/logs'){res.end(JSON.stringify({result:[{source:'agent',text:'agent ready',size:11},{source:'mqtt',text:'connected to broker',size:19}]}));return;}
   if(req.url==='/api/v1/voice'){res.end(JSON.stringify({result:{current:voiceCurrent,voices:[{id:'EN',builtin:true,files:540},{id:'RU',builtin:false,files:3,bytes:2048},{id:'ZH',builtin:true,files:561}]}}));return;}
   if(req.url==='/api/v1/voice/phrases?id=EN'){res.end(JSON.stringify({result:[0,45,700]}));return;}
@@ -61,6 +62,7 @@ const server=http.createServer((req,res)=>{
  let body='';req.on('data',b=>body+=b);req.on('end',()=>{
   if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   const json=v=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result:v}));};
+  if(req.url==='/api/v1/ui'){const p=JSON.parse(body);commands.push({method:req.url,params:p});labelSize=p.label_size;json({label_size:labelSize});return;}
   if(req.url==='/api/v1/voice/use'){const p=JSON.parse(body);commands.push({method:req.url,params:p});voiceCurrent=p.id;json({current:voiceCurrent,voices:[{id:'EN',builtin:true,files:540},{id:'RU',builtin:false,files:3,bytes:2048}]});return;}
   if(req.url==='/api/v1/pets/delete'){const p=JSON.parse(body);commands.push({method:req.url,params:p});petPhotos=petPhotos.filter(x=>x.name!==p.name);json({deleted:p.name});return;}
   if(req.url==='/api/v1/system/tokens'){const t=JSON.parse(body);tokens.push({...t,created:'2026-11-22T10:00:00Z'});json({...t,created:'2026-11-22T10:00:00Z',token:'f'.repeat(64)});return;}
@@ -194,6 +196,8 @@ const server=http.createServer((req,res)=>{
   await sheet('station');assert(await page.locator('[data-command=dry_start]').isHidden());assert(await page.locator('[data-command=empty]').isVisible());assert.match(await page.locator('#model').innerText(),/r2505 · 4\.3\.9_2021$/);
   await mode('room');assert(await page.locator('#clear-selection').isHidden());const cyc0=await page.locator('#cycles').boundingBox();await page.mouse.click(...await at(-500,-250));await page.waitForFunction(()=>document.body.dataset.selected!==undefined);assert.equal((await page.locator('#cycles').boundingBox()).x,cyc0.x,'«Снять выбор» does not push «Циклы» aside');assert(await page.locator('#clear-selection').isVisible());await page.locator('#clean-rooms').click();await page.waitForFunction(()=>!document.querySelector('[data-command=start]').disabled);
   assert.deepEqual(commands.at(-1).params,{name:'clean_rooms',rooms:[1],repeats:1,suction:1,water:2});
+  {const fs=()=>page.locator('#map-labels').evaluate(e=>parseFloat(e.style.fontSize));assert.equal(await page.locator('.room-label',{hasText:'Кухня'}).count(),1);assert.equal(await page.locator('.room-badge').innerText(),'1');for(let k=0;k<8;k++)await page.locator('#zoom-in').click();assert.equal(await fs(),14,'labels stop growing at 14 px');await page.locator('#zoom-fit').click();
+   await sheet('update');await page.locator('#look-panel details').evaluate(d=>d.open=true);await page.locator('#label-size').selectOption('18');await until(()=>commands.at(-1)?.method==='/api/v1/ui');assert.deepEqual(commands.at(-1).params,{label_size:18});assert.equal(await fs(),18);await page.locator('#label-size').selectOption('0');await until(()=>commands.at(-1)?.params?.label_size===0);await page.evaluate(async()=>(await import('/app.js')).closeSheet());}
   await hclick('#rooms button:has-text("Гостиная")');await tile('split-details');assert.equal(await page.locator('[data-op=merge]').getAttribute('aria-pressed'),'true');await page.locator('#edit-save').click();await page.waitForFunction(()=>!document.querySelector('[data-command=start]').disabled);
   assert.deepEqual(JSON.parse(commands.at(-1).params.in[0].value),{msr:[1,2],mapid:2});
   await tile('split-details');await page.locator('[data-op=split]').click();await hclick('#rooms button:has-text("Кухня")');

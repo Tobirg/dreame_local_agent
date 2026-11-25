@@ -649,25 +649,30 @@ mapStage.addEventListener('pointermove',e=>{
 const endPointer=e=>{touches.delete(e.pointerId);if(touches.size<2)pinch=0;panMoved=!!pan?.moved;if(panMoved)setTimeout(()=>{panMoved=false;},0);pan=null;mapStage.classList.remove('panning');};
 mapStage.addEventListener('pointerup',endPointer);mapStage.addEventListener('pointercancel',endPointer);
 mapStage.addEventListener('click',e=>{if(panMoved){e.stopPropagation();e.preventDefault();panMoved=false;}},true); // a drag is not a tap on a room
+// Room names and order badges are page text over the map, not canvas pixels, so they stay sharp at any zoom.
+// Size: the agent's label_size (panel → Агент), or 10–14 px following the zoom when it is 0.
+let labelSize=0;
+async function loadLook(){try{labelSize=Number((await api('/api/v1/ui')).label_size)||0;}catch{labelSize=0;}const o=$('label-size');if(![...o.options].some(x=>Number(x.value)===labelSize))o.add(new Option(labelSize+' px',String(labelSize)));o.value=String(labelSize);}
+function renderLabels(order){
+ const box=$('map-labels'),cw=canvas.getBoundingClientRect().width,perUnit=cw?cw/(3*view.width):1;
+ box.style.fontSize=(labelSize||Math.min(14,Math.max(10,11*perUnit)))+'px';
+ const items=[];
+ for(const room of view.rooms){
+  const at=`left:${(room.x+.5)/view.width*100}%;top:${(view.height-room.y-.5)/view.height*100}%`;
+  const name=document.createElement('span');name.className='room-label';name.style.cssText=at;name.textContent=(roomIcons[room.type]?roomIcons[room.type]+' ':'')+room.name;
+  name.classList.toggle('dim',!!(roomsShown()&&selected.size&&!selected.has(room.id)));items.push(name);
+  const i=order.indexOf(room.id);
+  if(i>=0){const b=document.createElement('span');b.className='room-badge';b.style.cssText=at+';background:'+palette[(room.id-1)%palette.length];b.textContent=String(i+1);items.push(b);}
+ }
+ box.replaceChildren(...items);
+}
 function draw(){
  layoutMap();
- ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty)return;ctx.setTransform(res,0,0,res,0,0);
+ ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);if(!view||view.empty){$('map-labels').replaceChildren();return;}ctx.setTransform(res,0,0,res,0,0);
  const scale=3;baseLayer();
- // Room labels like the app: type icon and name.
- ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
  // Order badges as the app: the selection order in the room mode, the saved cleaning order in «Все».
  const order=dock.dataset.mode==='room'&&!editTool?[...selected]:dock.dataset.mode==='all'&&!editTool&&!openSheet?roomOrder.map(r=>r.id):[];
- // Labels stay between 10 and 14 screen pixels whatever the zoom: L scales drawing units to that.
- const cw=canvas.getBoundingClientRect().width,u=cw?3*view.width/cw:1,L=u*Math.min(14/11,Math.max(10/11,1/u));
- for(const room of view.rooms){
-  const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale,dim=roomsShown()&&selected.size&&!selected.has(room.id);
-  ctx.globalAlpha=dim?.55:1;
-  ctx.font=`600 ${11*L}px system-ui`;const label=(roomIcons[room.type]?roomIcons[room.type]+' ':'')+room.name;ctx.lineWidth=3*L;ctx.strokeStyle='rgba(23,35,45,.8)';ctx.strokeText(label,x,y+8*L);ctx.fillStyle='#fff';ctx.fillText(label,x,y+8*L);
- }
- ctx.globalAlpha=1;
- order.forEach((id,i)=>{const room=view.rooms.find(r=>r.id===id);if(!room)return;const x=(room.x+.5)*scale,y=(view.height-room.y-.5)*scale-9*L;
-  ctx.fillStyle=palette[(id-1)%palette.length];ctx.beginPath();ctx.arc(x,y,8*L,0,Math.PI*2);ctx.fill();ctx.lineWidth=2*L;ctx.strokeStyle='#fff';ctx.stroke();
-  ctx.fillStyle='#17232d';ctx.font=`700 ${10*L}px system-ui`;ctx.fillText(String(i+1),x,y+.5*L);});
+ renderLabels(order);
  drawThresholds();drawRestrictions();drawFurniture();drawPatrol();drawLive();
  if(points.length){ctx.strokeStyle='#ffae67';ctx.fillStyle='#ffae67';ctx.lineWidth=2;for(const p of points){ctx.beginPath();ctx.arc(p.x*scale,(view.height-p.y)*scale,4,0,Math.PI*2);ctx.fill();}if(points.length===2){ctx.beginPath();ctx.moveTo(points[0].x*scale,(view.height-points[0].y)*scale);ctx.lineTo(points[1].x*scale,(view.height-points[1].y)*scale);ctx.stroke();}}
  drawEditor();
@@ -883,7 +888,7 @@ async function login(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)document.querySelector('#sheet-wifi .sheet-body').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
- await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
+ await loadLook();await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);$('look-panel').hidden=$('update-panel').hidden;await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
 $('logout').onclick=()=>{clearPets();stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
@@ -1513,3 +1518,5 @@ document.querySelector('[data-sheet="tune"]').addEventListener('click',()=>reque
 syncChips();
 // Sub-pages (map editor, station settings): an opened block takes the sheet; its title is the way back.
 for(const d of document.querySelectorAll('.hub>details'))d.addEventListener('toggle',()=>{if(d.open)d.parentElement.scrollTop=0;draw();});
+
+$('label-size').onchange=async e=>{const prev=labelSize;try{labelSize=Number(e.target.value);draw();labelSize=Number((await api('/api/v1/ui',{label_size:labelSize})).label_size)||0;toast('Размер подписей сохранён');}catch(err){labelSize=prev;e.target.value=String(prev);draw();toast(err.message,true);}};
