@@ -32,6 +32,8 @@ const (
 )
 
 // Kept names: "pet-<unix time of the firmware file>-<its name, other characters replaced>.<ext>".
+var errPetPhotoNotFound = errors.New("photo not found")
+
 var (
 	petPhotoName   = regexp.MustCompile(`^pet-[0-9]{1,12}-[A-Za-z0-9_.-]{1,80}\.(gif|jpg|png)$`)
 	petUnsafeChars = regexp.MustCompile(`[^A-Za-z0-9_.-]`)
@@ -245,7 +247,7 @@ func (a *agent) deletePetPhoto(name string) error {
 		petPhotoMu.Lock()
 		defer petPhotoMu.Unlock()
 		if err := os.Remove(filepath.Join(a.path(petPhotoDir), name)); err != nil {
-			return errors.New("photo not found")
+			return errPetPhotoNotFound
 		}
 		return a.forgetPetPhotos(name)
 	case runPhotoName.MatchString(name):
@@ -260,7 +262,7 @@ func (a *agent) deletePetPhoto(name string) error {
 			}
 		}
 		if !found {
-			return errors.New("photo not found")
+			return errPetPhotoNotFound
 		}
 		b, err := json.Marshal(runs)
 		if err == nil {

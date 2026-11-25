@@ -397,9 +397,9 @@ $('refresh-history').onclick=()=>loadHistory().catch(e=>toast(e.message,true));
 // ---- Pet photos: the robot's pet GIFs the agent keeps and pet obstacle photos of runs, newest first.
 // They need the token, so they come through fetch as blobs; tiles load when scrolled into view.
 let petList=[],petIndex=-1,petBlobs=new Map(),petSwipe=null;
-const petObserver=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){petObserver.unobserve(e.target);e.target.load();}},{rootMargin:'200px'});
+const petObserver=window.IntersectionObserver?new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){petObserver.unobserve(e.target);e.target.load();}},{rootMargin:'200px'}):{observe:b=>b.load(),unobserve(){}};
 function petBlob(p){
- if(!petBlobs.has(p.url))petBlobs.set(p.url,fetch(p.url,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'}).then(async r=>{if(!r.ok)throw Error('Фото не загрузилось');return URL.createObjectURL(await r.blob());}));
+ if(!petBlobs.has(p.url))petBlobs.set(p.url,fetch(p.url,{headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'}).then(async r=>{if(!r.ok)throw Error('Фото не загрузилось');return URL.createObjectURL(await r.blob());}).catch(e=>{petBlobs.delete(p.url);throw e;})); // a failed one is fetched again next time
  return petBlobs.get(p.url);
 }
 const petCaption=p=>new Date(p.at).toLocaleString([], {dateStyle:'short',timeStyle:'short'})+(p.source==='obstacle'?' · уборка'+(p.confidence?' · '+p.confidence+'%':''):'');

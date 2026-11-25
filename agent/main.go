@@ -640,7 +640,15 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := a.deletePetPhoto(req.Name); err != nil {
-			send(404, map[string]string{"error": err.Error()})
+			switch {
+			case errors.Is(err, errPetPhotoNotFound):
+				send(404, map[string]string{"error": err.Error()})
+			case !petPhotoName.MatchString(req.Name) && !runPhotoName.MatchString(req.Name):
+				send(400, map[string]string{"error": err.Error()})
+			default:
+				log.Printf("pet photo delete: %v", err)
+				send(500, map[string]string{"error": "cannot delete the photo"})
+			}
 			return
 		}
 		send(200, map[string]any{"result": map[string]string{"deleted": req.Name}})
