@@ -26,7 +26,7 @@ const (
 	monitorSession   = "local"
 	monitorKeepAlive = 8 * time.Second
 	// The robot leaves remote control ~15 s after the last step; the session ends a while after that.
-	monitorIdle = 45 * time.Second
+	monitorIdle = 30 * time.Second
 )
 
 var errNoVideoCode = errors.New("set the video access code (panel: Camera) first: without the video monitoring session the robot runs the vacuum motor while driving")

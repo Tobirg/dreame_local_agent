@@ -16,22 +16,21 @@ const pace=1000; // the app repeats the held direction once a second
 export function mountMonitor({api,command,rpc,token,toast,statusText,mapCanvas,onClose}){
  const root=document.createElement('section');root.id='monitor';root.className='monitor';root.hidden=true;root.setAttribute('role','dialog');root.setAttribute('aria-label','Мониторинг камеры');root.innerHTML=html;document.body.append(root);
  const $=n=>root.querySelector(`[data-m="${n}"]`),img=$('img'),note=$('note');
- let open=false,flip=false,frame=null,stream=null,beat=0,miniTimer=0,driving=null,driveTimer=0,rec=null;
+ let open=false,flip=false,frame=null,stream=null,miniTimer=0,driving=null,driveTimer=0,rec=null;
  try{flip=localStorage.getItem('dreame-monitor-flip')==='1';}catch{}
  const showFlip=()=>{img.classList.toggle('flipped',flip);$('flip').setAttribute('aria-pressed',String(flip));};showFlip();
  const say=t=>{note.textContent=t;note.hidden=!t;};
- // The robot's monitoring session: asked again every 20 s while the screen is open, closed on exit.
- async function session(enabled){
-  try{await rpc('video_monitor',{enabled});if(enabled&&/код|code/i.test(note.textContent))say('');}
-  catch(e){if(enabled)say(e.message+(/code|код/i.test(e.message)?' Задай код в «Поездка и патруль» → «Код доступа к видео».':''));}
- }
+ // The robot's monitoring session (needed for driving without the motor) makes the firmware encode
+ // and send video to its cloud, so the screen does not open it for watching: the agent opens it on the
+ // first drive or pet search, and the screen ends it on exit.
+ const session=()=>rpc('video_monitor',{enabled:false}).catch(()=>{});
  // Frames: one long GET of /api/v1/camera/stream (multipart, each new JPEG as the module captures it).
  const enc=new TextEncoder(),dec=new TextDecoder(),gap=enc.encode('\r\n\r\n');
  function find(buf,pat,from=0){outer:for(let i=from;i<=buf.length-pat.length;i++){for(let j=0;j<pat.length;j++)if(buf[i+j]!==pat[j])continue outer;return i;}return -1;}
  function show(bytes){
   const url=URL.createObjectURL(new Blob([bytes],{type:'image/jpeg'})),old=img.src;
   img.onload=()=>{if(old.startsWith('blob:'))URL.revokeObjectURL(old);if(rec)rec.draw();};
-  img.src=url;img.hidden=false;frame=Date.now();if(!/код|code/i.test(note.textContent))say('');
+  img.src=url;img.hidden=false;frame=Date.now();say('');
  }
  async function frames(){
   while(open){
@@ -66,7 +65,7 @@ export function mountMonitor({api,command,rpc,token,toast,statusText,mapCanvas,o
  }
  const title=()=>{$('title').textContent=statusText()||'Мониторинг';};
  // Driving: send at once, repeat while held, stop with 0,0 on release, as the app does.
- const step=()=>rpc('remote_move',{velocity:driving[0],rotation:driving[1]}).catch(e=>{toast(e.message,true);drive(null);});
+ const step=()=>rpc('remote_move',{velocity:driving[0],rotation:driving[1]}).catch(e=>{toast(e.message+(/code|код/i.test(e.message)?' Задай код в «Поездка и патруль» → «Код доступа к видео».':''),true);drive(null);});
  function drive(move){
   const was=driving;clearInterval(driveTimer);driving=move;
   if(move){step();driveTimer=setInterval(step,pace);}
@@ -99,14 +98,14 @@ export function mountMonitor({api,command,rpc,token,toast,statusText,mapCanvas,o
  $('pet').onclick=()=>command('find_pet').then(()=>toast('Робот ищет питомца'),e=>toast(e.message,true));
  $('dock').onclick=()=>command('dock').then(()=>toast('Робот едет на базу'),e=>toast(e.message,true));
  function close(){
-  if(!open)return;open=false;stream?.abort();drive(null);rec?.stop();clearInterval(beat);clearInterval(miniTimer);root.hidden=true;delete document.body.dataset.monitor;session(false);onClose?.();
+  if(!open)return;open=false;stream?.abort();drive(null);rec?.stop();clearInterval(miniTimer);root.hidden=true;delete document.body.dataset.monitor;session();onClose?.();
  }
  $('back').onclick=close;
  root.querySelector('[data-sheet="camera"]').addEventListener('click',()=>close(),{capture:true});
  return {
   open(){
    if(open)return;open=true;frame=null;img.hidden=true;say('Включаю камеру…');root.hidden=false;document.body.dataset.monitor='1';
-   title();mini();session(true);beat=setInterval(()=>session(true),20000);miniTimer=setInterval(()=>{title();mini();},1000);
+   title();mini();miniTimer=setInterval(()=>{title();mini();},1000);
    api('/api/v1/m/camera/status',{}).then(s=>$('light').setAttribute('aria-pressed',String(!!s.light)),()=>{});
    frames();
   },
