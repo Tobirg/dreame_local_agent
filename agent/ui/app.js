@@ -270,6 +270,7 @@ function renderState(snap){
   const s=snap.state;
   $('status').textContent=statusNames[s.status]||(s.status>1510&&s.status<1600?'Самопроверка: проверка '+(s.status-1510):'Статус '+(s.status??'недоступен'));
   $('battery').textContent=s.battery===undefined?'—':s.battery+'%';$('battery').style.setProperty('--charge',(s.battery??0)+'%');
+  $('stat-area').textContent=Number.isFinite(s.cleaned_area)?String(s.cleaned_area):'—';$('stat-time').textContent=Number.isFinite(s.cleaning_time)?String(s.cleaning_time):'—';document.body.dataset.activity=s.activity||'';
   $('updated').textContent='Обновлено '+new Date(snap.updated_at).toLocaleTimeString();
   if(!fanDirty&&document.activeElement!==$('fan')&&s.suction!==undefined)$('fan').value=String(s.suction);
   if(!volumeDirty&&document.activeElement!==$('volume')&&s.volume!==undefined){$('volume').value=s.volume;$('volume-value').textContent=s.volume+'%';}
@@ -517,7 +518,7 @@ async function streamEvents(){
 function invalidateEdit(){pending=null;$('map-preview').textContent='';$('apply-map-edit').disabled=true;}
 function selectRoom(id){
  if($('map-operation').value==='split')selected=new Set(selected.has(id)?[]:[id]);
- else if(selected.has(id))selected.delete(id);else selected.add(id);
+ else if(selected.has(id))selected.delete(id);else{selected.add(id);if(!openSheet&&dock.dataset.mode==='all')setMode('room');}
  points=[];invalidateEdit();renderRoomButtons();draw();disableControls(busy);
 }
 function renderRoomButtons(){
@@ -548,10 +549,10 @@ function baseLayer(){
 // The whole map fits the window at 100%; the buttons zoom from there and only a zoomed map scrolls inside its frame.
 let zoom=1,res=0; // res: canvas pixels per 3 drawing units; the canvas gets sharper while zoomed in
 function layoutMap(){
- const stage=document.querySelector('.map-stage');stage.style.width='';
- const top=stage.getBoundingClientRect().top,avail=Math.max(260,innerHeight-Math.max(0,Math.min(top,innerHeight*.3))-24);
- const side=Math.round(Math.min(stage.clientWidth,avail)),fit=Math.min(side,side*canvas.width/canvas.height); // square frame, the same at every zoom
- stage.style.width=side+'px';stage.style.height=side+'px';stage.querySelector('.map-wrap').style.width=Math.round(fit*zoom)+'px';
+ const stage=document.querySelector('.map-stage'),w=stage.clientWidth-16,h=stage.clientHeight-16;
+ if(w<=0||h<=0)return; // hidden page: laid out again when the stage gets a size
+ const fit=Math.max(1,Math.min(w,h*canvas.width/canvas.height)); // the stage is sized by the page layout, the same at every zoom
+ stage.querySelector('.map-wrap').style.width=Math.round(fit*zoom)+'px';
  if(view&&!view.empty){const want=Math.max(1,Math.min(4,Math.floor(4096/(view.width*3)),Math.ceil(fit*zoom*(devicePixelRatio||1)/(view.width*3)))),mine=res;
   if(want!==mine){res=want;canvas.width=view.width*3*res;canvas.height=view.height*3*res;if(mine)draw();}}
  $('zoom-fit').textContent=Math.round(zoom*100)+'%';if(markerArgs)placeMarker(...markerArgs);
@@ -652,6 +653,7 @@ canvas.onclick=e=>{
  if(patrolDrawing){addPatrolPoint(x,y);return;}
  if(zoneDrawing){zone.push({x,y});if(zoneSpot){zoneDrawing=false;$('zone-status').textContent='Будет убран квадрат 1,5 × 1,5 м вокруг точки. Повторы, мощность и влажность — как для комнат.';}else if(zone.length===2){zoneDrawing=false;$('zone-status').textContent='Зона выбрана. Повторы, мощность и влажность — как для комнат.';}draw();disableControls(busy);return;}
  if(thresholdDrawing){addThresholdPoint(x,y);return;}
+ if(!openSheet&&dock.dataset.mode==='zone')return; // in zone mode a tap marks the zone, it does not pick rooms
  if($('threshold-details').open&&selectThresholdNear(x,y))return;
  if($('map-operation').value==='split'&&selected.size===1){if(points.length===2)points=[];points.push({x,y,robot:pixelToRobot(view,x,y)});invalidateEdit();draw();return;}
  const px=Math.min(view.width-1,Math.max(0,Math.floor(x))),py=Math.min(view.height-1,Math.max(0,Math.floor(y))),id=view.grid[py*view.width+px];
@@ -660,12 +662,13 @@ canvas.onclick=e=>{
 // Show only what this robot supports: commands the hardware table rules out and properties the robot never answers are hidden.
 export function applyCapabilities(caps){
  const id=caps.identity||{};hardware=caps.hardware||null;
+ $('robot-name').textContent=robotName(id.model);
  $('model').textContent=(id.model||'Неизвестная модель')+' · '+(id.fw_ver||'?')+(caps.firmware?.verified?'':' · прошивка не проверена');
  for(const button of document.querySelectorAll('[data-command]')){const c=caps.commands?.[button.dataset.command];button.hidden=c?.available===false;if(c?.reason)button.title=c.reason;}
  for(const [prop,input,apply] of [['suction','fan','save-fan'],['volume','volume','save-volume']]){const hide=caps.properties?.[prop]?.readable===false;$(input).closest('label').hidden=hide;$(apply).hidden=hide;}
 }
 async function login(){
- const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)$('main-page').append($('wifi-panel'));applyCapabilities(caps);
+ const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)document.querySelector('#sheet-wifi .sheet-body').append($('wifi-panel'));applyCapabilities(caps);
  $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
  sessionStorage.setItem('dreame-token',token);
  await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
@@ -1058,11 +1061,11 @@ function settingControl(def,value){
  return input;
 }
 // Pages (pages.js) with their own panel show there, next to the matching controls; if that panel is hidden
-// (no rights or the robot lacks it) they stay under «Все настройки пылесоса».
+// (no rights or the robot lacks it) they stay under «Все настройки пылесоса». A closed sheet still counts as shown.
 function settingGroup(id){
  const title=(pages.find(p=>p.items.includes(id))||pages.find(p=>new RegExp(p.match).test(id))).title;
  if(!document.querySelector('.setting-group'))for(const {title:name,home:homeId} of pages){
-  const g=document.createElement('section'),home=homeId&&$(homeId),inHome=home&&!home.closest('[hidden]');g.className='setting-group';g.hidden=true;g.dataset.group=name;
+  const g=document.createElement('section'),home=homeId&&$(homeId),inHome=home&&!home.closest('[hidden]:not(.sheet)');g.className='setting-group';g.hidden=true;g.dataset.group=name;
   if(!inHome)g.append(Object.assign(document.createElement('h3'),{textContent:name}));(inHome?home:$('settings-list')).append(g);
  }
  return document.querySelector(`.setting-group[data-group="${title}"]`);
@@ -1192,3 +1195,31 @@ $('add-patrol-schedule').onclick=()=>{
  const days=dayNames.map((_,i)=>$('patrol-days').querySelector('input[value="'+i+'"]').checked?'1':'0').join('');
  control('local.patrol_schedule',{enabled:true,time:$('patrol-time').value,days,points:patrolPoints}).then(()=>{$('patrol-status').textContent='Расписание патруля сохранено.';loadPatrolSchedules().catch(()=>{});},()=>{});
 };
+
+// ---- App-style layout: one screen with the map; everything else opens in sheets.
+const robotNames={'dreame.vacuum.r2505':'Dreame X50'};
+function robotName(model){return robotNames[model]||(model?'Dreame '+String(model).split('.').pop():'Робот-пылесос');}
+// The stage changes size with the window, an opened side sheet and the bottom bar's mode.
+let layoutPending=false;
+if('ResizeObserver' in window)new ResizeObserver(()=>{if(layoutPending)return;layoutPending=true;requestAnimationFrame(()=>{layoutPending=false;layoutMap();});}).observe(mapStage);
+// Bottom bar: Комната / Все / Зона pick which "Чистить" button is shown.
+const dock=$('dock');
+export function setMode(mode){
+ dock.dataset.mode=mode;for(const b of dock.querySelectorAll('.segmented button'))b.setAttribute('aria-selected',String(b.dataset.mode===mode));
+ if(mode!=='zone'&&(zoneDrawing||zone.length))$('cancel-zone').click();
+}
+for(const b of dock.querySelectorAll('.segmented button'))b.onclick=()=>setMode(b.dataset.mode);
+// Sheets: one open at a time, without a backdrop, so the map stays usable for map tools.
+let openSheet=null;
+export function showSheet(name){
+ const sheet=$('sheet-'+name);if(!sheet)return;
+ if(openSheet&&openSheet!==sheet)openSheet.hidden=true;
+ if(name==='menu')for(const item of sheet.querySelectorAll('[data-sheet]')){const target=$('sheet-'+item.dataset.sheet),panels=target?[...target.querySelectorAll('.sheet-body>.panel')]:[];item.hidden=panels.length>0&&panels.every(p=>p.hidden);}
+ // A sheet holding one folded block opens it: the sheet's title already names it.
+ const body=sheet.querySelector('.sheet-body'),only=body.querySelectorAll(':scope>.panel>details,:scope>details');if(only.length===1&&body.children.length===1&&!only[0].open)only[0].open=true;
+ sheet.hidden=false;openSheet=sheet;document.body.dataset.openSheet=name;sheet.querySelector('.sheet-close').focus({preventScroll:true});
+}
+export function closeSheet(){if(!openSheet)return;const opener=document.querySelector('[data-sheet="'+openSheet.id.slice(6)+'"]');openSheet.hidden=true;openSheet=null;delete document.body.dataset.openSheet;if(opener&&opener.offsetParent)opener.focus({preventScroll:true});}
+document.addEventListener('click',e=>{const opener=e.target.closest('[data-sheet]');if(opener){e.preventDefault();showSheet(opener.dataset.sheet);return;}if(e.target.closest('.sheet-close'))closeSheet();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openSheet)closeSheet();});
+$('nav-modules').addEventListener('click',()=>closeSheet());
