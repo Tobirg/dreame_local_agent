@@ -176,8 +176,33 @@ $('save-embed').onclick=async()=>{
  try{const r=await api('/api/v1/system/embed',{origins});$('embed-origins').value=r.origins.join('\n');$('embed-status').textContent=r.origins.length?'Сохранено. Страницу можно встроить с этих адресов.':'Сохранено. Встраивание запрещено.';}
  catch(e){$('embed-status').textContent=e.message;}
 };
+// ADB: the allowed keys and a switch until the next reboot; the last key cannot be removed.
+function renderADB(s){
+ $('adb-status').textContent=s.running?(s.auth===false?'ADB включён без проверки ключа!':'ADB включён, вход только по ключу.'):'ADB выключен до перезагрузки робота.';
+ $('adb-toggle').textContent=s.running?'Выключить до перезагрузки':'Включить';$('adb-toggle').dataset.on=s.running?'1':'';
+ $('adb-keys').replaceChildren();$('adb-add').hidden=!s.editable;
+ for(const k of s.keys){
+  const row=document.createElement('div'),label=document.createElement('span');row.className='module-row';label.textContent=(k.comment||'без подписи')+' · '+k.id;row.append(label);
+  if(s.editable&&s.keys.length>1){const remove=document.createElement('button');remove.textContent='Удалить';remove.className='ghost';
+   remove.onclick=async()=>{if(!window.confirm('Удалить ключ '+(k.comment||k.id)+'? Это устройство больше не сможет зайти по ADB.'))return;
+    try{const response=await fetch('/api/v1/system/adb/keys/'+encodeURIComponent(k.id),{method:'DELETE',headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'});
+     const body=await response.json();if(!response.ok)throw Error(body.error||'Ошибка HTTP '+response.status);renderADB(body.result);$('adb-result').textContent='Ключ удалён.';}catch(e){toast(e.message,true);}};
+   row.append(remove);}
+  $('adb-keys').append(row);
+ }
+ if(!s.keys.length)$('adb-keys').textContent=s.keys_error||'Ключей нет.';
+}
+async function loadADB(){renderADB(await api('/api/v1/system/adb'));}
+$('adb-toggle').onclick=async()=>{
+ const on=!!$('adb-toggle').dataset.on;if(on&&!window.confirm('Выключить ADB? Он включится снова после перезагрузки робота или здесь.'))return;
+ $('adb-toggle').disabled=true;try{renderADB(await api('/api/v1/system/adb',{enabled:!on}));$('adb-result').textContent='';}catch(e){$('adb-result').textContent=e.message;}finally{$('adb-toggle').disabled=false;}
+};
+$('adb-add-key').onclick=async()=>{
+ try{renderADB(await api('/api/v1/system/adb/keys',{key:$('adb-key').value.trim()}));$('adb-key').value='';$('adb-add').open=false;$('adb-result').textContent='Ключ добавлен.';}
+ catch(e){$('adb-result').textContent=e.status===400?'Не подходит: '+e.message:e.message;}
+};
 async function loadTokens(){
- await loadEmbed().catch(()=>{});
+ await loadEmbed().catch(()=>{});loadADB().catch(e=>{$('adb-status').textContent=e.message;});
  const list=await api('/api/v1/system/tokens');$('token-list').replaceChildren();
  for(const t of list){
   const row=document.createElement('div'),label=document.createElement('span'),remove=document.createElement('button');

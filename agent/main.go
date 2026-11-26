@@ -72,6 +72,7 @@ type agent struct {
 	network      networkJob
 	dev          device
 	modules      moduleHost
+	adb          adbControl
 	configPath   string // absolute; the update helper is started with it
 	cfg          config
 	tokensMu     sync.RWMutex  // guards cfg.Tokens, cfg.Token and cfg.ModuleSecret

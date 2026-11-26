@@ -180,6 +180,10 @@ func (a *agent) tokenRoutes(w http.ResponseWriter, r *http.Request, send func(in
 		a.videoCloudRoute(w, r, send)
 		return true
 	}
+	if p == "/api/v1/system/adb" || strings.HasPrefix(p, "/api/v1/system/adb/") {
+		a.adbRoute(r, send)
+		return true
+	}
 	if p == "/api/v1/system/password" {
 		a.passwordRoute(r, send)
 		return true
