@@ -432,3 +432,5 @@ body[data-monitor]{overflow:hidden}
 .update-banner{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:12px;width:max-content;max-width:calc(100vw - 32px);padding:8px 8px 8px 16px;background:var(--ink);color:var(--paper);border-radius:999px;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.2)}
 .update-banner[hidden]{display:none}
 .update-banner button{border-radius:999px;padding:6px 14px;background:var(--go);color:#fff;border:0;font-weight:600}
+.adb-request{top:auto;bottom:24px;border-radius:14px;flex-wrap:wrap}
+.adb-request #adb-decline{background:transparent;color:var(--paper);border:1px solid currentColor}

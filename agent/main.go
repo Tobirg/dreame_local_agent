@@ -73,6 +73,7 @@ type agent struct {
 	dev          device
 	modules      moduleHost
 	adb          adbControl
+	adbWatch     adbWatch
 	configPath   string // absolute; the update helper is started with it
 	cfg          config
 	tokensMu     sync.RWMutex  // guards cfg.Tokens, cfg.Token and cfg.ModuleSecret
@@ -902,6 +903,7 @@ func main() {
 	go a.runPoller(portalContext, 5*time.Second)
 	go a.runPatrolSchedules(portalContext)
 	go a.runPetPhotos(portalContext)
+	go a.runADBWatch(portalContext)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan struct{})

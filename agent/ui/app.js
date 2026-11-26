@@ -178,9 +178,9 @@ $('save-embed').onclick=async()=>{
 };
 // ADB: the allowed keys and a switch until the next reboot; the last key cannot be removed.
 function renderADB(s){
- $('adb-status').textContent=s.running?(s.auth===false?'ADB включён без проверки ключа!':'ADB включён, вход только по ключу.'):'ADB выключен до перезагрузки робота.';
+ $('adb-status').textContent=s.running?(s.auth===false?'ADB включён без проверки ключа!':'ADB включён, вход только по ключу.'):'ADB выключен до перезагрузки робота.';if(s.watching===false)$('adb-status').textContent+=' Запросы новых устройств не отслеживаются'+(s.watch_error?': '+s.watch_error:'')+'.';
  $('adb-toggle').textContent=s.running?'Выключить до перезагрузки':'Включить';$('adb-toggle').dataset.on=s.running?'1':'';
- $('adb-keys').replaceChildren();$('adb-add').hidden=!s.editable;
+ $('adb-keys').replaceChildren();$('adb-add').hidden=!s.editable;showADBRequest(s);
  for(const k of s.keys){
   const row=document.createElement('div'),label=document.createElement('span');row.className='module-row';label.textContent=(k.comment||'без подписи')+' · '+k.id;row.append(label);
   if(s.editable&&s.keys.length>1){const remove=document.createElement('button');remove.textContent='Удалить';remove.className='ghost';
@@ -193,6 +193,18 @@ function renderADB(s){
  if(!s.keys.length)$('adb-keys').textContent=s.keys_error||'Ключей нет.';
 }
 async function loadADB(){renderADB(await api('/api/v1/system/adb'));}
+// A device with an unknown key tried to connect: ask, as Android does. Checked every 5 s while the panel is open.
+let adbAsking=null,adbTimer=null;
+function showADBRequest(s){
+ const r=(s.requests||[])[0];adbAsking=r?r.id:null;$('adb-request').hidden=!r;
+ if(r)$('adb-request-text').textContent='ADB: «'+(r.comment||'без подписи')+'» ('+r.from+') хочет подключиться';
+}
+async function answerADB(allow){
+ const id=adbAsking;if(!id)return;
+ try{const s=await api('/api/v1/system/adb/requests/'+encodeURIComponent(id),{allow});renderADB(s);toast(allow?'Ключ добавлен. Подключись ещё раз: adb disconnect, затем adb connect.':'Запрос отклонён.');}catch(e){toast(e.message,true);}
+}
+$('adb-allow').onclick=()=>answerADB(true);$('adb-decline').onclick=()=>answerADB(false);
+function watchADB(){clearInterval(adbTimer);adbTimer=setInterval(()=>{if(token&&!document.hidden&&!$('tokens-panel').hidden)loadADB().catch(()=>{});},5000);}
 $('adb-toggle').onclick=async()=>{
  const on=!!$('adb-toggle').dataset.on;if(on&&!window.confirm('Выключить ADB? Он включится снова после перезагрузки робота или здесь.'))return;
  $('adb-toggle').disabled=true;try{renderADB(await api('/api/v1/system/adb',{enabled:!on}));$('adb-result').textContent='';}catch(e){$('adb-result').textContent=e.message;}finally{$('adb-toggle').disabled=false;}
@@ -202,7 +214,7 @@ $('adb-add-key').onclick=async()=>{
  catch(e){$('adb-result').textContent=e.status===400?'Не подходит: '+e.message:e.message;}
 };
 async function loadTokens(){
- await loadEmbed().catch(()=>{});loadADB().catch(e=>{$('adb-status').textContent=e.message;});
+ await loadEmbed().catch(()=>{});loadADB().catch(e=>{$('adb-status').textContent=e.message;});watchADB();
  const list=await api('/api/v1/system/tokens');$('token-list').replaceChildren();
  for(const t of list){
   const row=document.createElement('div'),label=document.createElement('span'),remove=document.createElement('button');
@@ -975,7 +987,7 @@ async function loginNow(){
  await loadLook();await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('video-code-panel',loadVideoCode);await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);$('look-panel').hidden=$('update-panel').hidden;await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
-$('logout').onclick=()=>{clearPets();stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
+$('logout').onclick=()=>{clearPets();clearInterval(adbTimer);adbTimer=null;adbAsking=null;$('adb-request').hidden=true;stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
 // Buttons of the actions catalog (actions.js) go to their page's container; data-command keeps them under
 // the capability hiding, the busy lock and the click handler below.
 for(const act of actions){
@@ -1595,7 +1607,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openSheet)closeShee
 let swallowClick=false;
 document.addEventListener('pointerdown',e=>{
  swallowClick=false;
- if(!openSheet||openSheet.contains(e.target)||e.target.closest('[data-sheet],.photo-viewer,#toast,#update-banner'))return;
+ if(!openSheet||openSheet.contains(e.target)||e.target.closest('[data-sheet],.photo-viewer,#toast,#update-banner,#adb-request'))return;
  if(openSheet.id==='sheet-camera'&&mapStage.contains(e.target))return;
  closeSheet();swallowClick=true;e.stopPropagation();
 },true);

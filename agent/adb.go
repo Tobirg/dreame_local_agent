@@ -274,7 +274,13 @@ func (a *agent) startADB() error {
 func (a *agent) adbStatus() map[string]any {
 	adbd, _ := a.adbPIDs()
 	keys, editable, err := a.adbKeys()
-	out := map[string]any{"running": len(adbd) > 0, "keys": keys, "editable": editable}
+	a.adbWatch.mu.Lock()
+	watching, watchErr := a.adbWatch.running, a.adbWatch.err
+	a.adbWatch.mu.Unlock()
+	out := map[string]any{"running": len(adbd) > 0, "keys": keys, "editable": editable, "requests": a.adbRequests(time.Now()), "watching": watching}
+	if watchErr != "" {
+		out["watch_error"] = watchErr
+	}
 	if len(adbd) > 0 {
 		out["auth"] = a.adbAuthChecked(adbd[0])
 	}
@@ -326,6 +332,19 @@ func (a *agent) adbRoute(r *http.Request, send func(int, any)) {
 			return
 		}
 		if err := a.addADBKey(req.Key); err != nil {
+			fail(err)
+			return
+		}
+		send(200, map[string]any{"result": a.adbStatus()})
+	case strings.HasPrefix(r.URL.Path, "/api/v1/system/adb/requests/") && r.Method == "POST":
+		var req struct {
+			Allow *bool `json:"allow"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req) != nil || req.Allow == nil {
+			send(400, map[string]string{"error": `send {"allow": true|false}`})
+			return
+		}
+		if err := a.answerADBRequest(strings.TrimPrefix(r.URL.Path, "/api/v1/system/adb/requests/"), *req.Allow); err != nil {
 			fail(err)
 			return
 		}

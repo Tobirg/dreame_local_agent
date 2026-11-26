@@ -6,7 +6,7 @@ const assert=require('node:assert/strict');
 let refuseSetting=false,agentVersion='0.7.0'; // makes the fake robot reject local.setting
 const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES?process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright':'playwright');
 const root=path.resolve(__dirname,'../agent/ui'),token='a'.repeat(40),commands=[],commandReplies=new Map();
-let adb={running:true,auth:true,editable:true,keys:[{id:'aaaa',comment:'pavel@PashaPC'},{id:'bbbb',comment:'old-phone'}]};
+let adb={running:true,auth:true,editable:true,watching:true,requests:[],keys:[{id:'aaaa',comment:'pavel@PashaPC'},{id:'bbbb',comment:'old-phone'}]};
 let password=token; // the fake agent's current password (the panel can change it)
 let staleState=false,revision='test-map-1',regionCode=200,installedModules=[],stagedUpload=null,updateLast=null,updatePrevious=null,stagedAgent=null,dropNextRead=false,dropNextMutation=false;
 const values={'2/1':6,'2/2':0,'3/1':95,'4/1':6,'4/4':1,'4/5':2,'4/25':0,'7/1':50,'4/23':(2<<16)|(20<<8),'4/27':0,'28/1':10,'28/63':0,'28/38':1,'7/14':0,'4/50':JSON.stringify([{k:'AutoDry',v:1},{k:'SmartCharge',v:1},{k:'CleanRoute',v:1},{k:'BackWashType',v:3}]),'4/22':JSON.stringify({obstacle_detect_switch:true,human_detect_switch:false,untouched:42}),'5/4':JSON.stringify([{id:9,en:true,st:'22:00',et:'08:00',wk:127,ss:0,extra:'keep'},{id:10,en:false,st:'12:00',et:'13:00',wk:1,ss:0}])};
@@ -76,6 +76,7 @@ const server=http.createServer((req,res)=>{
   if(req.url==='/api/v1/system/video_cloud'){videoCloud=JSON.parse(body).enabled===true;json({enabled:videoCloud});return;}
   if(req.url==='/api/v1/system/video_code'){const c=JSON.parse(body).code;videoCodes.push(c);videoCode=c!=='';json({configured:videoCode});return;}
   if(req.url==='/api/v1/system/adb'){adb.running=JSON.parse(body).enabled;json(adb);return;}
+  if(req.url.startsWith('/api/v1/system/adb/requests/')){const id=req.url.split('/').pop(),r=adb.requests.find(x=>x.id===id);adb.requests=adb.requests.filter(x=>x.id!==id);if(JSON.parse(body).allow)adb.keys.push({id,comment:r.comment});json(adb);return;}
   if(req.url==='/api/v1/system/adb/keys'){const k=JSON.parse(body).key;if(!k.startsWith('QAAAA')){res.writeHead(400);res.end(JSON.stringify({error:'not an ADB public key'}));return;}adb.keys.push({id:'cccc',comment:k.split(' ')[1]||''});json(adb);return;}
   if(req.url==='/api/v1/system/password'){const r=JSON.parse(body);if(r.current!==password){res.writeHead(403);res.end(JSON.stringify({error:'current password is wrong'}));return;}if(r.new.length<8){res.writeHead(400);res.end(JSON.stringify({error:'password: 8 to 128 characters'}));return;}password=r.new;json({changed:true});return;}
   if(req.url==='/api/v1/system/tokens'){const t=JSON.parse(body);tokens.push({...t,created:'2026-11-22T10:00:00Z'});json({...t,created:'2026-11-22T10:00:00Z',token:'f'.repeat(64)});return;}
@@ -226,6 +227,11 @@ const server=http.createServer((req,res)=>{
   await page.locator('#adb-toggle').click();await page.waitForFunction(()=>document.querySelector('#adb-status').textContent.includes('включён'));assert.equal(adb.running,true);
   await page.locator('#adb-add summary').click();await page.locator('#adb-key').fill('garbage');await page.locator('#adb-add-key').click();await page.waitForFunction(()=>document.querySelector('#adb-result').textContent.includes('Не подходит'));
   await page.locator('#adb-key').fill('QAAAAkey tablet');await page.locator('#adb-add-key').click();await page.waitForFunction(()=>document.querySelector('#adb-keys').textContent.includes('tablet'));
+  // A new device asks to connect: the banner appears within the 5 s check and "Allow" adds its key.
+  adb.requests=[{id:'dddd',comment:'pavel@laptop',from:'192.168.2.50',at:'2026-11-26T01:00:00Z'}];
+  await page.locator('#adb-request').waitFor({state:'visible',timeout:8000});assert.match(await page.locator('#adb-request-text').innerText(),/pavel@laptop.*192\.168\.2\.50/);
+  await page.locator('#adb-allow').click();await page.waitForFunction(()=>document.querySelector('#adb-request').hidden&&document.querySelector('#adb-keys').textContent.includes('pavel@laptop'));
+  assert.deepEqual(adb.keys.map(k=>k.id),['aaaa','cccc','dddd']);
   await page.locator('#adb-block>summary').click();
   // Password change: a wrong current password or a mismatch keeps the old one; then the panel goes on with the new one.
   await page.locator('#password-block>summary').click();
