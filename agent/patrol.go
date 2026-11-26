@@ -22,6 +22,7 @@ const (
 var patrolRun struct {
 	sync.Mutex
 	cancel context.CancelFunc
+	id     uint64
 }
 
 // stopPatrol ends a running patrol; any command that moves the robot calls it first.
@@ -57,10 +58,19 @@ func (a *agent) startPatrol(ctx context.Context, p commandParams, did string) (a
 	run, cancel := context.WithCancel(context.Background())
 	patrolRun.Lock()
 	patrolRun.cancel = cancel
+	patrolRun.id++
+	id := patrolRun.id
 	patrolRun.Unlock()
 	go func() {
 		defer release()
 		a.patrol(run, legs)
+		// Forget only this patrol: a newer one started meanwhile keeps running.
+		patrolRun.Lock()
+		if patrolRun.id == id && patrolRun.cancel != nil {
+			patrolRun.cancel()
+			patrolRun.cancel = nil
+		}
+		patrolRun.Unlock()
 	}()
 	return map[string]any{"patrol": "started", "points": len(legs)}, nil
 }
@@ -91,7 +101,6 @@ func (a *agent) patrol(ctx context.Context, legs []json.RawMessage) {
 	if _, err := a.call(ctx, request{Method: "action", Params: json.RawMessage(`{"siid":3,"aiid":1,"in":[]}`)}); err != nil {
 		log.Printf("patrol: dock not sent: %v", err)
 	}
-	stopPatrol()
 }
 
 // waitArrival waits for status 23 (driving) and then 17 (standing at the point).

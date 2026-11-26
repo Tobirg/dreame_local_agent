@@ -262,6 +262,11 @@ func (a *agent) call(ctx context.Context, req request) (any, error) {
 		return nil, ctx.Err()
 	}
 	defer func() { <-a.gate }()
+	// select picks at random when both are ready: a caller cancelled while it waited (a patrol the
+	// owner stopped) must not send its step after the command that stopped it.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	info, err := a.identity()
 	if err != nil {
 		return nil, err

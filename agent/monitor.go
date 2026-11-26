@@ -165,43 +165,70 @@ func (a *agent) keepMonitor(stop chan struct{}) {
 			return
 		case <-t.C:
 		}
-		monitor.Lock()
-		idle := monitor.holds == 0 && time.Since(monitor.last) > monitorIdle
-		monitor.Unlock()
-		fields := map[string]any{"operType": "keep_alive", "videoStatus": "opened"}
-		if idle {
-			fields = map[string]any{"operType": "monitor", "operation": "end"}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		raw, _ := json.Marshal(monitorAction("", 1, idle2piid(idle), fields))
-		_, err := a.call(ctx, request{Method: "action", Params: raw})
-		cancel()
-		if err != nil {
-			log.Printf("video monitoring: %v", err)
-		}
-		if !idle && err == nil {
-			a.holdCamera(true) // keep the hold fresh
-		}
-		if idle || err != nil {
-			monitor.Lock()
-			if monitor.stop == stop {
-				monitor.open = false
-				monitor.stop = nil
-				a.cloudBlock(false)
-				a.holdCamera(false)
-			}
-			monitor.Unlock()
+		if a.endIdleMonitor(stop) {
 			return
 		}
+		fields := map[string]any{"operType": "keep_alive", "videoStatus": "opened"}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		raw, _ := json.Marshal(monitorAction("", 1, 6, fields))
+		_, err := a.call(ctx, request{Method: "action", Params: raw})
+		cancel()
+		if err == nil {
+			a.holdCamera(true) // keep the hold fresh
+			continue
+		}
+		log.Printf("video monitoring: %v", err)
+		monitor.Lock()
+		if monitor.stop == stop {
+			monitor.open = false
+			monitor.stop = nil
+			a.cloudBlock(false)
+			a.holdCamera(false)
+		}
+		monitor.Unlock()
+		return
 	}
 }
 
-// keep_alive goes to piid 6 (checkAlive), start and end to piid 1 (PropMonitor).
-func idle2piid(end bool) int {
-	if end {
-		return 1
+// endIdleMonitor ends the session when nobody used it for monitorIdle and reports whether it is over.
+// It checks and ends while holding the IPC gate and the monitor lock (the order runCommand takes them):
+// a drive step that slipped in between the check and the end would find the session "open", be sent
+// after the end and run the vacuum motor. keep_alive goes to piid 6 (checkAlive), start and end to
+// piid 1 (PropMonitor).
+func (a *agent) endIdleMonitor(stop chan struct{}) bool {
+	monitor.Lock()
+	idle := monitor.holds == 0 && time.Since(monitor.last) > monitorIdle
+	monitor.Unlock()
+	if !idle {
+		return false
 	}
-	return 6
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	select {
+	case a.gate <- struct{}{}:
+	case <-ctx.Done():
+		return false // the next tick tries again
+	}
+	defer func() { <-a.gate }()
+	monitor.Lock()
+	defer monitor.Unlock()
+	if monitor.stop != stop {
+		return true // ended or replaced meanwhile
+	}
+	if monitor.holds > 0 || time.Since(monitor.last) <= monitorIdle {
+		return false // used again while we waited for the gate
+	}
+	info, err := a.identity()
+	if err == nil {
+		_, err = a.miot(ctx, "action", monitorAction(info["did"], 1, 1, map[string]any{"operType": "monitor", "operation": "end"}))
+	}
+	if err != nil {
+		log.Printf("video monitoring: %v", err)
+	}
+	monitor.open, monitor.stop = false, nil
+	a.cloudBlock(false)
+	a.holdCamera(false)
+	return true
 }
 
 // videoCodeRoute: GET says whether a code is set; POST {"code": "1234"} stores its sha256, "" clears it.
@@ -229,6 +256,13 @@ func (a *agent) videoCodeRoute(w http.ResponseWriter, r *http.Request, send func
 			a.cfg.VideoCodeSHA256 = hash
 		}
 		a.tokensMu.Unlock()
+		if err == nil {
+			// Entering the code again (say, after fixing it in the Dreame app) is a new try, even
+			// when it is the same code the robot refused before.
+			monitor.Lock()
+			monitor.refused = ""
+			monitor.Unlock()
+		}
 		if err != nil {
 			send(500, map[string]string{"error": err.Error()})
 			return
