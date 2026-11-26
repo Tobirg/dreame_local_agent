@@ -303,6 +303,15 @@ func stopAgent() error {
 	return nil
 }
 
+// extendDeadlines gives a large upload time to arrive and its answer time to leave: the server's
+// write deadline runs from the request headers, so without the second one a slow upload is
+// processed but its reply is cut and the panel reports a failure.
+func extendDeadlines(w http.ResponseWriter, upload time.Duration) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(upload))
+	_ = rc.SetWriteDeadline(time.Now().Add(upload + time.Minute))
+}
+
 // systemRoutes handles /api/v1/system/update*; false when the path is not one of them.
 func (a *agent) systemRoutes(w http.ResponseWriter, r *http.Request, send func(int, any)) bool {
 	p := r.URL.Path
@@ -333,7 +342,7 @@ func (a *agent) systemRoutes(w http.ResponseWriter, r *http.Request, send func(i
 		return true
 	}
 	if p == "/api/v1/system/update/stage" {
-		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(5 * time.Minute))
+		extendDeadlines(w, 5*time.Minute)
 		data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAgentBinary))
 		if err != nil {
 			send(400, map[string]string{"error": "file too large or upload interrupted"})

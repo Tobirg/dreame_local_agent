@@ -100,6 +100,17 @@ func wifiConfig(ssid, password string) []byte {
 	}
 	return []byte(s)
 }
+
+// wpaSSID decodes an SSID as wpa_cli prints it: bytes outside printable ASCII (Cyrillic, emoji)
+// come as \xNN, a quote or backslash with a backslash before it.
+func wpaSSID(v string) string {
+	if strings.Contains(v, "\\") {
+		if decoded, err := strconv.Unquote("\"" + v + "\""); err == nil {
+			return decoded
+		}
+	}
+	return v
+}
 func wifiSignal(status, signal string) (string, *int, *int) {
 	ssid := ""
 	connected := true
@@ -110,12 +121,7 @@ func wifiSignal(status, signal string) (string, *int, *int) {
 			connected = false
 		}
 		if ok && k == "ssid" {
-			ssid = v
-			if strings.Contains(v, "\\") {
-				if decoded, err := strconv.Unquote("\"" + v + "\""); err == nil {
-					ssid = decoded
-				}
-			}
+			ssid = wpaSSID(v)
 		}
 	}
 	for _, line := range strings.Split(signal, "\n") {
@@ -262,7 +268,7 @@ func (a *agent) runWiFi(script, ssid, password string) {
 				fields[k] = v
 			}
 		}
-		connected = e == nil && fields["wpa_state"] == "COMPLETED" && fields["ip_address"] != "" && fields["ssid"] == ssid
+		connected = e == nil && fields["wpa_state"] == "COMPLETED" && fields["ip_address"] != "" && wpaSSID(fields["ssid"]) == ssid
 	}
 	if connected {
 		finish("connected", "")

@@ -519,6 +519,9 @@ func (a *agent) firmwareMessage(ctx context.Context, module string, raw []byte) 
 		return nil, ctx.Err()
 	}
 	defer func() { <-a.gate }()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if _, err := a.identity(); err != nil {
 		return nil, err
 	}
@@ -586,8 +589,8 @@ func (a *agent) moduleRoutes(w http.ResponseWriter, r *http.Request, send func(i
 			return true
 		}
 		if p == "/api/v1/modules/stage" {
-			// Large packages over Wi-Fi outlast the server-wide read timeout.
-			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(5 * time.Minute))
+			// Large packages over Wi-Fi outlast the server-wide timeouts.
+			extendDeadlines(w, 5*time.Minute)
 			data, ok := readJSON(maxPackage)
 			if ok {
 				reply(a.stageModule(data))
