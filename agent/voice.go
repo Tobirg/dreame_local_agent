@@ -344,7 +344,7 @@ func (a *agent) voiceRoutes(w http.ResponseWriter, r *http.Request, send func(in
 		return true
 	}
 	if p == "/api/v1/voice/install" {
-		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(5 * time.Minute))
+		extendDeadlines(w, 5*time.Minute)
 		pack, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxVoicePack))
 		if err != nil {
 			send(400, map[string]string{"error": "file too large (64 MB at most) or upload interrupted"})
