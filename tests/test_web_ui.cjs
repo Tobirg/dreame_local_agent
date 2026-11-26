@@ -129,6 +129,11 @@ const server=http.createServer((req,res)=>{
   const shown=id=>page.waitForFunction(id=>!document.getElementById(id).hidden,id);
   await page.goto(url);assert(await page.locator('#login').isVisible());
   await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelectorAll('#rooms button').length===2);
+  // A reload with the remembered token opens the panel without ever showing the login form.
+  await page.waitForFunction(t=>localStorage.getItem('dreame-token')===t,token);
+  await page.addInitScript(()=>{window.__loginShown=false;const check=()=>{const l=document.getElementById('login');if(l&&!l.hidden)window.__loginShown=true;};new MutationObserver(check).observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden']});});
+  await page.reload();await page.locator('#dashboard').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelectorAll('#rooms button').length===2);
+  assert.equal(await page.evaluate(()=>window.__loginShown),false,'login form flashed on reload');
   assert.equal(await page.locator('#battery').innerText(),'95%');
   assert.match(await page.locator('#obstacles').textContent(),/Препятствия от .*: носок ×2, неизвестное препятствие/);
   await shown('logs-panel');await sheet('logs');await page.locator('#logs-details').evaluate(d=>d.open=true);await page.locator('#log-source').selectOption('mqtt');assert.equal(await page.locator('#log-text').textContent(),'connected to broker');
