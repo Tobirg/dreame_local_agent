@@ -7,7 +7,8 @@ let refuseSetting=false,agentVersion='0.7.0'; // makes the fake robot reject loc
 const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES?process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright':'playwright');
 const root=path.resolve(__dirname,'../agent/ui'),token='a'.repeat(40),commands=[],commandReplies=new Map();
 let adb={running:true,auth:true,editable:true,watching:true,requests:[],keys:[{id:'aaaa',comment:'pavel@PashaPC'},{id:'bbbb',comment:'old-phone'}]};
-let password=token; // the fake agent's current password (the panel can change it)
+let password=token;
+let accounts=[],logins=[],signedIn='',logouts=0; // the fake agent's current password (the panel can change it)
 let staleState=false,revision='test-map-1',regionCode=200,installedModules=[],stagedUpload=null,updateLast=null,updatePrevious=null,stagedAgent=null,dropNextRead=false,dropNextMutation=false;
 const values={'2/1':6,'2/2':0,'3/1':95,'4/1':6,'4/4':1,'4/5':2,'4/25':0,'7/1':50,'4/23':(2<<16)|(20<<8),'4/27':0,'28/1':10,'28/63':0,'28/38':1,'7/14':0,'4/50':JSON.stringify([{k:'AutoDry',v:1},{k:'SmartCharge',v:1},{k:'CleanRoute',v:1},{k:'BackWashType',v:3}]),'4/22':JSON.stringify({obstacle_detect_switch:true,human_detect_switch:false,untouched:42}),'5/4':JSON.stringify([{id:9,en:true,st:'22:00',et:'08:00',wk:127,ss:0,extra:'keep'},{id:10,en:false,st:'12:00',et:'13:00',wk:1,ss:0}])};
 const capabilities={agent:{version:'0.7.0'},identity:{model:'dreame.vacuum.r2505',did:'123',fw_ver:'4.3.9_2021'},firmware:{profile:'r2505-r2440-4.3.9_2021',verified:true},control:true,properties:{suction:{readable:true},volume:{readable:true}},commands:{start:{available:true},locate:{available:true},dry_start:{available:false,reason:'HOT_AIR_DRYING_AC_PTC=N'},dry_stop:{available:false,reason:'HOT_AIR_DRYING_AC_PTC=N'}}};
@@ -50,6 +51,8 @@ const server=http.createServer((req,res)=>{
   if(req.url==='/api/v1/system/video_cloud'){res.end(JSON.stringify({result:{enabled:videoCloud}}));return;}
   if(req.url==='/api/v1/system/video_code'){res.end(JSON.stringify({result:{configured:videoCode}}));return;}
   if(req.url==='/api/v1/system/adb'){res.end(JSON.stringify({result:adb}));return;}
+  if(req.url==='/api/v1/account'){const acc=accounts.find(x=>x.name===signedIn);res.end(JSON.stringify({result:{name:signedIn,role:signedIn==='admin'?'admin':acc?acc.role:''}}));return;}
+  if(req.url==='/api/v1/system/accounts'){res.end(JSON.stringify({result:[{name:'admin',role:'admin'},...accounts.map(({name,role})=>({name,role}))]}));return;}
   if(req.url==='/api/v1/system/tokens'){res.end(JSON.stringify({result:tokens.map(({name,scope,created})=>({name,scope,created}))}));return;}
   if(req.url==='/api/v1/modules'){res.end(JSON.stringify({result:installedModules}));return;}
   if(req.url==='/api/v1/system/update'){res.end(JSON.stringify({result:{current:'0.7.0',staged:null,previous:updatePrevious,last:updateLast,applying:false}}));return;}
@@ -68,6 +71,7 @@ const server=http.createServer((req,res)=>{
   res.end(fs.readFileSync(path.join(root,name)));return;
  }
  let body='';req.on('data',b=>body+=b);req.on('end',()=>{
+  if(req.url==='/api/v1/login'){const r=JSON.parse(body);res.setHeader('Content-Type','application/json');const acc=accounts.find(x=>x.name===r.name);if(r.name==='admin'&&r.password===password||acc&&acc.password===r.password){logins.push(r.name);signedIn=r.name;res.end(JSON.stringify({result:{token:password,name:r.name,role:r.name==='admin'?'admin':acc.role}}));}else{res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));}return;}
   if(req.headers.authorization!=='Bearer '+password){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   const json=v=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result:v}));};
   if(req.url==='/api/v1/ui'){const p=JSON.parse(body);commands.push({method:req.url,params:p});labelSize=p.label_size;json({label_size:labelSize});return;}
@@ -78,8 +82,11 @@ const server=http.createServer((req,res)=>{
   if(req.url==='/api/v1/system/adb'){adb.running=JSON.parse(body).enabled;json(adb);return;}
   if(req.url.startsWith('/api/v1/system/adb/requests/')){const id=req.url.split('/').pop(),r=adb.requests.find(x=>x.id===id);adb.requests=adb.requests.filter(x=>x.id!==id);if(JSON.parse(body).allow)adb.keys.push({id,comment:r.comment});json(adb);return;}
   if(req.url==='/api/v1/system/adb/keys'){const k=JSON.parse(body).key;if(!k.startsWith('QAAAA')){res.writeHead(400);res.end(JSON.stringify({error:'not an ADB public key'}));return;}adb.keys.push({id:'cccc',comment:k.split(' ')[1]||''});json(adb);return;}
-  if(req.url==='/api/v1/system/password'){const r=JSON.parse(body);if(r.current!==password){res.writeHead(403);res.end(JSON.stringify({error:'current password is wrong'}));return;}if(r.new.length<8){res.writeHead(400);res.end(JSON.stringify({error:'password: 8 to 128 characters'}));return;}password=r.new;json({changed:true});return;}
+  if(req.url==='/api/v1/account/logout'){logouts++;json({signed_out:true});return;}
+  if(req.url==='/api/v1/system/accounts'){const r=JSON.parse(body);if(r.password.length<8){res.writeHead(400);res.end(JSON.stringify({error:'password: 8 to 128 characters'}));return;}accounts.push(r);json([{name:'admin',role:'admin'},...accounts.map(({name,role})=>({name,role}))]);return;}
+  if(req.url==='/api/v1/account/password'){const r=JSON.parse(body);if(r.current!==password){res.writeHead(403);res.end(JSON.stringify({error:'current password is wrong'}));return;}if(r.new.length<8){res.writeHead(400);res.end(JSON.stringify({error:'password: 8 to 128 characters'}));return;}password=r.new;json({changed:true});return;}
   if(req.url==='/api/v1/system/tokens'){const t=JSON.parse(body);tokens.push({...t,created:'2026-11-22T10:00:00Z'});json({...t,created:'2026-11-22T10:00:00Z',token:'f'.repeat(64)});return;}
+  if(req.method==='DELETE'&&req.url.startsWith('/api/v1/system/accounts/')){accounts=accounts.filter(x=>x.name!==decodeURIComponent(req.url.split('/').pop()));json([{name:'admin',role:'admin'},...accounts.map(({name,role})=>({name,role}))]);return;}
   if(req.method==='DELETE'&&req.url.startsWith('/api/v1/system/adb/keys/')){adb.keys=adb.keys.filter(k=>k.id!==req.url.split('/').pop());json(adb);return;}
   if(req.method==='DELETE'&&req.url.startsWith('/api/v1/system/tokens/')){tokens=tokens.filter(t=>t.name!==decodeURIComponent(req.url.split('/').pop()));json({revoked:true});return;}
   if(req.url==='/api/v1/system/update/stage'){stagedAgent=body;json({version:'0.8.0',current:'0.7.0',sha256:'b'.repeat(64),size:4096});return;}
@@ -136,7 +143,8 @@ const server=http.createServer((req,res)=>{
   const tile=async id=>{await sheet('map-edit');await page.evaluate(()=>document.querySelectorAll('#sheet-map-edit .sheet-body>details[open]').forEach(d=>d.open=false));await page.locator('#'+id+' summary').click();await page.waitForFunction(id=>!['restrict-details','carpet-details','threshold-details','furniture-details','split-details'].includes(id)||document.body.dataset.edit,id);};
   const shown=id=>page.waitForFunction(id=>!document.getElementById(id).hidden,id);
   await page.goto(url);assert(await page.locator('#login').isVisible());
-  await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelectorAll('#rooms button').length===2);
+  assert.equal(await page.locator('#login-name').inputValue(),'admin');await page.locator('#token').fill('wrong-password-1');await page.locator('#login-form button').click();await page.waitForFunction(()=>document.querySelector('#login-error').textContent.includes('Неверное имя или пароль'));
+  await page.locator('#token').fill(token);await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});assert.deepEqual(logins,['admin']);assert.equal(await page.evaluate(()=>document.body.classList.contains('limited')),false);await page.waitForFunction(()=>document.querySelectorAll('#rooms button').length===2);
   // A reload with the remembered token opens the panel without ever showing the login form.
   await page.waitForFunction(t=>localStorage.getItem('dreame-token')===t,token);
   await page.addInitScript(()=>{window.__loginShown=false;const check=()=>{const l=document.getElementById('login');if(l&&!l.hidden)window.__loginShown=true;};new MutationObserver(check).observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden']});});
@@ -218,6 +226,13 @@ const server=http.createServer((req,res)=>{
   await page.waitForFunction(()=>document.querySelector('#token-result').textContent.includes('f'.repeat(64)));assert.deepEqual(tokens.map(t=>[t.name,t.scope]),[['ha','control']]);
   assert.match(await page.locator('#token-list').innerText(),/ha · управление/);
   page.once('dialog',d=>d.accept());await page.locator('#token-list button').click();await page.waitForFunction(()=>document.querySelector('#token-list').textContent.includes('нет'));assert.equal(tokens.length,0);
+  // Accounts: an admin adds a user and removes it.
+  await page.locator('#accounts-block>summary').click();await page.waitForFunction(()=>document.querySelector('#account-list').textContent.includes('admin'));
+  await page.locator('#account-add>summary').click();await page.locator('#account-name').fill('masha');await page.locator('#account-password').fill('short');await page.locator('#create-account').click();await page.waitForFunction(()=>document.querySelector('#account-result').textContent.includes('Не подходит'));
+  await page.locator('#account-password').fill('masha-pass-1');await page.locator('#create-account').click();await page.waitForFunction(()=>document.querySelector('#account-list').textContent.includes('masha · пользователь'));
+  assert.deepEqual(accounts.map(a=>[a.name,a.role]),[['masha','user']]);
+  page.once('dialog',d=>d.accept());await page.locator('#account-list .module-row:nth-child(2) button').click();await page.waitForFunction(()=>!document.querySelector('#account-list').textContent.includes('masha'));
+  await page.locator('#accounts-block>summary').click();
   // ADB: keys listed, an extra one removed, the last one cannot be, the switch and adding a key.
   await page.locator('#adb-block>summary').click();await page.waitForFunction(()=>document.querySelector('#adb-keys').textContent.includes('old-phone'));
   assert.match(await page.locator('#adb-status').innerText(),/только по ключу/);
@@ -234,15 +249,15 @@ const server=http.createServer((req,res)=>{
   assert.deepEqual(adb.keys.map(k=>k.id),['aaaa','cccc','dddd']);
   await page.locator('#adb-block>summary').click();
   // Password change: a wrong current password or a mismatch keeps the old one; then the panel goes on with the new one.
-  await page.locator('#password-block>summary').click();
+  await sheet('account');assert.match(await page.locator('#account-who').innerText(),/admin/);
   const changePassword=async(current,next,repeat=next)=>{await page.locator('#password-current').fill(current);await page.locator('#password-new').fill(next);await page.locator('#password-repeat').fill(repeat);await page.locator('#change-password').click();};
   await changePassword('wrong-password','kitchen-robot');await page.waitForFunction(()=>document.querySelector('#password-result').textContent.includes('неверный'));assert.equal(password,token);
   await changePassword(token,'kitchen-robot','kitchen-robo');assert.match(await page.locator('#password-result').innerText(),/не совпадают/);assert.equal(password,token);
   await changePassword(token,'kitchen-robot');await page.waitForFunction(()=>document.querySelector('#password-result').textContent.includes('Пароль сменён'));assert.equal(password,'kitchen-robot');
   assert.equal(await page.evaluate(()=>[sessionStorage.getItem('dreame-token'),localStorage.getItem('dreame-token')].join()),'kitchen-robot,kitchen-robot');
-  await page.locator('#token-add summary').click();await page.locator('#token-name').fill('ha2');await page.locator('#create-token').click();await page.waitForFunction(()=>document.querySelector('#token-list').textContent.includes('ha2'));
+  await sheet('tokens');await page.locator('#token-add summary').click();await page.locator('#token-name').fill('ha2');await page.locator('#create-token').click();await page.waitForFunction(()=>document.querySelector('#token-list').textContent.includes('ha2'));
   page.once('dialog',d=>d.accept());await page.locator('#token-list button').click();await page.waitForFunction(()=>document.querySelector('#token-list').textContent.includes('нет'));
-  await changePassword('kitchen-robot',token);await page.waitForFunction(t=>sessionStorage.getItem('dreame-token')===t,token);assert.equal(password,token);await page.locator('#password-block>summary').click();
+  await sheet('account');await changePassword('kitchen-robot',token);await page.waitForFunction(t=>sessionStorage.getItem('dreame-token')===t,token);assert.equal(password,token);
   const xy=await page.evaluate(async()=>{const m=await import('/app.js');return m.pixelToRobot({origin:[-1000,-1000],grid_size:50},4,8);});assert.deepEqual(xy,[-800,-600]);
   await mode('all');await page.locator('.for-all[data-command=start]').click();await page.waitForFunction(()=>!document.querySelector('[data-command=start]').disabled);assert.deepEqual(commands.at(-1),{method:'/api/v1/command',params:{name:'start'}});
   await sheet('station');assert(await page.locator('[data-command=dry_start]').isHidden());assert(await page.locator('[data-command=empty]').isVisible());assert.match(await page.locator('#model').innerText(),/r2505 · 4\.3\.9_2021 · агент 0\.7\.0$/);
@@ -320,6 +335,14 @@ const server=http.createServer((req,res)=>{
    agentVersion='0.7.0';await page.reload();await page.locator('#map').waitFor();
   }
   await sheet('menu');await page.locator('#logout').click();assert(await page.locator('#login').isVisible());assert.equal(await page.evaluate(()=>sessionStorage.getItem('dreame-token')),null);
+  assert.equal(logouts,1);
+  // A "user" account: the vacuum screen, without the agent's own entries.
+  accounts.push({name:'masha',role:'user',password:'masha-pass-1'});
+  await page.locator('#login-name').fill('masha');await page.locator('#token').fill('masha-pass-1');await page.locator('#login-form button').click();await page.locator('#dashboard').waitFor({state:'visible'});
+  await page.waitForFunction(()=>document.body.classList.contains('limited'));
+  await sheet('menu');assert.equal(await page.locator('[data-sheet=tokens]').isVisible(),false);assert.equal(await page.locator('[data-sheet=update]').isVisible(),false);assert(await page.locator('#nav-account').isVisible());assert(await page.locator('[data-sheet=voice]').isVisible());
+  await page.locator('#logout').click();assert(await page.locator('#login').isVisible());assert.equal(await page.evaluate(()=>document.body.classList.contains('limited')),false);
+  accounts=[];signedIn='admin';await page.locator('#login-name').fill('admin');
   await page.goto(url+'/?setup=wifi');await page.locator('#wifi-ssid').waitFor({state:'visible',timeout:5000});assert(await page.locator('#wifi-ssid').isVisible());assert(await page.locator('#login').isVisible());await page.locator('#token').fill(token);await page.locator('#wifi-ssid').fill('Setup');await page.locator('#wifi-open').check();await page.locator('#save-wifi').click();await page.waitForFunction(()=>document.querySelector('#wifi-result').textContent.includes('Настройки приняты'));assert.deepEqual(commands.at(-1),{method:'local.wifi_setup',params:{ssid:'Setup',password:'',open:true}});
   { // Embedded view: signs in from the fragment, the same app screen with everything the token allows
    const emb=await browser.newPage({viewport:{width:600,height:900}});await emb.goto(url+'/?embed=1#token='+token);

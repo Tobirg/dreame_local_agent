@@ -36,6 +36,9 @@ func (a *agent) scopeOf(auth string) string {
 	if !ok || presented == "" {
 		return ""
 	}
+	if name := a.sessionAccount(presented); name != "" {
+		return a.roleOf(name) // "admin" or "user"
+	}
 	sum := sha256.Sum256([]byte(presented))
 	hash := hex.EncodeToString(sum[:])
 	a.tokensMu.RLock()

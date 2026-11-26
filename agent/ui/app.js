@@ -213,8 +213,33 @@ $('adb-add-key').onclick=async()=>{
  try{renderADB(await api('/api/v1/system/adb/keys',{key:$('adb-key').value.trim()}));$('adb-key').value='';$('adb-add').open=false;$('adb-result').textContent='Ключ добавлен.';}
  catch(e){$('adb-result').textContent=e.status===400?'Не подходит: '+e.message:e.message;}
 };
+// Who is signed in: a "user" account (or a scoped token) does not see the agent's own settings.
+async function loadAccount(){
+ let me=null;try{me=await api('/api/v1/account');}catch{}
+ document.body.classList.toggle('limited',!me||me.role!=='admin');$('nav-account').hidden=!me||!me.name;
+ $('account-who').dataset.name=me&&me.name||'';$('account-who').textContent=me&&me.name?'Ты вошёл как «'+me.name+'» ('+(me.role==='admin'?'администратор':'пользователь')+').':'';
+}
+const roleNames={admin:'администратор',user:'пользователь'};
+function renderAccounts(list){
+ $('account-list').replaceChildren();
+ for(const u of list){
+  const row=document.createElement('div'),label=document.createElement('span');row.className='module-row';label.textContent=u.name+' · '+(roleNames[u.role]||u.role);row.append(label);
+  if(u.name!=='admin'){const remove=document.createElement('button');remove.textContent='Удалить';remove.className='ghost';
+   remove.onclick=async()=>{if(!window.confirm('Удалить учётную запись '+u.name+'? Она сразу выйдет на всех устройствах.'))return;
+    try{const response=await fetch('/api/v1/system/accounts/'+encodeURIComponent(u.name),{method:'DELETE',headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'});
+     const body=await response.json();if(!response.ok)throw Error(body.error||'Ошибка HTTP '+response.status);renderAccounts(body.result);$('account-result').textContent='Учётная запись '+u.name+' удалена.';}catch(e){toast(e.message,true);}};
+   row.append(remove);}
+  $('account-list').append(row);
+ }
+}
+async function loadAccounts(){renderAccounts(await api('/api/v1/system/accounts'));}
+$('create-account').onclick=async()=>{
+ try{renderAccounts(await api('/api/v1/system/accounts',{name:$('account-name').value.trim(),role:$('account-role').value,password:$('account-password').value}));
+  $('account-result').textContent='Учётная запись '+$('account-name').value.trim()+' создана.';$('account-name').value='';$('account-password').value='';$('account-add').open=false;}
+ catch(e){$('account-result').textContent=e.status===400?'Не подходит: '+e.message:e.message;}
+};
 async function loadTokens(){
- await loadEmbed().catch(()=>{});loadADB().catch(e=>{$('adb-status').textContent=e.message;});watchADB();
+ await loadEmbed().catch(()=>{});loadAccounts().catch(()=>{});loadADB().catch(e=>{$('adb-status').textContent=e.message;});watchADB();
  const list=await api('/api/v1/system/tokens');$('token-list').replaceChildren();
  for(const t of list){
   const row=document.createElement('div'),label=document.createElement('span'),remove=document.createElement('button');
@@ -236,8 +261,9 @@ $('create-token').onclick=async()=>{
 $('password-form').onsubmit=async e=>{
  e.preventDefault();const current=$('password-current').value,next=$('password-new').value;
  if(next!==$('password-repeat').value){$('password-result').textContent='Новый пароль и повтор не совпадают.';return;}
- try{await api('/api/v1/system/password',{current,new:next});
-  token=next;sessionStorage.setItem('dreame-token',next);if(localStorage.getItem('dreame-token'))localStorage.setItem('dreame-token',next);
+ try{await api('/api/v1/account/password',{current,new:next});
+  // A session stays valid; a panel signed in with the bare password (older versions) takes a session now.
+  if(token===current){token=await signIn(($('account-who').dataset.name)||'admin',next);sessionStorage.setItem('dreame-token',token);if(localStorage.getItem('dreame-token'))localStorage.setItem('dreame-token',token);}
   $('password-form').reset();$('password-result').textContent='Пароль сменён. На других устройствах войди с новым.';}
  catch(e){$('password-result').textContent=e.status===403?'Текущий пароль неверный.':e.status===400?'Пароль: от 8 до 128 символов, латиница, цифры и знаки, без пробелов по краям.':e.message;}
 };
@@ -982,12 +1008,20 @@ let loggingIn=false; // a reload fires pageshow and focus while the first load s
 async function login(){loggingIn=true;try{await loginNow();}finally{loggingIn=false;}}
 async function loginNow(){
  const epoch=viewEpoch,loginToken=token,caps=await api('/api/v1/capabilities');if(epoch!==viewEpoch||loginToken!==token)return;if(captiveSetup)document.querySelector('#sheet-wifi .sheet-body').append($('wifi-panel'));applyCapabilities(caps);
- $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';
+ $('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('login-error').textContent='';await loadAccount();
  sessionStorage.setItem('dreame-token',token);
  await loadLook();await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('video-code-panel',loadVideoCode);await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);$('look-panel').hidden=$('update-panel').hidden;await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
-$('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
-$('logout').onclick=()=>{clearPets();clearInterval(adbTimer);adbTimer=null;adbAsking=null;$('adb-request').hidden=true;stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
+// Sign in: name and password give a session token. A scoped token (Home Assistant) typed as the password still works.
+async function signIn(name,password){
+ const response=await fetch('/api/v1/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,password}),credentials:'omit',cache:'no-store'});
+ const body=await response.json().catch(()=>({}));
+ if(response.ok)return body.result.token;
+ if(response.status===401&&name==='admin'&&password.length>=32)return password;
+ throw Error(response.status===401?'Неверное имя или пароль':response.status===429?'Слишком много попыток, подожди секунду':body.error||'Ошибка HTTP '+response.status);
+}
+$('login-form').onsubmit=async e=>{e.preventDefault();try{token=await signIn($('login-name').value.trim()||'admin',$('token').value);await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
+$('logout').onclick=()=>{if(token)fetch('/api/v1/account/logout',{method:'POST',headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'}).catch(()=>{});document.body.classList.remove('limited');closeSheet();clearPets();clearInterval(adbTimer);adbTimer=null;adbAsking=null;$('adb-request').hidden=true;stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
 // Buttons of the actions catalog (actions.js) go to their page's container; data-command keeps them under
 // the capability hiding, the busy lock and the click handler below.
 for(const act of actions){
