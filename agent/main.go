@@ -53,6 +53,8 @@ type config struct {
 	VideoCloudBlock bool `json:"video_cloud_block,omitempty"`
 	// Room label size on the panel map in screen pixels; 0 keeps the automatic 10–14 px.
 	LabelSize int `json:"label_size,omitempty"`
+	// Key the module tokens are derived from; set to the old password the first time the password changes.
+	ModuleSecret string `json:"module_secret,omitempty"`
 }
 type request struct {
 	Method string          `json:"method"`
@@ -66,17 +68,21 @@ type agent struct {
 	rebootCommand string   // Only overridden by tests.
 	iptables      []string // argv prefix for the video cloud block (monitor.go); tests record instead
 
-	portal     portalState
-	network    networkJob
-	dev        device
-	modules    moduleHost
-	configPath string // absolute; the update helper is started with it
-	cfg        config
-	tokensMu   sync.RWMutex // guards cfg.Tokens
-	root       string       // Only set by tests; runtime always uses the actual root filesystem.
-	avacmd     string
-	gate       chan struct{}
-	next       atomic.Int64
+	portal       portalState
+	network      networkJob
+	dev          device
+	modules      moduleHost
+	adb          adbControl
+	adbWatch     adbWatch
+	configPath   string // absolute; the update helper is started with it
+	cfg          config
+	tokensMu     sync.RWMutex  // guards cfg.Tokens, cfg.Token and cfg.ModuleSecret
+	authFailures chan struct{} // one failed sign-in at a time (password.go)
+	authDelay    time.Duration
+	root         string // Only set by tests; runtime always uses the actual root filesystem.
+	avacmd       string
+	gate         chan struct{}
+	next         atomic.Int64
 }
 
 func (a *agent) path(p string) string { return filepath.Join(a.root, p) }
@@ -529,7 +535,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 	scope, module := a.scopeOf(r.Header.Get("Authorization")), ""
 	if scope == "" {
 		if module = a.moduleForToken(r.Header.Get("Authorization")); module == "" {
-			send(401, map[string]string{"error": "unauthorized"})
+			a.refuseUnauthorized(send)
 			return
 		}
 		scope = "module"
@@ -838,8 +844,8 @@ func main() {
 	if json.Unmarshal(data, &cfg) != nil {
 		log.Fatal("invalid configuration")
 	}
-	if len(cfg.Token) < 32 || strings.HasPrefix(cfg.Token, "REPLACE") || cfg.Port < 1 || cfg.Port > 65535 {
-		log.Fatal("invalid API token or port")
+	if validPassword(cfg.Token) != nil || strings.HasPrefix(cfg.Token, "REPLACE") || cfg.Port < 1 || cfg.Port > 65535 {
+		log.Fatal("invalid password (token) or port")
 	}
 	if *applyUpdate != "" {
 		runUpdateHelper(cfg, *applyUpdate, *updateID)
@@ -859,7 +865,7 @@ func main() {
 	if err != nil {
 		log.Fatal("avacmd not found in PATH")
 	}
-	a := &agent{cfg: cfg, avacmd: path, gate: make(chan struct{}, 1), iptables: []string{"iptables"}}
+	a := &agent{cfg: cfg, avacmd: path, gate: make(chan struct{}, 1), iptables: []string{"iptables"}, authFailures: make(chan struct{}, 1), authDelay: time.Second}
 	a.cloudBlock(false) // a rule left by a crash while a session was open
 	if abs, err := filepath.Abs(*cfgPath); err == nil {
 		a.configPath = abs
@@ -897,6 +903,7 @@ func main() {
 	go a.runPoller(portalContext, 5*time.Second)
 	go a.runPatrolSchedules(portalContext)
 	go a.runPetPhotos(portalContext)
+	go a.runADBWatch(portalContext)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan struct{})

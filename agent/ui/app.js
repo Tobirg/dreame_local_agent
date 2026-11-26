@@ -176,8 +176,45 @@ $('save-embed').onclick=async()=>{
  try{const r=await api('/api/v1/system/embed',{origins});$('embed-origins').value=r.origins.join('\n');$('embed-status').textContent=r.origins.length?'Сохранено. Страницу можно встроить с этих адресов.':'Сохранено. Встраивание запрещено.';}
  catch(e){$('embed-status').textContent=e.message;}
 };
+// ADB: the allowed keys and a switch until the next reboot; the last key cannot be removed.
+function renderADB(s){
+ $('adb-status').textContent=s.running?(s.auth===false?'ADB включён без проверки ключа!':'ADB включён, вход только по ключу.'):'ADB выключен до перезагрузки робота.';if(s.watching===false)$('adb-status').textContent+=' Запросы новых устройств не отслеживаются'+(s.watch_error?': '+s.watch_error:'')+'.';
+ $('adb-toggle').textContent=s.running?'Выключить до перезагрузки':'Включить';$('adb-toggle').dataset.on=s.running?'1':'';
+ $('adb-keys').replaceChildren();$('adb-add').hidden=!s.editable;showADBRequest(s);
+ for(const k of s.keys){
+  const row=document.createElement('div'),label=document.createElement('span');row.className='module-row';label.textContent=(k.comment||'без подписи')+' · '+k.id;row.append(label);
+  if(s.editable&&s.keys.length>1){const remove=document.createElement('button');remove.textContent='Удалить';remove.className='ghost';
+   remove.onclick=async()=>{if(!window.confirm('Удалить ключ '+(k.comment||k.id)+'? Это устройство больше не сможет зайти по ADB.'))return;
+    try{const response=await fetch('/api/v1/system/adb/keys/'+encodeURIComponent(k.id),{method:'DELETE',headers:{'Authorization':'Bearer '+token},credentials:'omit',cache:'no-store'});
+     const body=await response.json();if(!response.ok)throw Error(body.error||'Ошибка HTTP '+response.status);renderADB(body.result);$('adb-result').textContent='Ключ удалён.';}catch(e){toast(e.message,true);}};
+   row.append(remove);}
+  $('adb-keys').append(row);
+ }
+ if(!s.keys.length)$('adb-keys').textContent=s.keys_error||'Ключей нет.';
+}
+async function loadADB(){renderADB(await api('/api/v1/system/adb'));}
+// A device with an unknown key tried to connect: ask, as Android does. Checked every 5 s while the panel is open.
+let adbAsking=null,adbTimer=null;
+function showADBRequest(s){
+ const r=(s.requests||[])[0];adbAsking=r?r.id:null;$('adb-request').hidden=!r;
+ if(r)$('adb-request-text').textContent='ADB: «'+(r.comment||'без подписи')+'» ('+r.from+') хочет подключиться';
+}
+async function answerADB(allow){
+ const id=adbAsking;if(!id)return;
+ try{const s=await api('/api/v1/system/adb/requests/'+encodeURIComponent(id),{allow});renderADB(s);toast(allow?'Ключ добавлен. Подключись ещё раз: adb disconnect, затем adb connect.':'Запрос отклонён.');}catch(e){toast(e.message,true);}
+}
+$('adb-allow').onclick=()=>answerADB(true);$('adb-decline').onclick=()=>answerADB(false);
+function watchADB(){clearInterval(adbTimer);adbTimer=setInterval(()=>{if(token&&!document.hidden&&!$('tokens-panel').hidden)loadADB().catch(()=>{});},5000);}
+$('adb-toggle').onclick=async()=>{
+ const on=!!$('adb-toggle').dataset.on;if(on&&!window.confirm('Выключить ADB? Он включится снова после перезагрузки робота или здесь.'))return;
+ $('adb-toggle').disabled=true;try{renderADB(await api('/api/v1/system/adb',{enabled:!on}));$('adb-result').textContent='';}catch(e){$('adb-result').textContent=e.message;}finally{$('adb-toggle').disabled=false;}
+};
+$('adb-add-key').onclick=async()=>{
+ try{renderADB(await api('/api/v1/system/adb/keys',{key:$('adb-key').value.trim()}));$('adb-key').value='';$('adb-add').open=false;$('adb-result').textContent='Ключ добавлен.';}
+ catch(e){$('adb-result').textContent=e.status===400?'Не подходит: '+e.message:e.message;}
+};
 async function loadTokens(){
- await loadEmbed().catch(()=>{});
+ await loadEmbed().catch(()=>{});loadADB().catch(e=>{$('adb-status').textContent=e.message;});watchADB();
  const list=await api('/api/v1/system/tokens');$('token-list').replaceChildren();
  for(const t of list){
   const row=document.createElement('div'),label=document.createElement('span'),remove=document.createElement('button');
@@ -194,6 +231,15 @@ $('create-token').onclick=async()=>{
  try{const t=await api('/api/v1/system/tokens',{name:$('token-name').value.trim(),scope:$('token-scope').value});
   $('token-result').textContent='Токен '+t.name+' ('+scopeNames[t.scope]+'). Скопируй сейчас, позже его не показать: '+t.token;$('token-name').value='';$('token-add').open=false;await loadTokens();}
  catch(e){$('token-result').textContent=e.message;}
+};
+// The password is written on the robot first; the panel switches to it only when the agent saved it.
+$('password-form').onsubmit=async e=>{
+ e.preventDefault();const current=$('password-current').value,next=$('password-new').value;
+ if(next!==$('password-repeat').value){$('password-result').textContent='Новый пароль и повтор не совпадают.';return;}
+ try{await api('/api/v1/system/password',{current,new:next});
+  token=next;sessionStorage.setItem('dreame-token',next);if(localStorage.getItem('dreame-token'))localStorage.setItem('dreame-token',next);
+  $('password-form').reset();$('password-result').textContent='Пароль сменён. На других устройствах войди с новым.';}
+ catch(e){$('password-result').textContent=e.status===403?'Текущий пароль неверный.':e.status===400?'Пароль: от 8 до 128 символов, латиница, цифры и знаки, без пробелов по краям.':e.message;}
 };
 // Panels that need the main token are hidden for a read/control token.
 const mainTokenOnly=(panel,load)=>load().then(()=>{$(panel).hidden=false;}).catch(e=>{if(e.status===403)$(panel).hidden=true;else toast(e.message,true);});
@@ -265,7 +311,7 @@ $('cancel-module').onclick=()=>{stagedModule=null;$('module-review').hidden=true
 $('wifi-open').onchange=()=>{$('wifi-password').disabled=$('wifi-open').checked;$('wifi-password').required=!$('wifi-open').checked;if($('wifi-open').checked)$('wifi-password').value='';};
 $('wifi-form').onsubmit=async e=>{
  e.preventDefault();if(busy)return;
- if(captiveSetup&&!token){token=$('token').value.trim();if(token.length<32){$('wifi-result').textContent='Введи API-токен агента в поле выше.';return;}}
+ if(captiveSetup&&!token){token=$('token').value.trim();if(token.length<8){$('wifi-result').textContent='Введи пароль агента в поле выше.';return;}}
  busy=true;disableControls(true);
  const params={ssid:$('wifi-ssid').value,password:$('wifi-open').checked?'':$('wifi-password').value,open:$('wifi-open').checked};$('wifi-password').value='';
  try{const result=await api('local.wifi_setup',params);if(!result.accepted)throw Error('Настройка сети не принята');$('wifi-result').textContent='Настройки приняты. Робот подключается. Точка доступа отключится; открой новый IP робота из домашней сети. При ошибке подожди до 3 минут для возврата точки доступа.';}
@@ -941,7 +987,7 @@ async function loginNow(){
  await loadLook();await refresh();await refreshMap();loadMessages().catch(()=>{});loadPatrolSchedules().catch(()=>{});await mainTokenOnly('video-code-panel',loadVideoCode);await mainTokenOnly('modules-panel',loadModules);$('nav-modules').hidden=$('modules-panel').hidden;await mainTokenOnly('update-panel',loadUpdate);$('look-panel').hidden=$('update-panel').hidden;await mainTokenOnly('tokens-panel',loadTokens);await mainTokenOnly('logs-panel',loadLogs);await mainTokenOnly('voice-panel',()=>mountVoice($('voice'),{api,token:()=>token,toast}));await loadHistory().catch(e=>toast(e.message,true));clearInterval(timer);timer=setInterval(()=>refresh(),30000);streamEvents();
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();token=$('token').value.trim();try{await login();if($('remember').checked)localStorage.setItem('dreame-token',token);else localStorage.removeItem('dreame-token');$('token').value='';}catch(e){$('login-error').textContent=e.message;}};
-$('logout').onclick=()=>{clearPets();stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
+$('logout').onclick=()=>{clearPets();clearInterval(adbTimer);adbTimer=null;adbAsking=null;$('adb-request').hidden=true;stopEvents();viewEpoch++;for(const read of activeReads)read.abort('logout');refreshing=false;clearInterval(timer);timer=null;token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;};
 // Buttons of the actions catalog (actions.js) go to their page's container; data-command keeps them under
 // the capability hiding, the busy lock and the click handler below.
 for(const act of actions){
@@ -986,7 +1032,7 @@ $('send-rpc').onclick=async()=>{try{const method=$('rpc-method').value,params=JS
 if(token)login().catch(e=>{if(e.status===401){token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');}else connectionLost(e.message);$('login-error').textContent=e.message;if($('dashboard').hidden)$('login').hidden=false;});
 else $('login').hidden=false;
 
-if(captiveSetup){$('login').querySelector('h2').textContent='Настройка Wi-Fi робота';$('login').querySelector('p.muted').textContent='Укажи API-токен агента, имя сети и пароль. Затем нажми «Подключить робот к сети».';$('login-form').querySelector('button').textContent='Открыть панель управления';$('wifi-details').open=true;$('login').append($('wifi-panel'));}
+if(captiveSetup){$('login').querySelector('h2').textContent='Настройка Wi-Fi робота';$('login').querySelector('p.muted').textContent='Укажи пароль агента, имя сети и пароль Wi-Fi. Затем нажми «Подключить робот к сети».';$('login-form').querySelector('button').textContent='Открыть панель управления';$('wifi-details').open=true;$('login').append($('wifi-panel'));}
 
 export function robotToPixel(v,x,y){
  if(!v||!Array.isArray(v.origin)||v.grid_size<=0||![x,y].every(Number.isFinite))throw Error('Некорректная точка карты');
@@ -1561,7 +1607,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openSheet)closeShee
 let swallowClick=false;
 document.addEventListener('pointerdown',e=>{
  swallowClick=false;
- if(!openSheet||openSheet.contains(e.target)||e.target.closest('[data-sheet],.photo-viewer,#toast,#update-banner'))return;
+ if(!openSheet||openSheet.contains(e.target)||e.target.closest('[data-sheet],.photo-viewer,#toast,#update-banner,#adb-request'))return;
  if(openSheet.id==='sheet-camera'&&mapStage.contains(e.target))return;
  closeSheet();swallowClick=true;e.stopPropagation();
 },true);
