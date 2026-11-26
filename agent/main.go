@@ -53,6 +53,8 @@ type config struct {
 	VideoCloudBlock bool `json:"video_cloud_block,omitempty"`
 	// Room label size on the panel map in screen pixels; 0 keeps the automatic 10–14 px.
 	LabelSize int `json:"label_size,omitempty"`
+	// Accounts besides "admin" (the password above); see accounts.go.
+	Users []account `json:"users,omitempty"`
 	// Key the module tokens are derived from; set to the old password the first time the password changes.
 	ModuleSecret string `json:"module_secret,omitempty"`
 }
@@ -74,6 +76,8 @@ type agent struct {
 	modules      moduleHost
 	adb          adbControl
 	adbWatch     adbWatch
+	sess         sessionStore
+	sessionsOnce sync.Once
 	configPath   string // absolute; the update helper is started with it
 	cfg          config
 	tokensMu     sync.RWMutex  // guards cfg.Tokens, cfg.Token and cfg.ModuleSecret
@@ -532,6 +536,10 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 	if serveRestoreFile(w, r) { // the firmware's wget has no token; see mapbackup.go
 		return
 	}
+	if r.URL.Path == "/api/v1/login" {
+		a.loginRoute(r, send)
+		return
+	}
 	scope, module := a.scopeOf(r.Header.Get("Authorization")), ""
 	if scope == "" {
 		if module = a.moduleForToken(r.Header.Get("Authorization")); module == "" {
@@ -548,7 +556,11 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 	if scope == "module" && a.crossModuleRead(module, r) {
 		scope = "admin" // only this one route: another module's declared read action
 	}
-	if scope != "admin" && !limitedRoute(scope, r) {
+	if scope == roleUser && !userRoute(r) {
+		send(403, map[string]string{"error": "this account cannot use this endpoint (admin only)"})
+		return
+	}
+	if scope != "admin" && scope != roleUser && !limitedRoute(scope, r) {
 		send(403, map[string]string{"error": scope + " token cannot use this endpoint"})
 		return
 	}
@@ -567,7 +579,7 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 		send(200, map[string]any{"result": result})
 		return
 	}
-	if a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.firmwareRoutes(w, r, send) || a.tokenRoutes(w, r, send) || a.voiceRoutes(w, r, send) || a.logRoutes(r, send) {
+	if a.accountRoutes(r, send) || a.moduleRoutes(w, r, send) || a.systemRoutes(w, r, send) || a.firmwareRoutes(w, r, send) || a.tokenRoutes(w, r, send) || a.voiceRoutes(w, r, send) || a.logRoutes(r, send) {
 		return
 	}
 	switch r.URL.Path {
@@ -731,6 +743,10 @@ func (a *agent) handler(w http.ResponseWriter, r *http.Request) {
 			send(400, map[string]string{"error": "trailing JSON data"})
 			return
 		}
+	}
+	if r.URL.Path == "/rpc" && scope == roleUser && userRPCDenied[req.Method] {
+		send(403, map[string]string{"error": "this account cannot use " + req.Method + " (admin only)"})
+		return
 	}
 	if r.URL.Path == "/rpc" && (scope == "read" || scope == "control") && !requestIsRead(req) {
 		send(403, map[string]string{"error": scope + " token can only read through /rpc"})
