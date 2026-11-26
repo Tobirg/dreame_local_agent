@@ -9,16 +9,22 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
-func syntheticFrame(t *testing.T, id uint16) string {
+func syntheticFrame(t *testing.T, id uint16, grid ...uint16) string {
 	t.Helper()
 	raw := make([]byte, 27)
 	binary.LittleEndian.PutUint16(raw, id)
 	raw[4] = 'I'
-	binary.LittleEndian.PutUint16(raw[17:19], 50)
+	size := uint16(50)
+	if len(grid) > 0 {
+		size = grid[0]
+	}
+	binary.LittleEndian.PutUint16(raw[17:19], size)
 	binary.LittleEndian.PutUint16(raw[19:21], 3)
 	binary.LittleEndian.PutUint16(raw[21:23], 3)
 	raw = append(raw, 1, 1, 255, 1, 2, 2, 0, 2, 2)
@@ -132,5 +138,59 @@ func TestRealMapWhenProvided(t *testing.T) {
 		if room.ID != i+1 {
 			t.Fatal("room IDs mismatch")
 		}
+	}
+}
+
+// r2505 cells as the Dreame app reads them: id in the low 6 bits, 0x40 carpet (still floor), 0x80 border cell.
+func TestR2505CellFlags(t *testing.T) {
+	raw, err := decodeSavedFrame(syntheticFrame(t, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(raw[27:], []byte{0x41, 0x81, 0x43, 0x00, 0x03, 0x85, 0x00, 0x00, 0x00})
+	view, err := makeMapView(raw, "dreame.vacuum.r2505")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := view.Pixels[:6]; !reflect.DeepEqual(got, []byte{1, 255, 3, 0, 3, 255}) {
+		t.Fatal(got)
+	}
+}
+
+func TestFrameAncestors(t *testing.T) {
+	a := testAgent(t)
+	csp := func() string {
+		w := httptest.NewRecorder()
+		a.handler(w, httptest.NewRequest("GET", "/", nil))
+		return w.Header().Get("Content-Security-Policy")
+	}
+	if !strings.Contains(csp(), "frame-ancestors 'none'") {
+		t.Fatal("no framing by default", csp())
+	}
+	a.cfg.EmbedOrigins = []string{"https://ha.home:8123", "http://192.168.2.5:8123", "*", "https://x.y;script-src *"}
+	if c := csp(); !strings.Contains(c, "frame-ancestors https://ha.home:8123 http://192.168.2.5:8123;") {
+		t.Fatal("only well-formed origins are allowed", c)
+	}
+}
+
+func TestEmbedOriginsRoute(t *testing.T) {
+	a := testAgent(t)
+	a.configPath = filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(a.configPath, []byte(`{"port":8765}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	post := func(body string) int {
+		w := httptest.NewRecorder()
+		a.embedRoute(w, httptest.NewRequest("POST", "/api/v1/system/embed", strings.NewReader(body)), func(code int, _ any) { w.Code = code })
+		return w.Code
+	}
+	if post(`{"origins":["https://ha.home:8123/path"]}`) != 400 || post(`{"origins":["*"]}`) != 400 {
+		t.Fatal("malformed origins must be refused")
+	}
+	if post(`{"origins":["https://ha.home:8123"]}`) != 200 || len(a.cfg.EmbedOrigins) != 1 {
+		t.Fatal("valid origin")
+	}
+	if b, _ := os.ReadFile(a.configPath); !strings.Contains(string(b), `"embed_origins"`) || !strings.Contains(string(b), `"port"`) {
+		t.Fatal("saved next to the other fields", string(b))
 	}
 }

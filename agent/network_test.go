@@ -42,33 +42,6 @@ func TestWiFiRequiresControlAndNativeAdapter(t *testing.T) {
 		t.Fatal("missing firmware adapter accepted")
 	}
 }
-func TestRegionGuardModePersistence(t *testing.T) {
-	a := testAgent(t)
-	_ = os.MkdirAll(a.path("/data/dreame-local"), 0700)
-	for _, enabled := range []bool{true, false} {
-		raw, _ := json.Marshal(map[string]bool{"enabled": enabled})
-		v, err := a.call(context.Background(), request{Method: "local.region_guard", Params: raw})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v.(map[string]any)["enabled"] != enabled {
-			t.Fatal(v)
-		}
-	}
-}
-func TestGuardLoadedMarkerNeedsLiveMapping(t *testing.T) {
-	a := testAgent(t)
-	_ = os.MkdirAll(a.path("/tmp"), 0700)
-	_ = os.WriteFile(a.path("/tmp/dreame-region-guard.loaded"), []byte("123\n"), 0600)
-	if a.guardStatus()["hook_loaded"] != false {
-		t.Fatal("stale PID accepted")
-	}
-	_ = os.MkdirAll(a.path("/proc/123"), 0700)
-	_ = os.WriteFile(a.path("/proc/123/maps"), []byte("/data/dreame-local/region-guard.so\n"), 0600)
-	if a.guardStatus()["hook_loaded"] != true {
-		t.Fatal("mapping not detected")
-	}
-}
 func TestPortalDNSPreservesDHCP(t *testing.T) {
 	source := []byte("interface=wlan0\ndhcp-range=192.168.5.10,192.168.5.100,12h\n")
 	got, err := portalDNSConfig(source)

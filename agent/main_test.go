@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,7 +38,7 @@ func testAgent(t *testing.T) *agent {
 	if err := os.WriteFile(mock, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	return &agent{root: root, avacmd: mock, gate: make(chan struct{}, 1), cfg: config{Token: strings.Repeat("a", 40), ExpectedModel: "dreame.vacuum.r2505", ExpectedDID: "12345678", ExpectedMAC: "00:11:22:33:44:55", AllowControl: true}}
+	return &agent{root: root, avacmd: mock, gate: make(chan struct{}, 1), modules: moduleHost{slots: make(chan struct{}, 4)}, cfg: config{Token: strings.Repeat("a", 40), ExpectedModel: "dreame.vacuum.r2505", ExpectedDID: "12345678", ExpectedMAC: "00:11:22:33:44:55", AllowControl: true, AllowUnverifiedFirmware: true}}
 }
 func TestIdentityFiltersSecrets(t *testing.T) {
 	a := testAgent(t)
@@ -118,8 +119,8 @@ func TestDisabledControlStillAllowsReads(t *testing.T) {
 	if _, e := a.call(context.Background(), request{Method: "get_properties", Params: json.RawMessage(`[{"siid":3,"piid":1}]`)}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := a.call(context.Background(), request{Method: "action", Params: json.RawMessage(`{"siid":6,"aiid":1,"in":[]}`)}); e != nil {
-		t.Fatal(e)
+	if _, e := a.call(context.Background(), request{Method: "action", Params: json.RawMessage(`{"siid":6,"aiid":1,"in":[]}`)}); e == nil {
+		t.Fatal("map action bypassed disabled control")
 	}
 	if _, e := a.call(context.Background(), request{Method: "action", Params: json.RawMessage(`{"siid":4,"aiid":1,"in":[]}`)}); e == nil {
 		t.Fatal("control enabled")
@@ -199,55 +200,6 @@ func TestOutputBufferIsBoundedWithIOCopy(t *testing.T) {
 	}
 }
 
-func TestRegionMessageUsesExactDirectArguments(t *testing.T) {
-	a := testAgent(t)
-	script := "#!/usr/bin/env python3\nimport json,sys\nassert sys.argv[1]=='msg_cvt'\nr=json.loads(sys.argv[2])\nassert r=={'type':'msgCvt','cmd':'device_lock','code':200}\nprint('message sent')\n"
-	if err := os.WriteFile(a.avacmd, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	result, err := a.call(context.Background(), request{Method: "local.region_lock", Params: json.RawMessage(`{"code":200}`)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := result.(map[string]any)
-	if v["dispatched"] != true || v["confirmed"] != false {
-		t.Fatal(v)
-	}
-}
-func TestRegionMessageValidationAndControl(t *testing.T) {
-	for _, raw := range []string{`null`, `{"code":201}`, `{"code":"200"}`, `{"code":200,"cmd":"shell"}`, `{"code":200.0}`} {
-		a := testAgent(t)
-		if _, err := a.call(context.Background(), request{Method: "local.region_lock", Params: json.RawMessage(raw)}); err == nil {
-			t.Fatalf("accepted %s", raw)
-		}
-	}
-	for _, field := range []string{"disabled", "model", "did", "mac", "identity"} {
-		a := testAgent(t)
-		switch field {
-		case "disabled":
-			a.cfg.AllowControl = false
-		case "model":
-			a.cfg.ExpectedModel = ""
-		case "did":
-			a.cfg.ExpectedDID = ""
-		case "mac":
-			a.cfg.ExpectedMAC = ""
-		case "identity":
-			a.cfg.ExpectedDID = "other"
-		}
-		if _, err := a.call(context.Background(), request{Method: "local.region_lock", Params: json.RawMessage(`{"code":401}`)}); err == nil {
-			t.Fatalf("accepted %s", field)
-		}
-	}
-}
-func TestRegionFailedDispatchIsNotSuccess(t *testing.T) {
-	a := testAgent(t)
-	_ = os.WriteFile(a.avacmd, []byte("#!/bin/sh\nexit 1\n"), 0700)
-	if _, err := a.call(context.Background(), request{Method: "local.region_lock", Params: json.RawMessage(`{"code":401}`)}); err == nil {
-		t.Fatal("failed command accepted")
-	}
-}
-
 func TestDetachedChildHelper(t *testing.T) {
 	if os.Getenv("DREAME_DAEMON_TEST") != "1" {
 		return
@@ -291,4 +243,34 @@ func TestDetachedProcessHasOwnSessionAndLog(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("child did not establish a new session", string(data))
+}
+
+func TestKeepAgent(t *testing.T) {
+	// A dying agent is started again.
+	runs := filepath.Join(t.TempDir(), "runs")
+	stop := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	go func() {
+		keepAgent(func() *exec.Cmd { return exec.Command("sh", "-c", "echo run >> "+runs+"; exit 1") }, stop, 10*time.Millisecond)
+		close(done)
+	}()
+	time.Sleep(300 * time.Millisecond)
+	stop <- syscall.SIGTERM
+	<-done
+	if b, _ := os.ReadFile(runs); strings.Count(string(b), "run") < 3 {
+		t.Fatalf("not restarted: %q", b)
+	}
+	// A stop signal ends the running agent and the keeper.
+	done = make(chan struct{})
+	go func() {
+		keepAgent(func() *exec.Cmd { return exec.Command("sleep", "30") }, stop, time.Hour)
+		close(done)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	stop <- syscall.SIGTERM
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("keeper did not stop")
+	}
 }

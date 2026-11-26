@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -26,6 +25,19 @@ type networkJob struct {
 
 func (a *agent) controlAllowed() bool {
 	return a.cfg.AllowControl && a.cfg.ExpectedModel != "" && a.cfg.ExpectedDID != "" && a.cfg.ExpectedMAC != ""
+}
+
+// robotWriteAllowed gates commands and setting/map writes: besides control, the firmware must
+// match a checked profile (or the owner opted in), so unknown firmware is read-only by default.
+// Agent updates, modules, Wi-Fi and reboot only need controlAllowed.
+func (a *agent) robotWriteAllowed(info map[string]string) error {
+	if !a.controlAllowed() {
+		return errors.New("control requires allow_control and pinned model, did, mac")
+	}
+	if !a.cfg.AllowUnverifiedFirmware && a.firmwareProfile(info["model"], info["fw_ver"])["verified"] != true {
+		return errors.New("firmware " + info["fw_ver"] + " of " + info["model"] + " matches no checked profile; the agent stays read-only until allow_unverified_firmware is set in the config")
+	}
+	return nil
 }
 func atomicPrivate(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".agent-*")
@@ -48,19 +60,6 @@ func atomicPrivate(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(name, path)
-}
-func (a *agent) guardStatus() map[string]any {
-	_, enabledErr := os.Stat(a.path("/data/dreame-local/region-guard.enabled"))
-	loaded := false
-	if b, err := readLimited(a.path("/tmp/dreame-region-guard.loaded"), 64); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 1 {
-			if maps, err := readLimited(a.path(fmt.Sprintf("/proc/%d/maps", pid)), 4<<20); err == nil {
-				loaded = strings.Contains(string(maps), "/data/dreame-local/region-guard.so")
-			}
-		}
-	}
-	_, blockedErr := os.Stat(a.path("/tmp/dreame-region-guard.blocked"))
-	return map[string]any{"enabled": enabledErr == nil, "hook_loaded": loaded, "blocked_since_boot": blockedErr == nil, "restart_required": !loaded}
 }
 func validateWiFi(raw json.RawMessage) (string, string, error) {
 	var p struct {
@@ -101,6 +100,17 @@ func wifiConfig(ssid, password string) []byte {
 	}
 	return []byte(s)
 }
+
+// wpaSSID decodes an SSID as wpa_cli prints it: bytes outside printable ASCII (Cyrillic, emoji)
+// come as \xNN, a quote or backslash with a backslash before it.
+func wpaSSID(v string) string {
+	if strings.Contains(v, "\\") {
+		if decoded, err := strconv.Unquote("\"" + v + "\""); err == nil {
+			return decoded
+		}
+	}
+	return v
+}
 func wifiSignal(status, signal string) (string, *int, *int) {
 	ssid := ""
 	connected := true
@@ -111,12 +121,7 @@ func wifiSignal(status, signal string) (string, *int, *int) {
 			connected = false
 		}
 		if ok && k == "ssid" {
-			ssid = v
-			if strings.Contains(v, "\\") {
-				if decoded, err := strconv.Unquote("\"" + v + "\""); err == nil {
-					ssid = decoded
-				}
-			}
+			ssid = wpaSSID(v)
 		}
 	}
 	for _, line := range strings.Split(signal, "\n") {
@@ -263,7 +268,7 @@ func (a *agent) runWiFi(script, ssid, password string) {
 				fields[k] = v
 			}
 		}
-		connected = e == nil && fields["wpa_state"] == "COMPLETED" && fields["ip_address"] != "" && fields["ssid"] == ssid
+		connected = e == nil && fields["wpa_state"] == "COMPLETED" && fields["ip_address"] != "" && wpaSSID(fields["ssid"]) == ssid
 	}
 	if connected {
 		finish("connected", "")

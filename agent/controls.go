@@ -4,11 +4,83 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
 	"reflect"
 	"strings"
 	"time"
 )
+
+type mapReplyError struct {
+	reason  string
+	outcome string
+	reply   json.RawMessage
+}
+
+func (e *mapReplyError) Error() string { return e.reason }
+
+func rpcErrorResponse(err error) map[string]any {
+	body := map[string]any{"error": err.Error()}
+	var operation *mapReplyError
+	if errors.As(err, &operation) {
+		body["result"] = operation.reply
+		body["outcome"] = operation.outcome
+	}
+	return body
+}
+
+func isMapEditAction(method string, params any) bool {
+	p, ok := params.(map[string]any)
+	return method == "action" && ok &&
+		(p["siid"] == json.Number("6") || p["siid"] == 6) &&
+		(p["aiid"] == json.Number("2") || p["aiid"] == 2)
+}
+
+// The map handler has an operation result separate from the dispatch code.
+// Even a valid zero is acceptance only, never proof of physical completion.
+func validateMapReply(reply json.RawMessage) error {
+	fail := func(outcome, reason string) error {
+		return &mapReplyError{reason: reason, outcome: outcome, reply: reply}
+	}
+	var result struct {
+		Code *int64          `json:"code"`
+		SIID *int64          `json:"siid"`
+		AIID *int64          `json:"aiid"`
+		Out  json.RawMessage `json:"out"`
+	}
+	if json.Unmarshal(reply, &result) != nil || result.Code == nil ||
+		(result.SIID != nil && *result.SIID != 6) || (result.AIID != nil && *result.AIID != 2) {
+		return fail("indeterminate", "Map response is invalid; outcome unknown; not retried")
+	}
+	if *result.Code != 0 {
+		return fail("rejected", fmt.Sprintf("Map command rejected (code=%d)", *result.Code))
+	}
+	var rows []struct {
+		PIID  int64           `json:"piid"`
+		Value json.RawMessage `json:"value"`
+	}
+	if json.Unmarshal(result.Out, &rows) != nil {
+		return fail("indeterminate", "Map operation result is invalid; outcome unknown; not retried")
+	}
+	var opRet *int64
+	for _, row := range rows {
+		if row.PIID != 6 {
+			continue
+		}
+		var value *int64
+		if opRet != nil || json.Unmarshal(row.Value, &value) != nil || value == nil {
+			return fail("indeterminate", "Map operation result is ambiguous; outcome unknown; not retried")
+		}
+		opRet = value
+	}
+	if opRet == nil {
+		return fail("indeterminate", "Map operation result is missing; outcome unknown; not retried")
+	}
+	if *opRet != 0 {
+		return fail("rejected", fmt.Sprintf("Map operation rejected (op_ret=%d)", *opRet))
+	}
+	return nil
+}
 
 func (a *agent) queueReboot() (any, error) {
 	command := a.rebootCommand
@@ -36,6 +108,8 @@ func (a *agent) thresholdPatch(raw json.RawMessage) (map[string]any, error) {
 		Revision   string  `json:"revision"`
 		Passable   [][]int `json:"passable"`
 		Impassable [][]int `json:"impassable"`
+		// Optional: ramps as rectangles [x0, y0, x1, y1] (SillAndRampPage); omitted keeps them.
+		Ramps *[][]int `json:"ramps"`
 	}
 	d := json.NewDecoder(strings.NewReader(string(raw)))
 	d.DisallowUnknownFields()
@@ -72,13 +146,34 @@ func (a *agent) thresholdPatch(raw json.RawMessage) (map[string]any, error) {
 			}
 		}
 	}
-	// Preserve ramps, cliffs and unknown firmware fields. Only the two line lists change.
+	var ramps []any
+	if request.Ramps != nil {
+		if len(*request.Ramps) > 20 {
+			return nil, errors.New("at most 20 ramps")
+		}
+		for _, r := range *request.Ramps {
+			if len(r) != 4 || r[2]-r[0] < 2*current.GridSize || r[3]-r[1] < 2*current.GridSize {
+				return nil, errors.New("ramp requires [x0, y0, x1, y1] with x0 < x1, y0 < y1 and two cells or more")
+			}
+			if r[0] < current.Origin[0] || r[1] < current.Origin[1] || r[2] > current.Origin[0]+current.Width*current.GridSize || r[3] > current.Origin[1]+current.Height*current.GridSize {
+				return nil, errors.New("ramp coordinates are outside the map")
+			}
+			ramps = append(ramps, []int{r[0], r[1], r[2], r[3], 0}) // the app always adds a fifth 0
+		}
+	}
+	// Preserve cliffs and unknown firmware fields; ramps change only when sent.
 	vws := map[string]any{}
 	for key, value := range current.VWS {
 		vws[key] = value
 	}
 	vws["vwsl"] = request.Passable
 	vws["npthrsd"] = request.Impassable
+	if request.Ramps != nil {
+		if ramps == nil {
+			ramps = []any{}
+		}
+		vws["ramp"] = ramps
+	}
 	return map[string]any{"mapid": current.MapID, "vws": vws}, nil
 }
 

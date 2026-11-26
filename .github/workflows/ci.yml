@@ -1,0 +1,49 @@
+# Tests on every push and pull request; a tag v<version> also publishes the robot build.
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+      - name: Go tests
+        run: cd agent && go vet ./... && go test ./...
+      - name: Python tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Browser tests
+        run: |
+          npm install --no-save playwright@1.65.1
+          npx playwright install --with-deps chromium
+          node tests/test_web_ui.cjs
+          node tests/test_command_results.cjs
+      - name: Build for the robot
+        run: sh build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dreame-local-agent
+          path: dist/
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dreame-local-agent
+          path: dist
+      - name: Tag must match the agent version
+        run: test -f "dist/dreame-local-agent-${GITHUB_REF_NAME#v}-linux-arm64"
+      - name: Publish
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
