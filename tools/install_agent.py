@@ -187,7 +187,7 @@ def main():
     if legacy_guard:
         print('The built-in region guard of older agents is no longer loaded at boot. Install the region module '
               'in the web UI (Modules) before rebooting the robot to keep the protection.')
-    print('Open', url+'/', 'and sign in with the token from', args.config)
+    print('Open', url+'/', 'and sign in with the password (the "token" field) from', args.config)
 
 
 if __name__ == '__main__':

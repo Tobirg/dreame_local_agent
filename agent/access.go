@@ -29,7 +29,7 @@ var tokenName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
 
 // scopeOf returns "admin" for the main token, the scope of a scoped token, or "".
 func (a *agent) scopeOf(auth string) string {
-	if subtle.ConstantTimeCompare([]byte(auth), []byte("Bearer "+a.cfg.Token)) == 1 {
+	if subtle.ConstantTimeCompare([]byte(auth), []byte("Bearer "+a.password())) == 1 {
 		return "admin"
 	}
 	presented, ok := strings.CutPrefix(auth, "Bearer ")
@@ -89,6 +89,11 @@ func (a *agent) saveTokens(tokens []apiToken) error {
 
 // saveConfigField writes one field of the config file, keeping every other field as it is.
 func (a *agent) saveConfigField(key string, value any) error {
+	return a.saveConfigFields(map[string]any{key: value})
+}
+
+// saveConfigFields writes several fields of the config file in one atomic replace, keeping the others.
+func (a *agent) saveConfigFields(fields map[string]any) error {
 	if a.configPath == "" {
 		return errors.New("agent was started without a configuration path")
 	}
@@ -100,8 +105,10 @@ func (a *agent) saveConfigField(key string, value any) error {
 	if json.Unmarshal(b, &raw) != nil {
 		return errors.New("invalid configuration")
 	}
-	if raw[key], err = json.Marshal(value); err != nil {
-		return err
+	for key, value := range fields {
+		if raw[key], err = json.Marshal(value); err != nil {
+			return err
+		}
 	}
 	out, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
@@ -171,6 +178,10 @@ func (a *agent) tokenRoutes(w http.ResponseWriter, r *http.Request, send func(in
 	}
 	if p == "/api/v1/system/video_cloud" {
 		a.videoCloudRoute(w, r, send)
+		return true
+	}
+	if p == "/api/v1/system/password" {
+		a.passwordRoute(r, send)
 		return true
 	}
 	if p == "/api/v1/ui" {

@@ -6,6 +6,7 @@ const assert=require('node:assert/strict');
 let refuseSetting=false,agentVersion='0.7.0'; // makes the fake robot reject local.setting
 const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES?process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright':'playwright');
 const root=path.resolve(__dirname,'../agent/ui'),token='a'.repeat(40),commands=[],commandReplies=new Map();
+let password=token; // the fake agent's current password (the panel can change it)
 let staleState=false,revision='test-map-1',regionCode=200,installedModules=[],stagedUpload=null,updateLast=null,updatePrevious=null,stagedAgent=null,dropNextRead=false,dropNextMutation=false;
 const values={'2/1':6,'2/2':0,'3/1':95,'4/1':6,'4/4':1,'4/5':2,'4/25':0,'7/1':50,'4/23':(2<<16)|(20<<8),'4/27':0,'28/1':10,'28/63':0,'28/38':1,'7/14':0,'4/50':JSON.stringify([{k:'AutoDry',v:1},{k:'SmartCharge',v:1},{k:'CleanRoute',v:1},{k:'BackWashType',v:3}]),'4/22':JSON.stringify({obstacle_detect_switch:true,human_detect_switch:false,untouched:42}),'5/4':JSON.stringify([{id:9,en:true,st:'22:00',et:'08:00',wk:127,ss:0,extra:'keep'},{id:10,en:false,st:'12:00',et:'13:00',wk:1,ss:0}])};
 const capabilities={agent:{version:'0.7.0'},identity:{model:'dreame.vacuum.r2505',did:'123',fw_ver:'4.3.9_2021'},firmware:{profile:'r2505-r2440-4.3.9_2021',verified:true},control:true,properties:{suction:{readable:true},volume:{readable:true}},commands:{start:{available:true},locate:{available:true},dry_start:{available:false,reason:'HOT_AIR_DRYING_AC_PTC=N'},dry_stop:{available:false,reason:'HOT_AIR_DRYING_AC_PTC=N'}}};
@@ -34,7 +35,7 @@ const server=http.createServer((req,res)=>{
  if(req.method==='GET'&&req.url.startsWith('/api/v1/map.svg')){res.setHeader('Content-Type','image/svg+xml');res.end('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="84" viewBox="0 0 120 84"><rect width="120" height="84" fill="#888"/></svg>');return;}
  if(req.method==='GET'&&req.url.startsWith('/api/v1/')){
   res.setHeader('Content-Type','application/json');
-  if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
+  if(req.headers.authorization!=='Bearer '+password){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   if(req.url==='/api/v1/events'){res.setHeader('Content-Type','text/event-stream');res.write('event: state\ndata: '+JSON.stringify(snapshot())+'\n\n');eventClients.add(res);req.on('close',()=>eventClients.delete(res));return;}
   if(req.url==='/api/v1/ui'){res.end(JSON.stringify({result:{label_size:labelSize}}));return;}
   if(req.url==='/api/v1/logs'){res.end(JSON.stringify({result:[{source:'agent',text:'agent ready',size:11},{source:'mqtt',text:'connected to broker',size:19}]}));return;}
@@ -65,13 +66,14 @@ const server=http.createServer((req,res)=>{
   res.end(fs.readFileSync(path.join(root,name)));return;
  }
  let body='';req.on('data',b=>body+=b);req.on('end',()=>{
-  if(req.headers.authorization!=='Bearer '+token){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
+  if(req.headers.authorization!=='Bearer '+password){res.writeHead(401);res.end(JSON.stringify({error:'unauthorized'}));return;}
   const json=v=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result:v}));};
   if(req.url==='/api/v1/ui'){const p=JSON.parse(body);commands.push({method:req.url,params:p});labelSize=p.label_size;json({label_size:labelSize});return;}
   if(req.url==='/api/v1/voice/use'){const p=JSON.parse(body);commands.push({method:req.url,params:p});voiceCurrent=p.id;json({current:voiceCurrent,voices:[{id:'EN',builtin:true,files:540},{id:'RU',builtin:false,files:3,bytes:2048}]});return;}
   if(req.url==='/api/v1/pets/delete'){const p=JSON.parse(body);commands.push({method:req.url,params:p});petPhotos=petPhotos.filter(x=>x.name!==p.name);json({deleted:p.name});return;}
   if(req.url==='/api/v1/system/video_cloud'){videoCloud=JSON.parse(body).enabled===true;json({enabled:videoCloud});return;}
   if(req.url==='/api/v1/system/video_code'){const c=JSON.parse(body).code;videoCodes.push(c);videoCode=c!=='';json({configured:videoCode});return;}
+  if(req.url==='/api/v1/system/password'){const r=JSON.parse(body);if(r.current!==password){res.writeHead(403);res.end(JSON.stringify({error:'current password is wrong'}));return;}if(r.new.length<8){res.writeHead(400);res.end(JSON.stringify({error:'password: 8 to 128 characters'}));return;}password=r.new;json({changed:true});return;}
   if(req.url==='/api/v1/system/tokens'){const t=JSON.parse(body);tokens.push({...t,created:'2026-11-22T10:00:00Z'});json({...t,created:'2026-11-22T10:00:00Z',token:'f'.repeat(64)});return;}
   if(req.method==='DELETE'&&req.url.startsWith('/api/v1/system/tokens/')){tokens=tokens.filter(t=>t.name!==decodeURIComponent(req.url.split('/').pop()));json({revoked:true});return;}
   if(req.url==='/api/v1/system/update/stage'){stagedAgent=body;json({version:'0.8.0',current:'0.7.0',sha256:'b'.repeat(64),size:4096});return;}
@@ -210,6 +212,16 @@ const server=http.createServer((req,res)=>{
   await page.waitForFunction(()=>document.querySelector('#token-result').textContent.includes('f'.repeat(64)));assert.deepEqual(tokens.map(t=>[t.name,t.scope]),[['ha','control']]);
   assert.match(await page.locator('#token-list').innerText(),/ha · управление/);
   page.once('dialog',d=>d.accept());await page.locator('#token-list button').click();await page.waitForFunction(()=>document.querySelector('#token-list').textContent.includes('нет'));assert.equal(tokens.length,0);
+  // Password change: a wrong current password or a mismatch keeps the old one; then the panel goes on with the new one.
+  await page.locator('#password-block summary').click();
+  const changePassword=async(current,next,repeat=next)=>{await page.locator('#password-current').fill(current);await page.locator('#password-new').fill(next);await page.locator('#password-repeat').fill(repeat);await page.locator('#change-password').click();};
+  await changePassword('wrong-password','kitchen-robot');await page.waitForFunction(()=>document.querySelector('#password-result').textContent.includes('неверный'));assert.equal(password,token);
+  await changePassword(token,'kitchen-robot','kitchen-robo');assert.match(await page.locator('#password-result').innerText(),/не совпадают/);assert.equal(password,token);
+  await changePassword(token,'kitchen-robot');await page.waitForFunction(()=>document.querySelector('#password-result').textContent.includes('Пароль сменён'));assert.equal(password,'kitchen-robot');
+  assert.equal(await page.evaluate(()=>[sessionStorage.getItem('dreame-token'),localStorage.getItem('dreame-token')].join()),'kitchen-robot,kitchen-robot');
+  await page.locator('#token-add summary').click();await page.locator('#token-name').fill('ha2');await page.locator('#create-token').click();await page.waitForFunction(()=>document.querySelector('#token-list').textContent.includes('ha2'));
+  page.once('dialog',d=>d.accept());await page.locator('#token-list button').click();await page.waitForFunction(()=>document.querySelector('#token-list').textContent.includes('нет'));
+  await changePassword('kitchen-robot',token);await page.waitForFunction(t=>sessionStorage.getItem('dreame-token')===t,token);assert.equal(password,token);await page.locator('#password-block summary').click();
   const xy=await page.evaluate(async()=>{const m=await import('/app.js');return m.pixelToRobot({origin:[-1000,-1000],grid_size:50},4,8);});assert.deepEqual(xy,[-800,-600]);
   await mode('all');await page.locator('.for-all[data-command=start]').click();await page.waitForFunction(()=>!document.querySelector('[data-command=start]').disabled);assert.deepEqual(commands.at(-1),{method:'/api/v1/command',params:{name:'start'}});
   await sheet('station');assert(await page.locator('[data-command=dry_start]').isHidden());assert(await page.locator('[data-command=empty]').isVisible());assert.match(await page.locator('#model').innerText(),/r2505 · 4\.3\.9_2021 · агент 0\.7\.0$/);

@@ -331,10 +331,10 @@ func (a *agent) listModules() []map[string]any {
 	return list
 }
 
-// moduleToken is derived from the main token, so it survives agent restarts and a
-// module's service can keep using it; it changes when the main token does.
+// moduleToken is derived from the module secret (the first password, see password.go), so it survives agent
+// restarts and password changes and a module's service can keep using it.
 func (a *agent) moduleToken(name string) string {
-	mac := hmac.New(sha256.New, []byte(a.cfg.Token))
+	mac := hmac.New(sha256.New, []byte(a.moduleSecret()))
 	mac.Write([]byte("dreame-module:" + name))
 	return hex.EncodeToString(mac.Sum(nil))
 }

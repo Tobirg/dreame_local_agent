@@ -195,6 +195,15 @@ $('create-token').onclick=async()=>{
   $('token-result').textContent='Токен '+t.name+' ('+scopeNames[t.scope]+'). Скопируй сейчас, позже его не показать: '+t.token;$('token-name').value='';$('token-add').open=false;await loadTokens();}
  catch(e){$('token-result').textContent=e.message;}
 };
+// The password is written on the robot first; the panel switches to it only when the agent saved it.
+$('password-form').onsubmit=async e=>{
+ e.preventDefault();const current=$('password-current').value,next=$('password-new').value;
+ if(next!==$('password-repeat').value){$('password-result').textContent='Новый пароль и повтор не совпадают.';return;}
+ try{await api('/api/v1/system/password',{current,new:next});
+  token=next;sessionStorage.setItem('dreame-token',next);if(localStorage.getItem('dreame-token'))localStorage.setItem('dreame-token',next);
+  $('password-form').reset();$('password-result').textContent='Пароль сменён. На других устройствах войди с новым.';}
+ catch(e){$('password-result').textContent=e.status===403?'Текущий пароль неверный.':e.status===400?'Пароль: от 8 до 128 символов, латиница, цифры и знаки, без пробелов по краям.':e.message;}
+};
 // Panels that need the main token are hidden for a read/control token.
 const mainTokenOnly=(panel,load)=>load().then(()=>{$(panel).hidden=false;}).catch(e=>{if(e.status===403)$(panel).hidden=true;else toast(e.message,true);});
 // ---- Modules: installed packages (GET /api/v1/modules) may add their own panel, mounted as mount(element, ctx).
@@ -265,7 +274,7 @@ $('cancel-module').onclick=()=>{stagedModule=null;$('module-review').hidden=true
 $('wifi-open').onchange=()=>{$('wifi-password').disabled=$('wifi-open').checked;$('wifi-password').required=!$('wifi-open').checked;if($('wifi-open').checked)$('wifi-password').value='';};
 $('wifi-form').onsubmit=async e=>{
  e.preventDefault();if(busy)return;
- if(captiveSetup&&!token){token=$('token').value.trim();if(token.length<32){$('wifi-result').textContent='Введи API-токен агента в поле выше.';return;}}
+ if(captiveSetup&&!token){token=$('token').value.trim();if(token.length<8){$('wifi-result').textContent='Введи пароль агента в поле выше.';return;}}
  busy=true;disableControls(true);
  const params={ssid:$('wifi-ssid').value,password:$('wifi-open').checked?'':$('wifi-password').value,open:$('wifi-open').checked};$('wifi-password').value='';
  try{const result=await api('local.wifi_setup',params);if(!result.accepted)throw Error('Настройка сети не принята');$('wifi-result').textContent='Настройки приняты. Робот подключается. Точка доступа отключится; открой новый IP робота из домашней сети. При ошибке подожди до 3 минут для возврата точки доступа.';}
@@ -986,7 +995,7 @@ $('send-rpc').onclick=async()=>{try{const method=$('rpc-method').value,params=JS
 if(token)login().catch(e=>{if(e.status===401){token='';sessionStorage.removeItem('dreame-token');localStorage.removeItem('dreame-token');}else connectionLost(e.message);$('login-error').textContent=e.message;if($('dashboard').hidden)$('login').hidden=false;});
 else $('login').hidden=false;
 
-if(captiveSetup){$('login').querySelector('h2').textContent='Настройка Wi-Fi робота';$('login').querySelector('p.muted').textContent='Укажи API-токен агента, имя сети и пароль. Затем нажми «Подключить робот к сети».';$('login-form').querySelector('button').textContent='Открыть панель управления';$('wifi-details').open=true;$('login').append($('wifi-panel'));}
+if(captiveSetup){$('login').querySelector('h2').textContent='Настройка Wi-Fi робота';$('login').querySelector('p.muted').textContent='Укажи пароль агента, имя сети и пароль Wi-Fi. Затем нажми «Подключить робот к сети».';$('login-form').querySelector('button').textContent='Открыть панель управления';$('wifi-details').open=true;$('login').append($('wifi-panel'));}
 
 export function robotToPixel(v,x,y){
  if(!v||!Array.isArray(v.origin)||v.grid_size<=0||![x,y].every(Number.isFinite))throw Error('Некорректная точка карты');
